@@ -1,1 +1,110 @@
-<!doctypehtml><html lang=en-us><head><meta charset=utf-8><meta content="text/html; charset=utf-8"http-equiv=Content-Type><link href=favicon.ico rel="shortcut icon"type=image/x-icon><link href=manifest.json rel=manifest><script>"serviceWorker"in navigator&&window.addEventListener("load",(function(){navigator.serviceWorker.register("sw.js")}))</script><title>TheXTech Engine</title><style>.emscripten{padding-right:0;margin-left:auto;margin-right:auto;display:block}textarea.emscripten{font-family:monospace;width:80%}div.emscripten{text-align:center}div.emscripten_border{border:1px solid #000}canvas.emscripten{border:0 none;background-color:#000}body{margin:0}.spinner{height:50px;width:50px;margin:0 auto;-webkit-animation:rotation .8s linear infinite;-moz-animation:rotation .8s linear infinite;-o-animation:rotation .8s linear infinite;animation:rotation .8s linear infinite;border-left:10px solid #0096f0;border-right:10px solid #0096f0;border-bottom:10px solid #0096f0;border-top:10px solid #6400c8;border-radius:100%;background-color:#c864fa}@-webkit-keyframes rotation{from{-webkit-transform:rotate(0)}to{-webkit-transform:rotate(360deg)}}@-moz-keyframes rotation{from{-moz-transform:rotate(0)}to{-moz-transform:rotate(360deg)}}@-o-keyframes rotation{from{-o-transform:rotate(0)}to{-o-transform:rotate(360deg)}}@keyframes rotation{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style></head><body><hr><figure id=spinner style=overflow:visible><div class=spinner></div><center style=margin-top:.5em><strong>TheXTech on emscripten</strong></center></figure><div class=emscripten id=status>Downloading...</div><div class=emscripten><progress hidden id=progress max=100 value=0></progress></div><div class=emscripten_border><canvas class=emscripten id=canvas oncontextmenu=event.preventDefault() tabindex=-1></canvas><div id=exit-msg style=position:absolute;top:25%;text-align:center;width:100%;display:none>Game finished.<br>Close or refresh the page to exit.</div></div><hr><script>var statusElement=document.getElementById("status"),progressElement=document.getElementById("progress"),spinnerElement=document.getElementById("spinner"),Module={preRun:[],postRun:[],print:function(e){arguments.length>1&&(e=Array.prototype.slice.call(arguments).join(" ")),console.log(e)},canvas:(()=>{var e=document.getElementById("canvas");return e.addEventListener("webglcontextlost",(e=>{alert("WebGL context lost. You will need to reload the page."),e.preventDefault()}),!1),e})(),setStatus:e=>{if(Module.setStatus.last||(Module.setStatus.last={time:Date.now(),text:""}),e!==Module.setStatus.last.text){var t=e.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/),n=Date.now();t&&n-Module.setStatus.last.time<30||(Module.setStatus.last.time=n,Module.setStatus.last.text=e,t?(e=t[1],progressElement.value=100*parseInt(t[2]),progressElement.max=100*parseInt(t[4]),progressElement.hidden=!1,spinnerElement.hidden=!1):(progressElement.value=null,progressElement.max=null,progressElement.hidden=!0,e||(spinnerElement.hidden=!0)),statusElement.innerHTML=e)}},totalDependencies:0,monitorRunDependencies:e=>{this.totalDependencies=Math.max(this.totalDependencies,e),Module.setStatus(e?"Preparing... ("+(this.totalDependencies-e)+"/"+this.totalDependencies+")":"All downloads complete.")}};Module.setStatus("Downloading..."),window.onerror=()=>{Module.setStatus("Exception thrown, see JavaScript console"),spinnerElement.style.display="none",Module.setStatus=e=>{e&&console.error("[post-exception status] "+e)}}</script><script async src=thextech.js></script></body></html>
+<!doctypehtml><html lang=en-us><head><meta charset=utf-8><meta content="text/html; charset=utf-8"http-equiv=Content-Type><link href=favicon.ico rel="shortcut icon"type=image/x-icon><link href=manifest.json rel=manifest><script>"serviceWorker"in navigator&&window.addEventListener("load",(function(){navigator.serviceWorker.register("sw.js")}))</script><title>TheXTech Engine</title><style>.emscripten{padding-right:0;margin-left:auto;margin-right:auto;display:block}textarea.emscripten{font-family:monospace;width:80%}div.emscripten{text-align:center}div.emscripten_border{border:1px solid #000}canvas.emscripten{border:0 none;background-color:#000}body{margin:0}.spinner{height:50px;width:50px;margin:0 auto;-webkit-animation:rotation .8s linear infinite;-moz-animation:rotation .8s linear infinite;-o-animation:rotation .8s linear infinite;animation:rotation .8s linear infinite;border-left:10px solid #0096f0;border-right:10px solid #0096f0;border-bottom:10px solid #0096f0;border-top:10px solid #6400c8;border-radius:100%;background-color:#c864fa}@-webkit-keyframes rotation{from{-webkit-transform:rotate(0)}to{-webkit-transform:rotate(360deg)}}@-moz-keyframes rotation{from{-moz-transform:rotate(0)}to{-moz-transform:rotate(360deg)}}@-o-keyframes rotation{from{-o-transform:rotate(0)}to{-o-transform:rotate(360deg)}}@keyframes rotation{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+html, body { height: 100%; margin: 0; background: #0e0a22; overflow: hidden; }
+#canvas { display: block; margin: 0 auto; background: #000; outline: none; }
+#gdq-title {
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1.1rem;
+  background: radial-gradient(ellipse at 50% 30%, #241a4d 0%, #140f30 55%, #0a0720 100%);
+  color: #f3efff; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  text-align: center; padding: 1.5rem; box-sizing: border-box;
+  transition: opacity .5s ease; opacity: 1;
+}
+#gdq-title.gdq-hidden { opacity: 0; pointer-events: none; }
+#gdq-title h1 {
+  margin: 0; font-size: clamp(2rem, 6vw, 3.4rem); font-weight: 800; letter-spacing: .02em;
+  color: #fff; text-shadow: 0 0 24px rgba(160,140,255,.55), 0 2px 0 #241a4d;
+}
+#gdq-title h1 span { color: #ffd678; }
+#gdq-title p.gdq-sub {
+  margin: 0; font-size: clamp(.85rem, 2vw, 1.05rem); color: #cabfff; opacity: .85;
+  letter-spacing: .03em;
+}
+#gdq-play {
+  margin-top: .6rem; padding: .85rem 2.6rem; font-size: 1.15rem; font-weight: 700;
+  color: #201640; background: linear-gradient(180deg, #ffe5a3, #ffc85c);
+  border: none; border-radius: 999px; cursor: pointer;
+  box-shadow: 0 6px 0 #b8873a, 0 10px 24px rgba(0,0,0,.35);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+#gdq-play:hover { transform: translateY(-2px); box-shadow: 0 8px 0 #b8873a, 0 14px 28px rgba(0,0,0,.4); }
+#gdq-play:active { transform: translateY(3px); box-shadow: 0 3px 0 #b8873a, 0 6px 14px rgba(0,0,0,.35); }
+#gdq-play:disabled { opacity: .55; cursor: default; transform: none; box-shadow: 0 6px 0 #b8873a; }
+#gdq-status { min-height: 1.3rem; font-size: .85rem; color: #a89bd8; }
+#gdq-credits { margin-top: .4rem; font-size: .72rem; color: #7c72a8; max-width: 30rem; line-height: 1.5; }
+#gdq-moon {
+  width: 3.2rem; height: 3.2rem; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff8dc, #ffe9a8 60%, #d8b96a 100%);
+  box-shadow: 0 0 40px rgba(255, 230, 170, .5);
+  margin-bottom: .2rem;
+}
+</style></head><body>
+<div id="gdq-title">
+  <div id="gdq-moon"></div>
+  <h1>GRAMPA'S <span>DREAM QUEST</span></h1>
+  <p class="gdq-sub">an original TheXTech episode</p>
+  <button id="gdq-play" disabled>Loading&hellip;</button>
+  <div id="gdq-status"></div>
+  <div id="gdq-credits">
+    Built on the open-source TheXTech engine (GPLv3). All characters,
+    art, and levels in Grampa's Dream Quest are original works created
+    for this project.
+  </div>
+</div>
+<hr><figure id=spinner style=overflow:visible><div class=spinner></div><center style=margin-top:.5em><strong>TheXTech on emscripten</strong></center></figure><div class=emscripten id=status>Downloading...</div><div class=emscripten><progress hidden id=progress max=100 value=0></progress></div><div class=emscripten_border><canvas class=emscripten id=canvas oncontextmenu=event.preventDefault() tabindex=-1></canvas><div id=exit-msg style=position:absolute;top:25%;text-align:center;width:100%;display:none>Game finished.<br>Close or refresh the page to exit.</div></div><hr><script>var statusElement=document.getElementById("status"),progressElement=document.getElementById("progress"),spinnerElement=document.getElementById("spinner"),Module={arguments:["worlds/dream-world/level1.lvlx"],preRun:[],postRun:[],print:function(e){arguments.length>1&&(e=Array.prototype.slice.call(arguments).join(" ")),console.log(e)},canvas:(()=>{var e=document.getElementById("canvas");return e.addEventListener("webglcontextlost",(e=>{alert("WebGL context lost. You will need to reload the page."),e.preventDefault()}),!1),e})(),setStatus:e=>{if(Module.setStatus.last||(Module.setStatus.last={time:Date.now(),text:""}),e!==Module.setStatus.last.text){var t=e.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/),n=Date.now();t&&n-Module.setStatus.last.time<30||(Module.setStatus.last.time=n,Module.setStatus.last.text=e,t?(e=t[1],progressElement.value=100*parseInt(t[2]),progressElement.max=100*parseInt(t[4]),progressElement.hidden=!1,spinnerElement.hidden=!1):(progressElement.value=null,progressElement.max=null,progressElement.hidden=!0,e||(spinnerElement.hidden=!0)),statusElement.innerHTML=e)}},totalDependencies:0,monitorRunDependencies:e=>{this.totalDependencies=Math.max(this.totalDependencies,e),Module.setStatus(e?"Preparing... ("+(this.totalDependencies-e)+"/"+this.totalDependencies+")":"All downloads complete.")}};Module.setStatus("Downloading..."),window.onerror=()=>{Module.setStatus("Exception thrown, see JavaScript console"),spinnerElement.style.display="none",Module.setStatus=e=>{e&&console.error("[post-exception status] "+e)}}</script><script async src=thextech.js></script><script>
+(function () {
+  var btn = document.getElementById('gdq-play');
+  var overlay = document.getElementById('gdq-title');
+  var statusEl = document.getElementById('gdq-status');
+  var canvas = document.getElementById('canvas');
+  var launched = false;
+
+  // TheXTech's Emscripten window init (WindowSDL::init) unconditionally calls
+  // emscripten_enter_soft_fullscreen(), which walks up from the canvas and
+  // force-hides every sibling element in <body> (see hideEverythingExceptGivenElement
+  // in the generated JS) so the canvas fills the viewport. That stomps on our
+  // overlay's display style the moment the engine's window is created, so we
+  // keep re-asserting visibility until the player actually launches.
+  var reshow = setInterval(function () {
+    if (launched) { clearInterval(reshow); return; }
+    if (overlay.style.display === 'none') overlay.style.display = '';
+  }, 50);
+
+  function reflectStatus() {
+    var text = (typeof Module !== 'undefined' && Module.setStatus && Module.setStatus.last)
+      ? Module.setStatus.last.text : '';
+    if (text && !/all downloads complete/i.test(text)) {
+      statusEl.textContent = text;
+    } else {
+      statusEl.textContent = '';
+      btn.disabled = false;
+      btn.textContent = 'Play';
+    }
+    requestAnimationFrame(reflectStatus);
+  }
+  requestAnimationFrame(reflectStatus);
+
+  function fireMouseEvent(type) {
+    var rect = canvas.getBoundingClientRect();
+    var evt = new MouseEvent(type, {
+      bubbles: true, cancelable: true, view: window,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      button: 0,
+    });
+    canvas.dispatchEvent(evt);
+  }
+
+  btn.addEventListener('click', function () {
+    if (btn.disabled) return;
+    launched = true;
+    overlay.classList.add('gdq-hidden');
+    overlay.style.display = 'none';
+    canvas.focus();
+    // The engine polls live mouse-button state each frame rather than a
+    // discrete click event, so hold the synthetic press briefly.
+    fireMouseEvent('mousedown');
+    setTimeout(function () { fireMouseEvent('mouseup'); }, 180);
+  });
+})();
+</script></body></html>
