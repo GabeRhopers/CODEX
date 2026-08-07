@@ -142,13 +142,19 @@ on you to source and license, not something this repo automates.
 
 The web build cross-compiles the engine to WebAssembly with Emscripten and bakes in Grampa's Dream
 Quest via `--preload-file`, same as the native build but targeting `emcmake`/`emmake` instead of a
-plain host toolchain:
+plain host toolchain. Flags follow the upstream build guide
+(https://github.com/TheXTech/TheXTech/wiki/Building-on-Emscripten), with `MinSizeRel` and
+`ENABLE_LOGGING=OFF` for a smaller download (matters more for a browser build than raw execution
+speed) and the manifest fields set for proper branding instead of the engine defaults:
 
 ```sh
 cd TheXTech
-emcmake cmake -B build-web -G Ninja -DCMAKE_BUILD_TYPE=Release \
+emcmake cmake -B build-web -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DENABLE_LOGGING=OFF \
     -DPGE_PRELOAD_ENVIRONMENT=../content/grampa-dreamquest \
-    -DTHEXTECH_DEPLOY_URL=https://gaberhopers.github.io/CODEX/
+    -DTHEXTECH_DEPLOY_URL=https://gaberhopers.github.io/CODEX/ \
+    -DTHEXTECH_MANIFEST_NAME="Grampa's Dream Quest" \
+    -DTHEXTECH_MANIFEST_ID=grampa-dream-quest \
+    -DTHEXTECH_MANIFEST_DESC="An original TheXTech episode - help Grampa through a dream world of sheep, pillows, and clouds."
 emmake ninja -C build-web thextech
 cd ..
 python3 scripts/postprocess_web.py TheXTech/build-web/output/bin
@@ -167,6 +173,8 @@ menu, the post-process step:
   entirely
 - replaces the default Emscripten shell UI with a real HTML/CSS title screen (`GRAMPA'S DREAM QUEST`,
   a Play button, credits) that's fully our own markup, not reverse-engineered engine assets
+- rewrites the `<title>` tag, which the shell template hardcodes to "TheXTech Engine" with no CMake
+  flag to override it (unlike the manifest fields above, which the build already sets directly)
 - wires that Play button to satisfy the engine's own click-to-start gate, which polls live mouse-button
     state each frame rather than a discrete click event, so the handler holds a synthetic mousedown
   briefly before releasing it — and also re-asserts the overlay's visibility for the first moment

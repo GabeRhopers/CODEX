@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 LEVEL_PATH = "worlds/dream-world/level1.lvlx"
+PAGE_TITLE = "Grampa's Dream Quest"
 
 TITLE_SCREEN_CSS = """
 html, body { height: 100%; margin: 0; background: #0e0a22; overflow: hidden; }
@@ -142,6 +143,13 @@ TITLE_SCREEN_JS = """
 
 def process(src: Path, dst: Path) -> None:
     html = src.read_text(encoding="utf-8")
+
+    # The shell template hardcodes <title>TheXTech Engine</title> with no CMake
+    # flag to override it (unlike THEXTECH_MANIFEST_NAME/ID/DESC, which the build
+    # is already configured with for the PWA manifest) - fix it here too.
+    html, n = re.subn(r"<title>[^<]*</title>", f"<title>{PAGE_TITLE}</title>", html, count=1)
+    if n != 1:
+        raise SystemExit("failed to rewrite <title> - shell markup may have changed")
 
     # Launch straight into the level, skipping the native menu entirely.
     html = html.replace(
