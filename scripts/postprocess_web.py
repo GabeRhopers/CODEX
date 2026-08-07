@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 LEVEL_PATH = "worlds/dream-world/level1.lvlx"
-PAGE_TITLE = "Grampa's Dream Quest"
+PAGE_TITLE = "Sleep Grampa"
 
 TITLE_SCREEN_CSS = """
 html, body { height: 100%; margin: 0; background: #0e0a22; overflow: hidden; }
@@ -70,13 +70,13 @@ html, body { height: 100%; margin: 0; background: #0e0a22; overflow: hidden; }
 TITLE_SCREEN_HTML = """
 <div id="gdq-title">
   <div id="gdq-moon"></div>
-  <h1>GRAMPA'S <span>DREAM QUEST</span></h1>
+  <h1>SLEEP <span>GRAMPA</span></h1>
   <p class="gdq-sub">an original TheXTech episode</p>
   <button id="gdq-play" disabled>Loading&hellip;</button>
   <div id="gdq-status"></div>
   <div id="gdq-credits">
     Built on the open-source TheXTech engine (GPLv3). All characters,
-    art, and levels in Grampa's Dream Quest are original works created
+    art, and levels in Sleep Grampa are original works created
     for this project.
   </div>
 </div>

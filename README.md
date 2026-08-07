@@ -14,13 +14,13 @@ itself belongs to the Wohlstand / TheXTech project and its contributors.
 git clone <this-repo-url> && cd CODEX
 git submodule update --init --recursive   # fetch the engine source
 ./scripts/build.sh                        # build the engine
-./scripts/run.sh                          # play "Grampa's Dream Quest" (original content, committed to this repo)
+./scripts/run.sh                          # play "Sleep Grampa" (original content, committed to this repo)
 ```
 
 To instead play the official upstream demo pack: `./scripts/fetch-assets.sh && ./scripts/run.sh demo`.
 
 See below for dependencies, what each script does, and why *fetched* game content isn't committed to git
-(the original episode above is an exception — see "Grampa's Dream Quest" below).
+(the original episode above is an exception — see "Sleep Grampa" below).
 
 ## Getting the source
 
@@ -87,16 +87,17 @@ push/PR, so a broken submodule pin or build regression shows up in CI.
 See the upstream build guide for the full list of CMake options and platform-specific notes:
 https://github.com/Wohlstand/TheXTech/wiki/Building-the-game
 
-## Grampa's Dream Quest (original content)
+## Sleep Grampa (original content)
 
 `content/grampa-dreamquest/` is a small, complete TheXTech content pack authored from scratch for
-this repository: an original playable character (a grandpa in pajamas and a hoodie, armed with a
-plush monkey toy), three original dream/nightmare-themed enemies (a sheep, a pillow, a drifting
+this repository: an original playable character (a wizard grampa in a star/moon hat, armed with
+sparkly magic), three original dream/nightmare-themed enemies (a sheep, a pillow, a drifting
 cloud), original tiles, background, UI chrome, and one hand-built level. None of it is derived from
 or resembles any existing game's characters or art — it exists specifically so this repository has
 a genuinely playable, unencumbered game with no third-party licensing questions attached. Because
 it's original work created for this project, it (unlike the fetched packs below) **is** committed to
-git, under `content/`.
+git, under `content/`. (The pack's directory is still named `grampa-dreamquest/` internally — only
+the game's own display name changed to "Sleep Grampa".)
 
 ```sh
 ./scripts/run.sh          # play it (after ./scripts/build.sh)
@@ -152,8 +153,8 @@ cd TheXTech
 emcmake cmake -B build-web -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DENABLE_LOGGING=OFF \
     -DPGE_PRELOAD_ENVIRONMENT=../content/grampa-dreamquest \
     -DTHEXTECH_DEPLOY_URL=https://gaberhopers.github.io/CODEX/ \
-    -DTHEXTECH_MANIFEST_NAME="Grampa's Dream Quest" \
-    -DTHEXTECH_MANIFEST_ID=grampa-dream-quest \
+    -DTHEXTECH_MANIFEST_NAME="Sleep Grampa" \
+    -DTHEXTECH_MANIFEST_ID=sleep-grampa \
     -DTHEXTECH_MANIFEST_DESC="An original TheXTech episode - help Grampa through a dream world of sheep, pillows, and clouds."
 emmake ninja -C build-web thextech
 cd ..
@@ -171,7 +172,7 @@ menu, the post-process step:
 - launches straight into `worlds/dream-world/level1.lvlx` (`Module.arguments`), skipping the native
   `MENU_INTRO`/`MENU_MAIN` screens (and the intro-level/menu-font requirements that come with them)
   entirely
-- replaces the default Emscripten shell UI with a real HTML/CSS title screen (`GRAMPA'S DREAM QUEST`,
+- replaces the default Emscripten shell UI with a real HTML/CSS title screen (`SLEEP GRAMPA`,
   a Play button, credits) that's fully our own markup, not reverse-engineered engine assets
 - rewrites the `<title>` tag, which the shell template hardcodes to "TheXTech Engine" with no CMake
   flag to override it (unlike the manifest fields above, which the build already sets directly)
