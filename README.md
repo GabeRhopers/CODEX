@@ -44,6 +44,15 @@ sudo apt-get install -y build-essential cmake ninja-build libsdl2-dev libsdl2-mi
 
 ## Building
 
+Either run the wrapper script, which does the submodule fetch and the steps below for you:
+
+```sh
+./scripts/build.sh          # defaults to a Release build
+./scripts/build.sh Debug    # or pass a CMAKE_BUILD_TYPE explicitly
+```
+
+or do it by hand:
+
 ```sh
 cd TheXTech
 mkdir -p build && cd build
@@ -51,11 +60,34 @@ cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
 ninja
 ```
 
-The resulting binary is written to `TheXTech/build/output/bin/thextech`. Game assets are not bundled in this
-repository (TheXTech ships as an assets-less "engine" build by default); place a compatible set of
-game resources next to the binary, or point the engine at your assets directory, before running it.
+Either way, the resulting binary is written to `TheXTech/build/output/bin/thextech`. Running it with
+`--version` is a good smoke test that the build is healthy:
+
+```sh
+TheXTech/build/output/bin/thextech --version
+```
+
+A GitHub Actions workflow (`.github/workflows/build.yml`) builds this same configuration on every
+push/PR, so a broken submodule pin or build regression shows up in CI.
+
 See the upstream build guide for the full list of CMake options and platform-specific notes:
 https://github.com/Wohlstand/TheXTech/wiki/Building-the-game
+
+## Game assets are not included
+
+This repository intentionally vendors only the **engine source code**. TheXTech's own source (the
+code under `TheXTech/`) is GPLv3, but the graphics/audio/level assets needed to actually play a game
+with it are a separate work with separate licensing, and upstream does not distribute them from the
+source repository either — a build with no assets pointed at it is the documented default ("engine
+build" / `USE_BUNDLED_ASSETS` off). Because of that, this project does not fetch, vendor, or bundle
+any asset pack.
+
+To run a playable game with this engine, supply your own legally-obtained set of assets (graphics,
+sounds, music, and world/level files) yourself, e.g. by:
+
+- Pointing the engine at an assets directory via its `thextech.ini` / command-line options, or
+- Placing the assets in the per-user data directory the engine reads at runtime (see the upstream
+  README's "Where does it take resources from?" section for the exact path on your OS).
 
 ## Updating the engine
 
