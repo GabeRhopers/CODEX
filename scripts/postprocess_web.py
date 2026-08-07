@@ -141,8 +141,32 @@ TITLE_SCREEN_JS = """
 """
 
 
+SW_UNREGISTER_SNIPPET = (
+    '<script>"serviceWorker"in navigator&&navigator.serviceWorker.getRegistrations()'
+    ".then(rs=>rs.forEach(r=>r.unregister()));"
+    '"caches"in window&&caches.keys().then(ks=>ks.forEach(k=>caches.delete(k)))</script>'
+)
+
+
 def process(src: Path, dst: Path) -> None:
     html = src.read_text(encoding="utf-8")
+
+    # The default shell registers a service worker (sw.js) for offline/PWA support.
+    # Its own cache-first strategy plus an explicit "do NOT claim clients; wait for
+    # the old service worker to die naturally" design means a normal reload after a
+    # new deploy can keep serving a stale cached build indefinitely - the new SW only
+    # takes over once every tab using the old one has been fully closed. That's a bad
+    # tradeoff while this project is iterating on every push, so instead of
+    # registering sw.js we actively unregister any previously-installed one and clear
+    # its caches, so browsers that got stuck on an old deploy self-heal.
+    html, n = re.subn(
+        r'<script>"serviceWorker"in navigator[^<]*</script>',
+        SW_UNREGISTER_SNIPPET,
+        html,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit("failed to replace service worker registration - shell markup may have changed")
 
     # The shell template hardcodes <title>TheXTech Engine</title> with no CMake
     # flag to override it (unlike THEXTECH_MANIFEST_NAME/ID/DESC, which the build
