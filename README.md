@@ -136,6 +136,46 @@ on you to source and license, not something this repo automates.
 ./scripts/run.sh demo       # launches TheXTech with that asset pack
 ```
 
+## Playing in the browser
+
+**Live URL: https://gaberhopers.github.io/CODEX/**
+
+The web build cross-compiles the engine to WebAssembly with Emscripten and bakes in Grampa's Dream
+Quest via `--preload-file`, same as the native build but targeting `emcmake`/`emmake` instead of a
+plain host toolchain:
+
+```sh
+cd TheXTech
+emcmake cmake -B build-web -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DPGE_PRELOAD_ENVIRONMENT=../content/grampa-dreamquest \
+    -DTHEXTECH_DEPLOY_URL=https://gaberhopers.github.io/CODEX/
+emmake ninja -C build-web thextech
+cd ..
+python3 scripts/postprocess_web.py TheXTech/build-web/output/bin
+```
+
+`scripts/postprocess_web.py` is the important last step, and it's worth explaining *why* it exists:
+TheXTech's own native main menu depends on several pixel-exact legacy bitmap-font atlases and an
+"intro level" that are only documented in the engine's C++ source, and its intro/attract mode spawns
+multiple wandering demo players by default. That's a lot of fragile, easy-to-get-subtly-wrong surface
+for a menu whose only real job here is "show the title and let the player click Play" — a job an
+ordinary web page does more reliably and with actual design control. So instead of fighting the native
+menu, the post-process step:
+
+- launches straight into `worlds/dream-world/level1.lvlx` (`Module.arguments`), skipping the native
+  `MENU_INTRO`/`MENU_MAIN` screens (and the intro-level/menu-font requirements that come with them)
+  entirely
+- replaces the default Emscripten shell UI with a real HTML/CSS title screen (`GRAMPA'S DREAM QUEST`,
+  a Play button, credits) that's fully our own markup, not reverse-engineered engine assets
+- wires that Play button to satisfy the engine's own click-to-start gate, which polls live mouse-button
+    state each frame rather than a discrete click event, so the handler holds a synthetic mousedown
+  briefly before releasing it — and also re-asserts the overlay's visibility for the first moment
+  after load, because `WindowSDL::init()` unconditionally calls Emscripten's soft-fullscreen helper,
+  which force-hides every sibling of the `<canvas>` element to make it fill the viewport
+
+The output is a single self-contained `index.html` alongside `thextech.{js,wasm,data}` in
+`TheXTech/build-web/output/bin/`, which is what's published to the `gh-pages` branch.
+
 ## Updating the engine
 
 To pull a newer upstream commit of TheXTech:
