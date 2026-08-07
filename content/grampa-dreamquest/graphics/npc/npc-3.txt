@@ -1,0 +1,9 @@
+frames=1
+framespeed=8
+framestyle=0
+width=36
+height=28
+gfxwidth=36
+gfxheight=28
+nogravity=1
+speed=0.4

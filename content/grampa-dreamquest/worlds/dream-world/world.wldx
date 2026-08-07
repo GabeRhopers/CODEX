@@ -1,0 +1,6 @@
+HEAD
+TL:"Dream World";IT:"level1.lvlx";CD:"Grampa's Dream Quest - an original episode.";CPID:"TheXTech";
+HEAD_END
+LEVELS
+ID:1;X:0;Y:0;LT:"Bedroom Beginnings";LF:"level1.lvlx";EL:0;ET:0;ER:0;EB:0;BP:1;
+LEVELS_END

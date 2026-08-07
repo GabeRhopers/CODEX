@@ -14,11 +14,13 @@ itself belongs to the Wohlstand / TheXTech project and its contributors.
 git clone <this-repo-url> && cd CODEX
 git submodule update --init --recursive   # fetch the engine source
 ./scripts/build.sh                        # build the engine
-./scripts/fetch-assets.sh                 # download the official demo content pack
-./scripts/run.sh                          # play it
+./scripts/run.sh                          # play "Grampa's Dream Quest" (original content, committed to this repo)
 ```
 
-See below for dependencies, what each script does, and why game content isn't committed to git.
+To instead play the official upstream demo pack: `./scripts/fetch-assets.sh && ./scripts/run.sh demo`.
+
+See below for dependencies, what each script does, and why *fetched* game content isn't committed to git
+(the original episode above is an exception — see "Grampa's Dream Quest" below).
 
 ## Getting the source
 
@@ -85,6 +87,25 @@ push/PR, so a broken submodule pin or build regression shows up in CI.
 See the upstream build guide for the full list of CMake options and platform-specific notes:
 https://github.com/Wohlstand/TheXTech/wiki/Building-the-game
 
+## Grampa's Dream Quest (original content)
+
+`content/grampa-dreamquest/` is a small, complete TheXTech content pack authored from scratch for
+this repository: an original playable character (a grandpa in pajamas and a hoodie, armed with a
+plush monkey toy), three original dream/nightmare-themed enemies (a sheep, a pillow, a drifting
+cloud), original tiles, background, UI chrome, and one hand-built level. None of it is derived from
+or resembles any existing game's characters or art — it exists specifically so this repository has
+a genuinely playable, unencumbered game with no third-party licensing questions attached. Because
+it's original work created for this project, it (unlike the fetched packs below) **is** committed to
+git, under `content/`.
+
+```sh
+./scripts/run.sh          # play it (after ./scripts/build.sh)
+```
+
+The level lives at `content/grampa-dreamquest/worlds/dream-world/level1.lvlx`; the character/enemy/
+tile art is under `content/grampa-dreamquest/graphics/`. Feel free to extend it — add levels, swap
+art, tune the enemy configs in `graphics/npc/npc-*.txt`.
+
 ## Game assets are not vendored in git
 
 This repository vendors only the **engine source code**. TheXTech's own source (under `TheXTech/`)
@@ -112,7 +133,7 @@ on you to source and license, not something this repo automates.
 
 ```sh
 ./scripts/fetch-assets.sh   # downloads game-data/adventures-of-demo/ (gitignored, ~74 MB)
-./scripts/run.sh            # launches TheXTech with that asset pack
+./scripts/run.sh demo       # launches TheXTech with that asset pack
 ```
 
 ## Updating the engine
