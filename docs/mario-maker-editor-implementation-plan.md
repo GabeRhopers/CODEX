@@ -65,9 +65,22 @@ decision before writing code:
    tier, or just local dev server for now? Affects whether Stage 1 needs a
    deploy workflow.
 
-I'll proceed with the recommended options (Vite + TS, Phaser-rendered
-palette) unless told otherwise, since they're reversible early and
-consistent with the $0 stack goal.
+**Resolved (2026-08-08):** proceeding with the recommended defaults —
+Vite + TypeScript, Phaser-rendered in-canvas palette, this repo is the
+game repo (root-level `src/`/`public/`), local dev server for now
+(`npm run dev`; a static-host deploy step, e.g. GitHub Pages, can be
+added later at zero cost whenever playtesting-by-URL is needed).
+
+**Asset-sourcing deviation:** the build sandbox's network proxy only
+allows the npm registry and `github.com`/`raw.githubusercontent.com` —
+`kenney.nl`, OpenGameArt, unpkg, and jsdelivr all return 403. Since Kenney
+assets can't be fetched from here, the MVP uses **simple placeholder
+pixel art generated procedurally in code** (solid-color tiles/sprites
+drawn via Phaser `Graphics.generateTexture`, rendered with `pixelArt:
+true` so the crisp-rendering risk is still validated). This is a
+zero-licensing-risk, zero-network-dependency substitute for Stage 1 only;
+swapping in real Kenney CC0 pixel-platformer PNGs later is a drop-in
+change to `PreloadScene`'s asset keys, not an architecture change.
 
 ## 4. Proposed repository layout
 

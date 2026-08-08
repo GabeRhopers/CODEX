@@ -1,0 +1,25 @@
+import { EMPTY_TILE, EntityType, GROUND_TILE } from "../level/LevelSchema";
+
+export type BrushKind = "tile" | "entity";
+
+export interface Brush {
+  id: string;
+  kind: BrushKind;
+  label: string;
+  textureKey: string;
+  tileIndex?: number;
+  entityType?: EntityType;
+}
+
+/**
+ * Palette is data, not branching code: adding a new tile type or entity in
+ * a later milestone means adding an entry here (plus a texture and, for
+ * entities, a spawn case in PlayScene) — not new if/else logic in the
+ * pointer handlers.
+ */
+export const PALETTE: Brush[] = [
+  { id: "ground", kind: "tile", label: "Ground", textureKey: "tile-ground", tileIndex: GROUND_TILE },
+  { id: "eraser", kind: "tile", label: "Erase", textureKey: "tile-eraser", tileIndex: EMPTY_TILE },
+  { id: "spawn", kind: "entity", label: "Spawn", textureKey: "marker-spawn", entityType: "player-spawn" },
+  { id: "goal", kind: "entity", label: "Goal", textureKey: "marker-goal", entityType: "goal" },
+];

@@ -1,0 +1,92 @@
+import Phaser from "phaser";
+import { TILE_SIZE } from "../config/gameConfig";
+
+/**
+ * Procedurally generated placeholder pixel art. The build sandbox's network
+ * proxy blocks kenney.nl / OpenGameArt / unpkg / jsdelivr (only the npm
+ * registry and github.com are reachable), so real Kenney CC0 assets can't
+ * be fetched from here. These textures are simple, deliberately blocky
+ * shapes drawn with Phaser's Graphics API and baked via generateTexture —
+ * zero licensing risk, zero network dependency, and (with `pixelArt: true`
+ * in the game config) they still validate that nearest-neighbor rendering
+ * is crisp. Swap these for real Kenney PNGs later by changing only the
+ * `scene.load.image(...)` calls that would replace this module.
+ */
+export function generateTextures(scene: Phaser.Scene): void {
+  const g = scene.add.graphics();
+
+  // Ground tile: grass-top dirt block.
+  g.clear();
+  g.fillStyle(0x8b5a2b, 1);
+  g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  g.fillStyle(0x4caf50, 1);
+  g.fillRect(0, 0, TILE_SIZE, 8);
+  g.fillStyle(0x6b3f1d, 1);
+  g.fillRect(2, 12, 4, 4);
+  g.fillRect(20, 20, 4, 4);
+  g.fillRect(10, 24, 5, 4);
+  g.lineStyle(1, 0x000000, 0.35);
+  g.strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
+  g.generateTexture("tile-ground", TILE_SIZE, TILE_SIZE);
+
+  // Eraser palette icon: red X on light gray.
+  g.clear();
+  g.fillStyle(0xdddddd, 1);
+  g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  g.lineStyle(4, 0xd32f2f, 1);
+  g.lineBetween(6, 6, TILE_SIZE - 6, TILE_SIZE - 6);
+  g.lineBetween(TILE_SIZE - 6, 6, 6, TILE_SIZE - 6);
+  g.lineStyle(1, 0x000000, 0.35);
+  g.strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
+  g.generateTexture("tile-eraser", TILE_SIZE, TILE_SIZE);
+
+  // Spawn marker: downward blue arrow.
+  g.clear();
+  g.fillStyle(0x2196f3, 1);
+  g.fillRect(TILE_SIZE / 2 - 3, 4, 6, 14);
+  g.fillTriangle(TILE_SIZE / 2 - 9, 16, TILE_SIZE / 2 + 9, 16, TILE_SIZE / 2, 28);
+  g.generateTexture("marker-spawn", TILE_SIZE, TILE_SIZE);
+
+  // Goal marker: checkered flag on a pole.
+  g.clear();
+  g.fillStyle(0x555555, 1);
+  g.fillRect(6, 2, 3, TILE_SIZE - 4);
+  g.fillStyle(0xffffff, 1);
+  g.fillRect(9, 2, 18, 12);
+  g.fillStyle(0x222222, 1);
+  g.fillRect(9, 2, 6, 6);
+  g.fillRect(21, 2, 6, 6);
+  g.fillRect(15, 8, 6, 6);
+  g.generateTexture("marker-goal", TILE_SIZE, TILE_SIZE);
+
+  // Player: blocky two-tone character, slightly narrower than a tile.
+  const pw = 24;
+  const ph = 32;
+  g.clear();
+  g.fillStyle(0xd32f2f, 1);
+  g.fillRect(2, 0, pw - 4, 10); // cap
+  g.fillStyle(0xffccaa, 1);
+  g.fillRect(4, 8, pw - 8, 8); // face
+  g.fillStyle(0x2196f3, 1);
+  g.fillRect(0, 16, pw, ph - 16); // overalls
+  g.fillStyle(0x8b5a2b, 1);
+  g.fillRect(0, ph - 6, 8, 6);
+  g.fillRect(pw - 8, ph - 6, 8, 6); // shoes
+  g.generateTexture("player", pw, ph);
+
+  // Hover highlight overlay for the editor grid.
+  g.clear();
+  g.fillStyle(0xffffff, 0.25);
+  g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  g.lineStyle(2, 0xffffff, 0.9);
+  g.strokeRect(1, 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  g.generateTexture("highlight", TILE_SIZE, TILE_SIZE);
+
+  // Selected-brush outline for the palette bar.
+  g.clear();
+  g.lineStyle(3, 0xffeb3b, 1);
+  g.strokeRect(1, 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  g.generateTexture("selected-outline", TILE_SIZE, TILE_SIZE);
+
+  g.destroy();
+}
