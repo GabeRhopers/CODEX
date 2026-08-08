@@ -171,6 +171,11 @@ Design notes:
 
 ## 6. Editor interaction design
 
+*Note: this describes the full target design, including undo/redo and
+composite commands. The MVP (§9.1) implements steps 1, 2, 4, and 5 below
+without the `HistoryStack`/`CompositeCommand` machinery — see §9.2 for
+why that's a safe cut.*
+
 Painting loop (per research §3 and §6):
 1. On `pointerdown`/`pointermove` while a brush is selected and the primary
    button is held: convert pointer position via
@@ -240,62 +245,150 @@ Palette:
   `LocalStorageAdapter` is actually synchronous — avoids an interface
   break when IndexedDB/Supabase (genuinely async) are swapped in.
 
-## 9. Milestones
+## 9. Milestones — MVP first, then additive layers
 
-**M0 — Project scaffold** *(half a day)*
-- Vite + TS + Phaser installed, `pixelArt: true` config, empty scene that
-  renders a placeholder sprite. Confirms the toolchain and pixel-art
-  rendering work before any editor logic.
-- Acceptance: `npm run dev` shows a crisp, non-blurry test sprite in
-  browser.
+The guiding principle: build the **shortest possible path that closes the
+full loop** — paint → play → win/lose → save → reload → load — before
+adding breadth (more tiles, enemies, undo, multi-level browsing, polish).
+A horizontal build order (perfect the palette, *then* perfect undo, *then*
+add play mode) risks weeks of work with nothing demoable and no proof the
+core pieces fit together. A vertical slice retires the biggest technical
+risks first (does Phaser tilemap collision actually feel good? does the
+paint loop feel right? does editor state survive a save/reload round trip?)
+while every piece cut from v1 is cut *because* the seam it needs already
+exists, not because it was forgotten.
 
-**M1 — Static level render + play skeleton**
-- Hand-authored `LevelData` JSON (no editor yet) loads into `PlayScene`.
-- Player can run/jump/collide with tiles from Kenney tileset.
-- Acceptance: a hardcoded test level is fully playable start-to-goal.
+### 9.1 The MVP: a single walking skeleton
 
-**M2 — Core paint loop**
-- `EditorScene` with `createBlankLayer`, palette (2-3 tile types), pointer
-  paint/erase with hover highlight, per the research's "Paint Tiles"/"Put
-  Tiles" pattern.
-- Acceptance: can paint and erase tiles smoothly; no visible input lag;
-  debounced so drag-paint doesn't spam duplicate commands.
+Ship this as one cohesive milestone, built in the numbered order below —
+each step ends in a state you can run in a browser and show someone,
+which is itself the point: it forces the highest-risk unknown in that
+step to surface immediately, not after several more steps are stacked on
+top of an unverified assumption.
 
-**M3 — Undo/redo**
-- `Command`/`HistoryStack`/`CompositeCommand` implemented and wired to
-  paint/erase and entity placement.
-- Acceptance: Ctrl+Z/Ctrl+Y (or on-screen buttons) correctly undo/redo
-  single paints, drag-fills, and entity placement, including across a
-  save (history itself need not persist, but state must stay consistent).
+1. **Scaffold + prove crisp rendering.** Vite + TS + Phaser, `pixelArt:
+   true`, load the *real* Kenney tile/player/goal sprites (not gray boxes
+   — asset selection is cheap and this retires the "does pixel art
+   actually render crisp in this exact Phaser version" risk from the
+   research doc immediately, rather than discovering a TileSprite
+   smoothing edge case during the polish pass). One scene renders a
+   player sprite standing on a row of ground tiles.
+   *Verify:* sprite is pixel-sharp at the target zoom, no blur/shimmer.
 
-**M4 — Entities + win/lose**
-- Player-spawn, at least one enemy, coin, goal placeable from palette;
-  `PlayScene` honors them (spawn point, stomp kill, pickup, win trigger).
-- Acceptance: a level built entirely in the editor is playable and
-  winnable/losable correctly.
+2. **Static level → playable, one screen, no editor.** Hand-write a
+   single small `LevelData` JSON (ground row, a gap, a player-spawn
+   entity, a goal entity) and load it into `PlayScene`: Arcade Physics
+   player with run/jump/gravity, tile collision via
+   `setCollisionByExclusion`, camera fixed (no scrolling — level is
+   capped to one screen, e.g. ~20×12 tiles), touching the goal shows "You
+   Win," falling off the bottom shows "You Lose" + restart.
+   *Verify:* the hardcoded level is fully playable start-to-finish. This
+   is the single highest-risk step (physics/collision correctness) and
+   it's proven *before* any editor UI exists, so editor bugs and physics
+   bugs are never debugged tangled together.
 
-**M5 — Save/load (local)**
-- `LocalStorageAdapter`, `LevelBrowserScene` (list/play/edit/delete),
-  "New Level" flow with width/height/name prompt.
-- Acceptance: build a level, save, reload the page, load it from the
-  browser screen, and it's pixel-identical to what was saved.
+3. **Paint loop, one tile brush.** `EditorScene` with `createBlankLayer`,
+   exactly **one** ground-tile brush + an eraser, pointer paint/erase via
+   `worldToTileXY`/`putTileAtWorldXY`, debounced on tile-coordinate
+   change, plus the hover-highlight overlay (cheap, and it's the single
+   biggest "does this feel like Mario Maker" signal, so it stays in
+   scope even though everything else is being cut).
+   *Rule that pays for itself later:* route every grid mutation through
+   one function (e.g. `TilePainter.paint(x, y, tileIndex)`), never
+   inline in the pointer handler — undo/redo (§9.2) wraps this function
+   later without touching call sites.
+   *Verify:* paint/erase feels smooth and responsive with no input lag.
 
-**M6 — Polish pass**
-- Hover/selection feedback, toolbar icons, Press Start 2P UI text,
-  keyboard shortcuts, basic sound effects (optional, still $0 via
-  Kenney's CC0 audio packs), clamp/validate map size in the "New Level"
-  form.
-- Acceptance: a first-time user can create, save, and play a level
-  without instructions.
+4. **Spawn/goal placement, palette made data-driven.** Add two more
+   palette entries — player-spawn and goal — as **data** (an array of
+   brush definitions), not as hardcoded if/else branches, and route
+   placement through one `EntityPlacer.place(type, x, y)` function
+   (same rule as step 3, applied to the entity list). Placing writes into
+   `LevelData.entities`, exactly the shape `PlayScene` already consumes
+   from step 2.
+   *Verify:* palette now has 3 buttons (ground, spawn, goal); clicking
+   each does the right thing.
 
-**M7 (optional, later) — Sharing backend**
-- Only start once M0–M6 are solid, per research's explicit
-  recommendation. Introduce `SupabaseAdapter`, auth, and a public level
-  browse/list view. Out of scope for the current plan; revisit with its
-  own design pass when triggered.
+5. **Close the loop: Test Play.** A "Test Play" button hands the
+   in-memory editor state (already `LevelData`-shaped, via the shared
+   `LevelSerializer` — write it now rather than duplicating
+   editor↔tilemap conversion ad hoc) to `PlayScene`, with "Back to
+   Editor" returning to the same editor state.
+   *Verify:* paint a tiny level from scratch, hit Play, actually run,
+   jump, and win. This is the moment it becomes *the product* rather
+   than two disconnected halves.
 
-Each milestone should land as its own PR/commit set so undo/redo, entity
-system, and persistence can be reviewed independently.
+6. **Persist it.** `StorageAdapter` interface + `LocalStorageAdapter`
+   (async methods even though localStorage itself is sync — see §8), one
+   Save button (single fixed slot is fine — no browser/list UI yet), one
+   Load action.
+   *Verify:* build a level, Save, reload the browser tab, Load, and it's
+   pixel-identical to what was saved. This is the proof that editor,
+   `LevelSerializer`, and persistence are actually one consistent
+   pipeline, not three places that happen to agree today.
+
+**MVP acceptance (the demo):** open the page with nothing saved, paint a
+short level (ground + gap + spawn + goal) from an empty grid, hit Test
+Play, run and jump across the gap, touch the goal and see "You Win,"
+return to the editor, Save, reload the tab, Load, and play it again with
+identical results. If that sequence works end-to-end, the MVP is done —
+everything after this is additive, not foundational.
+
+### 9.2 What's deliberately cut from the MVP, and why it's safe to cut
+
+Each cut below is safe specifically because the seam it would need
+already exists from the steps above — nothing here requires reopening
+step 1-6 code, only extending it:
+
+| Cut from MVP | Why it's safe to defer |
+|---|---|
+| Undo/redo | Steps 3-4 already funnel every mutation through one function per subsystem; wrapping those functions in `Command` objects (§6) is additive, not a rewrite |
+| Tile/entity variety (decorative tiles, enemies, coins, moving platforms) | Palette is already data (step 4) and `LevelEntity.type` is already an open string — new brushes are new array entries plus a new `case` in `PlayScene`'s entity-spawn switch |
+| Multiple saved levels / level browser | `StorageAdapter` (step 6) already supports list/save/load/delete by id; only the UI for many levels is missing |
+| Camera scrolling / levels larger than one screen | `PlayScene`'s camera setup (step 2) is isolated from tilemap/serializer code; `camera.startFollow` plus lifting the size cap touches nothing else |
+| IndexedDB / backend persistence | Behind the same `StorageAdapter` interface (step 6) by construction |
+| Composite/batched undo commands for drag-fills | Moot until undo exists; the painter already applies one tile at a time so batching is a `HistoryStack` concern, not a `TilePainter` one |
+| Sound, animations, keyboard shortcuts, toolbar polish | Additive UI/UX, touches no data model or architecture |
+
+### 9.3 Post-MVP milestones (additive, any order after M-MVP)
+
+**M1 — Undo/redo.** `Command`/`HistoryStack`/`CompositeCommand`, wired
+onto the mutator functions from MVP steps 3-4. *Acceptance:* Ctrl+Z/
+Ctrl+Y correctly undo/redo single paints, drag-fills (as one batched
+command), and entity placement.
+
+**M2 — Content breadth.** More ground/decoration tile types, at least
+one enemy (patrol + stomp-kill) and coins, all as new palette/entity
+entries. *Acceptance:* a level using every brush type is playable and
+scores/behaves correctly.
+
+**M3 — Bigger levels.** Lift the one-screen cap, add camera-follow and
+scrolling in both editor and play mode; keep a sane upper bound per the
+research's FPS-on-large-maps finding. *Acceptance:* a multi-screen level
+scrolls smoothly in both editor and play, at or under the size cap.
+
+**M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
+rename), proper "New Level" flow with name + width/height prompts
+(validated against the size cap). *Acceptance:* manage several saved
+levels without losing or overwriting the wrong one.
+
+**M5 — Polish pass.** Toolbar icons, Press Start 2P UI text, keyboard
+shortcuts, optional Kenney CC0 sound effects, hover/selection feedback
+beyond the MVP's basic highlight. *Acceptance:* a first-time user can
+create, save, and play a level with no instructions.
+
+**M6 (optional, if levels get large or numerous) — IndexedDB.** Swap
+`LocalStorageAdapter` for `IndexedDbAdapter` behind the existing
+interface; add level thumbnails if desired (binary storage IndexedDB
+supports and localStorage doesn't).
+
+**M7 (optional, later) — Sharing backend.** Only start once the above is
+solid, per the original research's explicit recommendation. Introduce
+`SupabaseAdapter`, auth, and a public level browse/list view. Out of
+scope for this plan; revisit with its own design pass when triggered.
+
+Each milestone (MVP included) should land as its own PR/commit set so
+review stays scoped.
 
 ## 10. Testing strategy
 
@@ -327,6 +420,8 @@ system, and persistence can be reviewed independently.
 ## 12. Immediate next step
 
 Once the open decisions in §3 are answered (or you confirm the
-recommended defaults), Stage/M0 can start: scaffold the Vite+TS+Phaser
-project, wire `pixelArt: true`, and commit a crisp-rendering smoke test as
-the first real commit on this branch.
+recommended defaults), MVP step 1 (§9.1) can start: scaffold the
+Vite+TS+Phaser project, wire `pixelArt: true`, load real Kenney sprites,
+and commit a crisp-rendering smoke test as the first real commit on this
+branch — then proceed straight through steps 2-6 to the closed-loop demo
+before any breadth work begins.
