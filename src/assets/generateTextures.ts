@@ -2,15 +2,20 @@ import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
 
 /**
- * Procedurally generated placeholder pixel art. The build sandbox's network
- * proxy blocks kenney.nl / OpenGameArt / unpkg / jsdelivr (only the npm
- * registry and github.com are reachable), so real Kenney CC0 assets can't
- * be fetched from here. These textures are simple, deliberately blocky
- * shapes drawn with Phaser's Graphics API and baked via generateTexture —
- * zero licensing risk, zero network dependency, and (with `pixelArt: true`
- * in the game config) they still validate that nearest-neighbor rendering
- * is crisp. Swap these for real Kenney PNGs later by changing only the
- * `scene.load.image(...)` calls that would replace this module.
+ * Procedurally generated placeholder pixel art for tiles/markers/UI. The
+ * build sandbox's network proxy blocks kenney.nl / OpenGameArt / unpkg /
+ * jsdelivr (only the npm registry and github.com are reachable), so real
+ * Kenney CC0 assets can't be fetched from here. These textures are simple,
+ * deliberately blocky shapes drawn with Phaser's Graphics API and baked via
+ * generateTexture — zero licensing risk, zero network dependency, and
+ * (with `pixelArt: true` in the game config) they still validate that
+ * nearest-neighbor rendering is crisp. Swap these for real Kenney PNGs
+ * later by changing only the `scene.load.image(...)` calls that would
+ * replace this module.
+ *
+ * The player character is the one exception: it's real art the user
+ * supplied (see public/assets/wizard/ and gameplay/wizardAnimation.ts),
+ * loaded like any other image asset rather than generated here.
  */
 export function generateTextures(scene: Phaser.Scene): void {
   const g = scene.add.graphics();
@@ -59,20 +64,9 @@ export function generateTextures(scene: Phaser.Scene): void {
   g.fillRect(15, 8, 6, 6);
   g.generateTexture("marker-goal", TILE_SIZE, TILE_SIZE);
 
-  // Player: blocky two-tone character, slightly narrower than a tile.
-  const pw = 24;
-  const ph = 32;
-  g.clear();
-  g.fillStyle(0xd32f2f, 1);
-  g.fillRect(2, 0, pw - 4, 10); // cap
-  g.fillStyle(0xffccaa, 1);
-  g.fillRect(4, 8, pw - 8, 8); // face
-  g.fillStyle(0x2196f3, 1);
-  g.fillRect(0, 16, pw, ph - 16); // overalls
-  g.fillStyle(0x8b5a2b, 1);
-  g.fillRect(0, ph - 6, 8, 6);
-  g.fillRect(pw - 8, ph - 6, 8, 6); // shoes
-  g.generateTexture("player", pw, ph);
+  // Player character art is loaded from public/assets/wizard/*.png (see
+  // BootScene.preload + gameplay/wizardAnimation.ts) rather than generated
+  // here — the user supplied real hand-drawn art for it.
 
   // Hover highlight overlay for the editor grid.
   g.clear();

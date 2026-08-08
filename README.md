@@ -53,16 +53,27 @@ Open the dev server URL in a browser. Controls:
   Clear reset the undo history (undoing past a full level swap doesn't
   make sense).
 
-## Placeholder art
+## Art
 
-Tile/character/marker art is generated procedurally in
+**Player character:** a real hand-drawn wizard sprite sheet the user
+supplied (idle, walk1, walk2, jump, cast — all originally facing right).
+Cropped into individual frames, background keyed to transparent, and
+normalized to a common 48px display height so animation-frame swaps never
+jitter the character's size — see `public/assets/wizard/*.png` and
+`src/gameplay/wizardAnimation.ts`. Left-facing movement reuses the same
+right-facing frames via `setFlipX`, the standard 2D-platformer approach,
+rather than needing mirrored art. The physics collision body is a fixed
+size, re-centered under whichever frame is showing, so hitbox behavior
+never changes with the animation.
+
+**Tiles/markers/UI:** generated procedurally in
 `src/assets/generateTextures.ts` rather than loaded from Kenney's CC0
 packs, because this project's build sandbox only allows outbound network
 access to the npm registry and github.com — `kenney.nl`, OpenGameArt,
 unpkg, and jsdelivr are all blocked here. The plan doc's asset-sourcing
-recommendation (Kenney CC0 pixel-platformer packs) still stands; swapping
-real Kenney PNGs in is a change to that one file's texture-loading calls,
-not an architecture change.
+recommendation (Kenney CC0 pixel-platformer packs) still stands for these;
+swapping real Kenney PNGs in is a change to that one file's
+texture-loading calls, not an architecture change.
 
 ## Project layout
 
@@ -73,7 +84,7 @@ full layout. Implemented so far:
 src/
 ├── main.ts                  Phaser game config + boot
 ├── scenes/
-│   ├── BootScene.ts          generates placeholder textures, starts Editor
+│   ├── BootScene.ts          loads wizard art + procedural textures, starts Editor
 │   ├── EditorScene.ts        palette + grid painting + save/load/test-play
 │   └── PlayScene.ts          runs a level with Arcade Physics
 ├── editor/
@@ -91,12 +102,15 @@ src/
 │   ├── LevelSchema.ts        LevelData / LevelEntity types
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
 ├── gameplay/
-│   └── PlayerController.ts   run/jump input handling
+│   ├── PlayerController.ts   run/jump input handling
+│   └── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 ├── persistence/
 │   ├── StorageAdapter.ts     interface (list/save/load/remove)
 │   └── LocalStorageAdapter.ts
 ├── config/
 │   └── gameConfig.ts         tile size, grid dimensions, physics constants
 └── assets/
-    └── generateTextures.ts   procedural placeholder pixel art
+    └── generateTextures.ts   procedural placeholder pixel art (tiles/markers/UI)
+
+public/assets/wizard/         idle.png, walk1.png, walk2.png, jump.png, cast.png
 ```

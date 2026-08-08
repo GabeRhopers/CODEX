@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
 import { createPlayerInput, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
+import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { LevelData } from "../level/LevelSchema";
 
 interface PlaySceneData {
@@ -12,6 +13,7 @@ export class PlayScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private input$!: PlayerInputKeys;
+  private wizardAnim: WizardAnimState = createWizardAnimState();
   private outcome: "playing" | "won" | "lost" = "playing";
   private banner!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
@@ -23,6 +25,7 @@ export class PlayScene extends Phaser.Scene {
   init(data: PlaySceneData): void {
     this.level = data.level;
     this.outcome = "playing";
+    this.wizardAnim = createWizardAnimState();
   }
 
   create(): void {
@@ -39,9 +42,13 @@ export class PlayScene extends Phaser.Scene {
 
     const spawn = this.level.entities.find((e) => e.type === "player-spawn");
     const spawnX = spawn ? spawn.x * TILE_SIZE + TILE_SIZE / 2 : TILE_SIZE;
-    const spawnY = spawn ? spawn.y * TILE_SIZE + TILE_SIZE / 2 : TILE_SIZE;
+    // Bottom-anchored (see below), so Y is where the feet should land — the
+    // top of the ground tile one row below the spawn marker's tile.
+    const spawnY = spawn ? (spawn.y + 1) * TILE_SIZE : TILE_SIZE;
 
-    this.player = this.physics.add.sprite(spawnX, spawnY, "player");
+    this.player = this.physics.add.sprite(spawnX, spawnY, "wizard-idle");
+    this.player.setOrigin(0.5, 1);
+    applyWizardTexture(this.player, "wizard-idle");
     this.player.setCollideWorldBounds(false);
     this.physics.add.collider(this.player, this.groundLayer);
 
@@ -95,10 +102,11 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-R", () => this.restart());
   }
 
-  update(): void {
+  update(_time: number, delta: number): void {
     if (this.outcome !== "playing") return;
 
     updatePlayerMovement(this.player, this.input$);
+    updateWizardAnimation(this.player, this.wizardAnim, delta);
 
     if (this.player.y > this.level.height * TILE_SIZE + 200) {
       this.onLose();
@@ -109,6 +117,7 @@ export class PlayScene extends Phaser.Scene {
     if (this.outcome !== "playing") return;
     this.outcome = "won";
     this.player.setVelocity(0, 0);
+    applyWizardTexture(this.player, "wizard-cast");
     this.physics.pause();
     this.banner.setText("You Win!").setVisible(true);
     this.hint.setText("Press R to play again, or Esc for the editor").setVisible(true);
