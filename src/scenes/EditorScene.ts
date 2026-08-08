@@ -1,5 +1,10 @@
 import Phaser from "phaser";
 import { GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
+import { Command } from "../editor/commands/Command";
+import { CompositeCommand } from "../editor/commands/CompositeCommand";
+import { HistoryStack } from "../editor/commands/HistoryStack";
+import { PaintTileCommand } from "../editor/commands/PaintTileCommand";
+import { PlaceEntityCommand } from "../editor/commands/PlaceEntityCommand";
 import { EditorUI } from "../editor/EditorUI";
 import { EntityPlacer } from "../editor/EntityPlacer";
 import { Brush, PALETTE } from "../editor/Palette";
@@ -20,6 +25,11 @@ export class EditorScene extends Phaser.Scene {
   private isPointerDown = false;
   private storage: StorageAdapter = new LocalStorageAdapter();
   private brushesByType = new Map<EntityType, Brush>();
+  private history = new HistoryStack();
+  private dragCommands: Command[] = [];
+  private dragLastX = -1;
+  private dragLastY = -1;
+  private lastActionFrame = new Map<string, number>();
 
   constructor() {
     super("Editor");
@@ -51,26 +61,55 @@ export class EditorScene extends Phaser.Scene {
       onSave: () => void this.saveLevel(),
       onLoad: () => void this.loadLevel(),
       onClear: () => this.clearLevel(),
+      onUndo: () => this.undo(),
+      onRedo: () => this.redo(),
     });
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (pointer.y >= GRID_ROWS * TILE_SIZE) return; // toolbar area, not the grid
-      this.isPointerDown = true;
-      this.painter.resetDrag();
-      this.applyBrushAt(pointer);
+      const tileX = Math.floor(pointer.x / TILE_SIZE);
+      const tileY = Math.floor(pointer.y / TILE_SIZE);
+      if (this.currentBrush.kind === "tile") {
+        this.isPointerDown = true;
+        this.dragCommands = [];
+        this.dragLastX = -1;
+        this.dragLastY = -1;
+        this.applyTileBrushAt(tileX, tileY);
+      } else {
+        this.applyEntityBrushAt(tileX, tileY);
+      }
     });
     this.input.on("pointerup", () => {
       this.isPointerDown = false;
-      this.painter.resetDrag();
+      this.flushDragCommands();
     });
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer));
 
-    this.input.keyboard?.on("keydown-SPACE", () => this.testPlay());
-
-    this.events.on("resume", () => {
-      // Coming back from Test Play: nothing to rebuild, `this.level` and
-      // all rendered tiles/markers were untouched while this scene slept.
+    this.input.keyboard?.on("keydown-SPACE", () => this.onceThisFrame("testPlay", () => this.testPlay()));
+    this.input.keyboard?.on("keydown-Z", (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      if (event.shiftKey) this.onceThisFrame("redo", () => this.redo());
+      else this.onceThisFrame("undo", () => this.undo());
     });
+    this.input.keyboard?.on("keydown-Y", (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      this.onceThisFrame("redo", () => this.redo());
+    });
+  }
+
+  /** Phaser's keyboard queue can re-emit the same physical keydown more
+   * than once within a single rendered frame under frame stalls (observed
+   * with software-rendered WebGL) even though the browser only dispatched
+   * one native event. Since a single physical keypress can't legitimately
+   * produce two independent actions within one frame, only the first
+   * invocation per (action, frame) pair runs. */
+  private onceThisFrame(action: string, fn: () => void): void {
+    const frame = this.game.loop.frame;
+    if (this.lastActionFrame.get(action) === frame) return;
+    this.lastActionFrame.set(action, frame);
+    fn();
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
@@ -86,18 +125,56 @@ export class EditorScene extends Phaser.Scene {
       this.highlight.setPosition(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2);
     }
     if (this.isPointerDown && this.currentBrush.kind === "tile") {
-      this.applyBrushAt(pointer);
+      this.applyTileBrushAt(tileX, tileY);
     }
   }
 
-  private applyBrushAt(pointer: Phaser.Input.Pointer): void {
-    const tileX = Math.floor(pointer.x / TILE_SIZE);
-    const tileY = Math.floor(pointer.y / TILE_SIZE);
-    if (this.currentBrush.kind === "tile" && this.currentBrush.tileIndex !== undefined) {
-      this.painter.paintIfNewCell(tileX, tileY, this.currentBrush.tileIndex);
-    } else if (this.currentBrush.kind === "entity") {
-      this.entityPlacer.place(this.currentBrush, tileX, tileY);
-    }
+  /** Applies the current tile brush at one cell, debounced to "new cell
+   * since the drag started", and records a PaintTileCommand for it. The
+   * command is collected in dragCommands (not pushed to history yet) so a
+   * whole drag becomes one undo step — see flushDragCommands. */
+  private applyTileBrushAt(tileX: number, tileY: number): void {
+    if (this.currentBrush.tileIndex === undefined) return;
+    if (tileX === this.dragLastX && tileY === this.dragLastY) return;
+    this.dragLastX = tileX;
+    this.dragLastY = tileY;
+
+    const prevIndex = this.level.layers.ground[tileY]?.[tileX];
+    if (prevIndex === undefined) return; // out of bounds
+
+    const newIndex = this.currentBrush.tileIndex;
+    if (!this.painter.paint(tileX, tileY, newIndex)) return; // no-op (already this value)
+
+    this.dragCommands.push(new PaintTileCommand(this.painter, tileX, tileY, prevIndex, newIndex));
+  }
+
+  private flushDragCommands(): void {
+    if (this.dragCommands.length === 0) return;
+    const command =
+      this.dragCommands.length === 1 ? this.dragCommands[0] : new CompositeCommand(this.dragCommands);
+    this.history.push(command);
+    this.dragCommands = [];
+  }
+
+  private applyEntityBrushAt(tileX: number, tileY: number): void {
+    const type = this.currentBrush.entityType;
+    if (!type) return;
+    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
+
+    const prev = this.entityPlacer.getPosition(type);
+    if (prev && prev.x === tileX && prev.y === tileY) return; // no-op, same spot
+
+    const command = new PlaceEntityCommand(this.entityPlacer, this.currentBrush, prev, { x: tileX, y: tileY });
+    command.execute();
+    this.history.push(command);
+  }
+
+  private undo(): void {
+    if (!this.history.undo()) this.ui.setStatus("Nothing to undo");
+  }
+
+  private redo(): void {
+    if (!this.history.redo()) this.ui.setStatus("Nothing to redo");
   }
 
   private testPlay(): void {
@@ -132,6 +209,7 @@ export class EditorScene extends Phaser.Scene {
     }
     this.level = loaded;
     this.rebuildVisualsFromLevel();
+    this.history.clear(); // undoing past a level swap makes no sense
     this.ui.setStatus(`Loaded "${loaded.name}"`);
   }
 
@@ -143,6 +221,7 @@ export class EditorScene extends Phaser.Scene {
     }
     this.level.entities = [];
     this.rebuildVisualsFromLevel();
+    this.history.clear();
     this.ui.setStatus("Cleared");
   }
 

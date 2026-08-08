@@ -2,11 +2,21 @@ import Phaser from "phaser";
 import { EntityType, LevelData } from "../level/LevelSchema";
 import { Brush } from "./Palette";
 
+export interface TileCoord {
+  x: number;
+  y: number;
+}
+
 /**
  * The single mutator for the entity layer (mirrors TilePainter for tiles).
  * MVP constraint: exactly one of each entity type (player-spawn, goal) —
  * placing a new one replaces the previous marker of that type, since
  * PlayScene expects exactly one spawn point and one goal.
+ *
+ * setEntity/removeEntity are unconditional, like TilePainter#paint — the
+ * "is this actually a change" and "what was here before" decisions belong
+ * to whoever is building a PlaceEntityCommand (EditorScene), not to this
+ * class.
  */
 export class EntityPlacer {
   private markers = new Map<EntityType, Phaser.GameObjects.Image>();
@@ -17,10 +27,14 @@ export class EntityPlacer {
     private readonly tileSize: number,
   ) {}
 
-  place(brush: Brush, tileX: number, tileY: number): void {
+  getPosition(type: EntityType): TileCoord | null {
+    const entity = this.level.entities.find((e) => e.type === type);
+    return entity ? { x: entity.x, y: entity.y } : null;
+  }
+
+  setEntity(brush: Brush, tileX: number, tileY: number): void {
     const type = brush.entityType;
     if (!type) return;
-    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
 
     const worldX = tileX * this.tileSize + this.tileSize / 2;
     const worldY = tileY * this.tileSize + this.tileSize / 2;
@@ -35,6 +49,15 @@ export class EntityPlacer {
       const marker = this.scene.add.image(worldX, worldY, brush.textureKey);
       marker.setDepth(10);
       this.markers.set(type, marker);
+    }
+  }
+
+  removeEntity(type: EntityType): void {
+    this.level.entities = this.level.entities.filter((e) => e.type !== type);
+    const marker = this.markers.get(type);
+    if (marker) {
+      marker.destroy();
+      this.markers.delete(type);
     }
   }
 

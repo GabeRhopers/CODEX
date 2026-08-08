@@ -8,9 +8,14 @@ export interface EditorUICallbacks {
   onSave: () => void;
   onLoad: () => void;
   onClear: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 const TOOLBAR_Y = GRID_ROWS * TILE_SIZE;
+const PALETTE_START_X = 16;
+const PALETTE_ICON_SPACING = TILE_SIZE + 14;
+const BUTTON_GAP = 8;
 
 export class EditorUI {
   private selectedOutline: Phaser.GameObjects.Image;
@@ -24,9 +29,8 @@ export class EditorUI {
     bg.setOrigin(0, 0);
     bg.setDepth(20);
 
-    let x = 16;
     PALETTE.forEach((brush, i) => {
-      const cx = x + TILE_SIZE / 2;
+      const cx = PALETTE_START_X + i * PALETTE_ICON_SPACING + TILE_SIZE / 2;
       const cy = TOOLBAR_Y + 22;
       const icon = scene.add.image(cx, cy, brush.textureKey).setDepth(21).setInteractive({ useHandCursor: true });
       icon.on("pointerdown", () => this.selectBrush(brush));
@@ -34,17 +38,23 @@ export class EditorUI {
         .text(cx, cy + 20, brush.label, { fontSize: "10px", color: "#eeeeee" })
         .setOrigin(0.5, 0)
         .setDepth(21);
-      x += TILE_SIZE + 14;
-      if (i === 0) this.firstBrushX = cx;
     });
 
-    this.selectedOutline = scene.add.image(this.firstBrushX, TOOLBAR_Y + 22, "selected-outline").setDepth(22);
+    this.selectedOutline = scene.add
+      .image(PALETTE_START_X + TILE_SIZE / 2, TOOLBAR_Y + 22, "selected-outline")
+      .setDepth(22);
 
-    const buttonsStartX = x + 24;
-    this.makeButton(buttonsStartX, "Test Play (Space)", () => this.callbacks.onTestPlay());
-    this.makeButton(buttonsStartX + 150, "Save", () => this.callbacks.onSave());
-    this.makeButton(buttonsStartX + 220, "Load", () => this.callbacks.onLoad());
-    this.makeButton(buttonsStartX + 290, "Clear", () => this.callbacks.onClear());
+    let buttonX = PALETTE_START_X + PALETTE.length * PALETTE_ICON_SPACING + 20;
+    const addButton = (label: string, onClick: () => void) => {
+      const button = this.makeButton(buttonX, label, onClick);
+      buttonX += button.width + BUTTON_GAP;
+    };
+    addButton("Test Play (Space)", () => this.callbacks.onTestPlay());
+    addButton("Save", () => this.callbacks.onSave());
+    addButton("Load", () => this.callbacks.onLoad());
+    addButton("Clear", () => this.callbacks.onClear());
+    addButton("Undo (Ctrl+Z)", () => this.callbacks.onUndo());
+    addButton("Redo (Ctrl+Y)", () => this.callbacks.onRedo());
 
     this.statusText = scene.add
       .text(scene.scale.width / 2, 8, "", {
@@ -57,9 +67,7 @@ export class EditorUI {
       .setDepth(25);
   }
 
-  private firstBrushX = 0;
-
-  private makeButton(x: number, label: string, onClick: () => void): void {
+  private makeButton(x: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
     const text = this.scene.add
       .text(x, TOOLBAR_Y + 22, label, {
         fontSize: "13px",
@@ -73,11 +81,12 @@ export class EditorUI {
     text.on("pointerdown", onClick);
     text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));
     text.on("pointerout", () => text.setStyle({ backgroundColor: "#0f3460" }));
+    return text;
   }
 
   selectBrush(brush: Brush): void {
     const index = PALETTE.findIndex((b) => b.id === brush.id);
-    const cx = 16 + TILE_SIZE / 2 + index * (TILE_SIZE + 14);
+    const cx = PALETTE_START_X + index * PALETTE_ICON_SPACING + TILE_SIZE / 2;
     this.selectedOutline.setPosition(cx, TOOLBAR_Y + 22);
     this.callbacks.onSelectBrush(brush);
   }

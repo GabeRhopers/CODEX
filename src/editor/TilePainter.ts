@@ -4,14 +4,16 @@ import { EMPTY_TILE, LevelData } from "../level/LevelSchema";
 /**
  * The single mutator for the editable ground layer. Every paint/erase in
  * EditorScene goes through TilePainter#paint so that (a) the LevelData
- * grid and the visible TilemapLayer never fall out of sync, and (b) a
- * later undo/redo milestone can wrap this one function instead of
- * touching every pointer-handling call site.
+ * grid and the visible TilemapLayer never fall out of sync, and (b)
+ * PaintTileCommand can wrap this one function for undo/redo instead of
+ * every pointer-handling call site needing to know about tiles.
+ *
+ * Drag debouncing ("only paint when the pointer reaches a new cell") lives
+ * in EditorScene, not here — it needs to read the pre-paint tile index at
+ * the same moment it decides whether to paint, to build an accurate
+ * PaintTileCommand.
  */
 export class TilePainter {
-  private lastPaintedX = -1;
-  private lastPaintedY = -1;
-
   constructor(
     private readonly level: LevelData,
     private readonly layer: Phaser.Tilemaps.TilemapLayer,
@@ -28,19 +30,6 @@ export class TilePainter {
       this.layer.putTileAt(tileIndex, tileX, tileY);
     }
     return true;
-  }
-
-  /** Debounce helper: only paints when the pointer has moved to a new cell. */
-  paintIfNewCell(tileX: number, tileY: number, tileIndex: number): boolean {
-    if (tileX === this.lastPaintedX && tileY === this.lastPaintedY) return false;
-    this.lastPaintedX = tileX;
-    this.lastPaintedY = tileY;
-    return this.paint(tileX, tileY, tileIndex);
-  }
-
-  resetDrag(): void {
-    this.lastPaintedX = -1;
-    this.lastPaintedY = -1;
   }
 
   private inBounds(tileX: number, tileY: number): boolean {
