@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { EntityType, LevelData } from "../level/LevelSchema";
 import { Brush } from "./Palette";
+import { fitWithinTile } from "./spriteFit";
 
 export interface TileCoord {
   x: number;
@@ -9,9 +10,9 @@ export interface TileCoord {
 
 /**
  * The single mutator for the entity layer (mirrors TilePainter for tiles).
- * MVP constraint: exactly one of each entity type (player-spawn, goal) —
- * placing a new one replaces the previous marker of that type, since
- * PlayScene expects exactly one spawn point and one goal.
+ * MVP constraint: exactly one of each entity type (player-spawn, goal,
+ * enemy-ghost) — placing a new one replaces the previous marker of that
+ * type, since PlayScene currently expects at most one of each.
  *
  * setEntity/removeEntity are unconditional, like TilePainter#paint — the
  * "is this actually a change" and "what was here before" decisions belong
@@ -48,6 +49,7 @@ export class EntityPlacer {
     } else {
       const marker = this.scene.add.image(worldX, worldY, brush.textureKey);
       marker.setDepth(10);
+      fitWithinTile(marker);
       this.markers.set(type, marker);
     }
   }
@@ -72,6 +74,7 @@ export class EntityPlacer {
       const worldY = entity.y * this.tileSize + this.tileSize / 2;
       const marker = this.scene.add.image(worldX, worldY, brush.textureKey);
       marker.setDepth(10);
+      fitWithinTile(marker);
       this.markers.set(entity.type, marker);
     }
   }

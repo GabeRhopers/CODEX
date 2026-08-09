@@ -13,9 +13,9 @@ import { TILE_SIZE } from "../config/gameConfig";
  * later by changing only the `scene.load.image(...)` calls that would
  * replace this module.
  *
- * The player character is the one exception: it's real art the user
- * supplied (see public/assets/wizard/ and gameplay/wizardAnimation.ts),
- * loaded like any other image asset rather than generated here.
+ * The player, the goal, and the ghost-pillow enemy are the exceptions:
+ * they're real drawn art (see public/assets/), loaded like any other
+ * image asset rather than generated here.
  */
 export function generateTextures(scene: Phaser.Scene): void {
   const g = scene.add.graphics();
@@ -52,21 +52,10 @@ export function generateTextures(scene: Phaser.Scene): void {
   g.fillTriangle(TILE_SIZE / 2 - 9, 16, TILE_SIZE / 2 + 9, 16, TILE_SIZE / 2, 28);
   g.generateTexture("marker-spawn", TILE_SIZE, TILE_SIZE);
 
-  // Goal marker: checkered flag on a pole.
-  g.clear();
-  g.fillStyle(0x555555, 1);
-  g.fillRect(6, 2, 3, TILE_SIZE - 4);
-  g.fillStyle(0xffffff, 1);
-  g.fillRect(9, 2, 18, 12);
-  g.fillStyle(0x222222, 1);
-  g.fillRect(9, 2, 6, 6);
-  g.fillRect(21, 2, 6, 6);
-  g.fillRect(15, 8, 6, 6);
-  g.generateTexture("marker-goal", TILE_SIZE, TILE_SIZE);
-
-  // Player character art is loaded from public/assets/wizard/*.png (see
-  // BootScene.preload + gameplay/wizardAnimation.ts) rather than generated
-  // here — the user supplied real hand-drawn art for it.
+  // Player character, the goal (dream cloud portal), and the ghost-pillow
+  // enemy are all loaded from public/assets/ rather than generated here —
+  // see BootScene.preload, gameplay/wizardAnimation.ts, and
+  // gameplay/EnemyBehaviors.ts.
 
   // Hover highlight overlay for the editor grid.
   g.clear();

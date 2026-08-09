@@ -11,6 +11,8 @@ export class BootScene extends Phaser.Scene {
     for (const key of WIZARD_FRAME_KEYS) {
       this.load.image(key, `/assets/wizard/${key.replace("wizard-", "")}.png`);
     }
+    this.load.image("enemy-ghost-pillow", "/assets/entities/ghost-pillow.png");
+    this.load.image("goal-portal", "/assets/entities/dream-portal.png");
   }
 
   create(): void {

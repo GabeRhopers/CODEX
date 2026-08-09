@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GRID_ROWS, TILE_SIZE, TOOLBAR_HEIGHT } from "../config/gameConfig";
 import { Brush, PALETTE } from "./Palette";
+import { fitWithinTile } from "./spriteFit";
 
 export interface EditorUICallbacks {
   onSelectBrush: (brush: Brush) => void;
@@ -33,6 +34,7 @@ export class EditorUI {
       const cx = PALETTE_START_X + i * PALETTE_ICON_SPACING + TILE_SIZE / 2;
       const cy = TOOLBAR_Y + 22;
       const icon = scene.add.image(cx, cy, brush.textureKey).setDepth(21).setInteractive({ useHandCursor: true });
+      fitWithinTile(icon);
       icon.on("pointerdown", () => this.selectBrush(brush));
       scene.add
         .text(cx, cy + 20, brush.label, { fontSize: "10px", color: "#eeeeee" })

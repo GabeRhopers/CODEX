@@ -1,5 +1,13 @@
 import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
+import {
+  applyStompBounce,
+  createGhostEnemy,
+  createGhostState,
+  GhostState,
+  isStompFromAbove,
+  updateGhostPatrol,
+} from "../gameplay/EnemyBehaviors";
 import { createPlayerInput, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { LevelData } from "../level/LevelSchema";
@@ -14,6 +22,8 @@ export class PlayScene extends Phaser.Scene {
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private input$!: PlayerInputKeys;
   private wizardAnim: WizardAnimState = createWizardAnimState();
+  private ghost?: Phaser.Physics.Arcade.Sprite;
+  private ghostState?: GhostState;
   private outcome: "playing" | "won" | "lost" = "playing";
   private banner!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
@@ -26,6 +36,8 @@ export class PlayScene extends Phaser.Scene {
     this.level = data.level;
     this.outcome = "playing";
     this.wizardAnim = createWizardAnimState();
+    this.ghost = undefined;
+    this.ghostState = undefined;
   }
 
   create(): void {
@@ -56,10 +68,25 @@ export class PlayScene extends Phaser.Scene {
     if (goal) {
       const goalX = goal.x * TILE_SIZE + TILE_SIZE / 2;
       const goalY = goal.y * TILE_SIZE + TILE_SIZE / 2;
-      this.add.image(goalX, goalY, "marker-goal").setDepth(5);
+      const portal = this.add.image(goalX, goalY, "goal-portal").setDepth(5);
+      this.tweens.add({
+        targets: portal,
+        scale: { from: 1, to: 1.08 },
+        yoyo: true,
+        repeat: -1,
+        duration: 900,
+        ease: "Sine.easeInOut",
+      });
       const goalZone = this.add.zone(goalX, goalY, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(goalZone, true);
       this.physics.add.overlap(this.player, goalZone, () => this.onWin());
+    }
+
+    const ghostEntity = this.level.entities.find((e) => e.type === "enemy-ghost");
+    if (ghostEntity) {
+      this.ghost = createGhostEnemy(this, ghostEntity.x, ghostEntity.y);
+      this.ghostState = createGhostState(this.ghost);
+      this.physics.add.overlap(this.player, this.ghost, () => this.onPlayerGhostOverlap());
     }
 
     this.input$ = createPlayerInput(this);
@@ -102,13 +129,29 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-R", () => this.restart());
   }
 
-  update(_time: number, delta: number): void {
+  update(time: number, delta: number): void {
     if (this.outcome !== "playing") return;
 
     updatePlayerMovement(this.player, this.input$);
     updateWizardAnimation(this.player, this.wizardAnim, delta);
 
+    if (this.ghost && this.ghostState) {
+      updateGhostPatrol(this.ghost, this.ghostState, time);
+    }
+
     if (this.player.y > this.level.height * TILE_SIZE + 200) {
+      this.onLose();
+    }
+  }
+
+  private onPlayerGhostOverlap(): void {
+    if (this.outcome !== "playing" || !this.ghost) return;
+    if (isStompFromAbove(this.player, this.ghost)) {
+      this.ghost.destroy();
+      this.ghost = undefined;
+      this.ghostState = undefined;
+      applyStompBounce(this.player);
+    } else {
       this.onLose();
     }
   }

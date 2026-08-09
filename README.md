@@ -6,11 +6,14 @@ the full architecture, data model, and milestone plan.
 
 ## Status
 
-**MVP + M1 (undo/redo) complete.** Paint a level → Test Play → win/lose →
-Save → reload → Load round-trips identically, and every paint/erase/entity
-edit is undoable — a whole paint drag reverts as one step, not tile by
-tile. See the plan doc §9.1 for the exact MVP scope and §9.2 for what's
-still deliberately deferred (tile/enemy variety, level browser, scrolling,
+**MVP + M1 (undo/redo) + first M2 content (enemy + real goal art) done.**
+Paint a level → Test Play → win/lose → Save → reload → Load round-trips
+identically, every paint/erase/entity edit is undoable — a whole paint
+drag reverts as one step, not tile by tile — and a level can now include
+a patrolling ghost-pillow enemy (stomp it from above to kill it, touch it
+any other way and you lose) plus a dream-cloud portal as the goal. See
+the plan doc §9.1 for the exact MVP scope and §9.2/§9.3 for what's still
+deliberately deferred (more tile/enemy variety, level browser, scrolling,
 IndexedDB, backend sharing).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
@@ -39,12 +42,15 @@ npm run typecheck # type-check only, no build
 
 Open the dev server URL in a browser. Controls:
 
-- **Palette** (bottom-left): click a brush — Ground, Erase, Spawn, Goal —
-  then click/drag on the grid above to paint.
+- **Palette** (bottom-left): click a brush — Ground, Erase, Spawn, Goal
+  (dream portal), Ghost (enemy) — then click/drag on the grid above to
+  paint or place.
 - **Test Play** (button or Space): plays the level you've built. Requires
-  a Spawn and a Goal to be placed first.
+  a Spawn and a Goal to be placed first; the Ghost is optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump,
-  **Esc** back to the editor, **R** to restart after winning/losing.
+  **Esc** back to the editor, **R** to restart after winning/losing. Jump
+  on top of the ghost to squish it; touching it any other way costs you
+  the level.
 - **Save** / **Load**: persists to `localStorage` (single most-recent
   slot for now — a multi-level browser is a planned post-MVP milestone).
 - **Clear**: wipes the current grid and entities.
@@ -66,6 +72,18 @@ rather than needing mirrored art. The physics collision body is a fixed
 size, re-centered under whichever frame is showing, so hitbox behavior
 never changes with the animation.
 
+**Ghost-pillow enemy & dream-cloud portal:** original art drawn to match
+the wizard's style — rounded shapes, thick navy ink outlines, flat pastel
+fills with a little shading, no external references. Built with Pillow
+(the build sandbox can reach PyPI even though it can't reach asset sites):
+clean vector shapes at high resolution (rounded rects, overlapping
+ellipses, a two-pass "draw it twice, slightly bigger underneath" outline
+trick), then LANCZOS-downscaled to final size — the same finishing
+pipeline used on the wizard frames, so all three characters read as one
+consistent family. See `public/assets/entities/*.png` and
+`src/gameplay/EnemyBehaviors.ts` (patrol + bob + the stomp-from-above
+rule, unit-tested in `EnemyBehaviors.test.ts`).
+
 **Tiles/markers/UI:** generated procedurally in
 `src/assets/generateTextures.ts` rather than loaded from Kenney's CC0
 packs, because this project's build sandbox only allows outbound network
@@ -74,6 +92,12 @@ unpkg, and jsdelivr are all blocked here. The plan doc's asset-sourcing
 recommendation (Kenney CC0 pixel-platformer packs) still stands for these;
 swapping real Kenney PNGs in is a change to that one file's
 texture-loading calls, not an architecture change.
+
+*Palette/marker scaling:* entity art varies in native resolution (32px
+icons vs. the larger ghost/portal illustrations), so both the editor
+palette and the in-grid placement markers scale any texture down to fit
+one tile via `src/editor/spriteFit.ts`, preserving aspect ratio. Gameplay
+objects in `PlayScene` are unaffected and render at full native size.
 
 ## Project layout
 
@@ -92,6 +116,7 @@ src/
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
 │   ├── EntityPlacer.ts       raw mutator for the entity layer
 │   ├── EditorUI.ts           toolbar + palette rendering
+│   ├── spriteFit.ts          scales any texture down to fit one tile
 │   └── commands/
 │       ├── Command.ts         execute()/undo() interface
 │       ├── PaintTileCommand.ts
@@ -103,7 +128,8 @@ src/
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling
-│   └── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
+│   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
+│   └── EnemyBehaviors.ts     ghost patrol/bob + stomp-vs-hit rule (+ unit tests)
 ├── persistence/
 │   ├── StorageAdapter.ts     interface (list/save/load/remove)
 │   └── LocalStorageAdapter.ts
@@ -112,5 +138,7 @@ src/
 └── assets/
     └── generateTextures.ts   procedural placeholder pixel art (tiles/markers/UI)
 
-public/assets/wizard/         idle.png, walk1.png, walk2.png, jump.png, cast.png
+public/assets/
+├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png
+└── entities/                 ghost-pillow.png, dream-portal.png
 ```

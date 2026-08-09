@@ -5,7 +5,7 @@ export const GROUND_TILE = 0;
 
 export const SCHEMA_VERSION = 1 as const;
 
-export type EntityType = "player-spawn" | "goal";
+export type EntityType = "player-spawn" | "goal" | "enemy-ghost";
 
 export interface LevelEntity {
   type: EntityType;
