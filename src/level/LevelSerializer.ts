@@ -1,4 +1,5 @@
 import { LevelData, SCHEMA_VERSION } from "./LevelSchema";
+import { DEFAULT_THEME } from "./themes";
 
 /**
  * Single source of truth for turning a LevelData object into a JSON string
@@ -26,5 +27,8 @@ export function deserializeLevel(json: string): LevelData {
       `Unsupported level schema version ${String(parsed.schemaVersion)}; expected ${SCHEMA_VERSION}`,
     );
   }
+  // Levels saved before themes existed have no `theme` field; treat them as
+  // the theme they always rendered as.
+  if (!parsed.theme) parsed.theme = DEFAULT_THEME;
   return parsed;
 }

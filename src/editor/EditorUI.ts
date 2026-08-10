@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GRID_ROWS, TILE_SIZE, TOOLBAR_HEIGHT } from "../config/gameConfig";
+import { groundIconKey, LevelTheme } from "../level/themes";
 import { Brush, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -24,6 +25,7 @@ export class EditorUI {
 
   constructor(
     private readonly scene: Phaser.Scene,
+    private readonly theme: LevelTheme,
     private readonly callbacks: EditorUICallbacks,
   ) {
     const bg = scene.add.rectangle(0, TOOLBAR_Y, scene.scale.width, TOOLBAR_HEIGHT, 0x16213e);
@@ -33,7 +35,11 @@ export class EditorUI {
     PALETTE.forEach((brush, i) => {
       const cx = PALETTE_START_X + i * PALETTE_ICON_SPACING + TILE_SIZE / 2;
       const cy = TOOLBAR_Y + 22;
-      const icon = scene.add.image(cx, cy, brush.textureKey).setDepth(21).setInteractive({ useHandCursor: true });
+      // The Ground brush's icon reflects the level's own theme rather than
+      // a fixed texture, so the palette always matches what painting Ground
+      // actually looks like in this level.
+      const textureKey = brush.id === "ground" ? groundIconKey(this.theme) : brush.textureKey;
+      const icon = scene.add.image(cx, cy, textureKey).setDepth(21).setInteractive({ useHandCursor: true });
       fitWithinTile(icon);
       icon.on("pointerdown", () => this.selectBrush(brush));
       scene.add

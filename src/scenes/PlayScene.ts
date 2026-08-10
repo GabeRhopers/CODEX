@@ -12,6 +12,7 @@ import { createPlayerInput, PlayerInputKeys, updatePlayerMovement } from "../gam
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { buildRenderGrid } from "../level/groundAutotile";
 import { LevelData } from "../level/LevelSchema";
+import { groundTilesetKey, THEMES } from "../level/themes";
 
 interface PlaySceneData {
   level: LevelData;
@@ -42,14 +43,15 @@ export class PlayScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.cameras.main.setBackgroundColor("#1a1a2e");
+    this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
 
+    const tilesetKey = groundTilesetKey(this.level.theme);
     const map = this.make.tilemap({
       data: buildRenderGrid(this.level.layers.ground),
       tileWidth: TILE_SIZE,
       tileHeight: TILE_SIZE,
     });
-    const tileset = map.addTilesetImage("tile-ground-tileset", "tile-ground-tileset", TILE_SIZE, TILE_SIZE, 0, 0)!;
+    const tileset = map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0)!;
     this.groundLayer = map.createLayer(0, tileset, 0, 0)!;
     this.groundLayer.setCollisionByExclusion([-1]);
 

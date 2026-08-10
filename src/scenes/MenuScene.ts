@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
+import { ensureSampleLevelsSeeded } from "../level/sampleLevels";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -44,13 +45,18 @@ export class MenuScene extends Phaser.Scene {
       .text(cx, 330, "Checking saved levels…", { fontSize: "13px", color: "#8888aa" })
       .setOrigin(0.5);
 
-    void this.storage.list().then((levels) => {
-      statusText.setText(
-        levels.length === 0
-          ? "No saved levels yet — start with New Level."
-          : `${levels.length} saved level${levels.length === 1 ? "" : "s"} waiting in My Levels.`,
-      );
-    });
+    // First-ever visit seeds 3 ready-to-play sample levels (one per theme)
+    // so My Levels isn't empty; a flag in localStorage makes this run once
+    // per browser, so deleting a sample later doesn't bring it back.
+    void ensureSampleLevelsSeeded(this.storage)
+      .then(() => this.storage.list())
+      .then((levels) => {
+        statusText.setText(
+          levels.length === 0
+            ? "No saved levels yet — start with New Level."
+            : `${levels.length} saved level${levels.length === 1 ? "" : "s"} waiting in My Levels.`,
+        );
+      });
 
     this.add
       .text(cx, GAME_HEIGHT - 20, "Arrow keys / WASD to move, Space to jump, once you're playing", {

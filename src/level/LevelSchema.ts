@@ -1,4 +1,5 @@
 import { GRID_COLS, GRID_ROWS, MAX_GRID_COLS, MAX_GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
+import { DEFAULT_THEME, LevelTheme } from "./themes";
 
 export const EMPTY_TILE = -1;
 export const GROUND_TILE = 0;
@@ -17,6 +18,7 @@ export interface LevelData {
   schemaVersion: typeof SCHEMA_VERSION;
   id: string;
   name: string;
+  theme: LevelTheme;
   createdAt: string;
   updatedAt: string;
   width: number;
@@ -46,6 +48,7 @@ export function createEmptyLevel(name = "Untitled Level", width = GRID_COLS, hei
     schemaVersion: SCHEMA_VERSION,
     id: "",
     name,
+    theme: DEFAULT_THEME,
     createdAt: now,
     updatedAt: now,
     width: clampedWidth,

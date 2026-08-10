@@ -12,6 +12,7 @@ import { TilePainter } from "../editor/TilePainter";
 import { groundFrameAt } from "../level/groundAutotile";
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
+import { groundTilesetKey, THEMES } from "../level/themes";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -47,17 +48,19 @@ export class EditorScene extends Phaser.Scene {
 
   create(): void {
     this.level = this.initialLevel ?? createEmptyLevel();
+    this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }
 
+    const tilesetKey = groundTilesetKey(this.level.theme);
     const map = this.make.tilemap({
       tileWidth: TILE_SIZE,
       tileHeight: TILE_SIZE,
       width: this.level.width,
       height: this.level.height,
     });
-    const tileset = map.addTilesetImage("tile-ground-tileset", "tile-ground-tileset", TILE_SIZE, TILE_SIZE, 0, 0)!;
+    const tileset = map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0)!;
     this.groundLayer = map.createBlankLayer("ground", tileset, 0, 0)!;
 
     this.painter = new TilePainter(this.level, this.groundLayer);
@@ -65,7 +68,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
 
-    this.ui = new EditorUI(this, {
+    this.ui = new EditorUI(this, this.level.theme, {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),

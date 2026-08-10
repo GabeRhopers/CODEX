@@ -1,4 +1,5 @@
 import { EMPTY_TILE, EntityType, GROUND_TILE } from "../level/LevelSchema";
+import { groundIconKey } from "../level/themes";
 
 export type BrushKind = "tile" | "entity";
 
@@ -18,7 +19,7 @@ export interface Brush {
  * pointer handlers.
  */
 export const PALETTE: Brush[] = [
-  { id: "ground", kind: "tile", label: "Ground", textureKey: "tile-ground-icon", tileIndex: GROUND_TILE },
+  { id: "ground", kind: "tile", label: "Ground", textureKey: groundIconKey("grass"), tileIndex: GROUND_TILE },
   { id: "eraser", kind: "tile", label: "Erase", textureKey: "tile-eraser", tileIndex: EMPTY_TILE },
   { id: "spawn", kind: "entity", label: "Spawn", textureKey: "marker-spawn", entityType: "player-spawn" },
   { id: "goal", kind: "entity", label: "Goal", textureKey: "goal-portal", entityType: "goal" },

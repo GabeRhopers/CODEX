@@ -7,18 +7,21 @@ the full architecture, data model, and milestone plan.
 ## Status
 
 **MVP + M1 (undo/redo) + first M2 content (enemy + real goal art) + M4
-(home page / level browser) done.** The game now opens on a **Menu**
-(home page) instead of dropping straight into the editor: New Level or
-My Levels, with a live count of saved levels. **My Levels** lists every
-saved level (not just a single most-recent slot) with Edit and Delete per
-row. Paint a level → Test Play → win/lose → Save → Menu → My Levels →
-Edit round-trips identically, every paint/erase/entity edit is undoable —
-a whole paint drag reverts as one step, not tile by tile — and a level
-can include a patrolling ghost-pillow enemy (stomp it from above to kill
-it, touch it any other way and you lose) plus a dream-cloud portal as the
-goal. See the plan doc §9.1 for the exact MVP scope and §9.2/§9.3 for
-what's still deliberately deferred (more tile/enemy variety, scrolling,
-IndexedDB, backend sharing, renaming levels from the browser).
+(home page / level browser) + 3 themed sample levels done.** The game now
+opens on a **Menu** (home page) instead of dropping straight into the
+editor: New Level or My Levels, with a live count of saved levels. **My
+Levels** lists every saved level (not just a single most-recent slot)
+with Edit and Delete per row — and on a visitor's first-ever visit it's
+pre-seeded with 3 ready-to-play sample levels, one per visual theme (see
+"Sample levels" under Art below). Paint a level → Test Play → win/lose →
+Save → Menu → My Levels → Edit round-trips identically, every
+paint/erase/entity edit is undoable — a whole paint drag reverts as one
+step, not tile by tile — and a level can include a patrolling ghost-pillow
+enemy (stomp it from above to kill it, touch it any other way and you
+lose) plus a dream-cloud portal as the goal. See the plan doc §9.1 for the
+exact MVP scope and §9.2/§9.3 for what's still deliberately deferred (more
+tile/enemy variety, scrolling, IndexedDB, backend sharing, renaming levels
+from the browser).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
 plus matching toolbar buttons.
@@ -110,6 +113,22 @@ grid the same way when building/reloading a level. The saved level format
 is untouched: it still stores one ground/empty value per cell, exactly as
 before.
 
+**Sample levels & themes.** A level carries a `theme` (`grass`, `desert`,
+or `castle`) — purely a recolor of the ground tileset and the scene's
+background, never gameplay data, so TilePainter/groundAutotile stay
+theme-agnostic and any level can be reskinned by changing one field. New
+levels default to `grass` (unchanged from before themes existed); old
+saved levels with no `theme` field are treated as `grass` on load (see
+`LevelSerializer.deserializeLevel`). `src/level/themes.ts` holds the
+color palette per theme and the themed texture-key naming; the palette's
+Ground brush icon and the editor/play tileset both follow the current
+level's theme automatically. `src/level/sampleLevels.ts` hand-authors one
+short, beatable level per theme — Sunny Hills (grass), Desert Canyon
+(desert), Castle Ascent (castle, a vertical staircase climb) — each with
+gaps and steps sized well within the player's jump range, and seeds all
+three into My Levels on a visitor's first-ever visit via a one-time
+`localStorage` flag (deleting a sample afterward doesn't bring it back).
+
 **Tiles/markers/UI:** generated procedurally in
 `src/assets/generateTextures.ts` rather than loaded from Kenney's CC0
 packs, because this project's build sandbox only allows outbound network
@@ -154,7 +173,9 @@ src/
 ├── level/
 │   ├── LevelSchema.ts        LevelData / LevelEntity types
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
-│   └── groundAutotile.ts     derives the grass-top/buried tile frame from neighbors (+ unit tests)
+│   ├── groundAutotile.ts     derives the grass-top/buried tile frame from neighbors (+ unit tests)
+│   ├── themes.ts              theme color palettes + themed texture-key naming
+│   └── sampleLevels.ts        3 hand-authored levels (one per theme) + first-visit seeding
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering

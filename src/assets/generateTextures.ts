@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
+import { groundIconKey, groundTilesetKey, ThemeColors, THEMES } from "../level/themes";
 
 /**
  * Procedurally generated placeholder pixel art for tiles/markers/UI. The
@@ -17,19 +18,16 @@ import { TILE_SIZE } from "../config/gameConfig";
  * they're real drawn art (see public/assets/), loaded like any other
  * image asset rather than generated here.
  */
-const DIRT_COLOR = 0x8b5a2b;
-const GRASS_COLOR = 0x4caf50;
-const DOT_COLOR = 0x6b3f1d;
 
 /** Grass-capped dirt — used where a ground cell has open air above it. No
  * border: adjacent tiles need to read as one continuous strip of terrain,
  * not a grid of visibly separate squares. */
-function drawGroundTop(g: Phaser.GameObjects.Graphics, offsetX: number): void {
-  g.fillStyle(DIRT_COLOR, 1);
+function drawGroundTop(g: Phaser.GameObjects.Graphics, offsetX: number, colors: ThemeColors): void {
+  g.fillStyle(colors.dirt, 1);
   g.fillRect(offsetX, 0, TILE_SIZE, TILE_SIZE);
-  g.fillStyle(GRASS_COLOR, 1);
+  g.fillStyle(colors.cap, 1);
   g.fillRect(offsetX, 0, TILE_SIZE, 8);
-  g.fillStyle(DOT_COLOR, 1);
+  g.fillStyle(colors.dot, 1);
   g.fillRect(offsetX + 2, 12, 4, 4);
   g.fillRect(offsetX + 20, 20, 4, 4);
   g.fillRect(offsetX + 10, 24, 5, 4);
@@ -38,10 +36,10 @@ function drawGroundTop(g: Phaser.GameObjects.Graphics, offsetX: number): void {
 /** Plain dirt, no grass cap — used where a ground cell is buried under
  * another ground cell (see groundAutotile.ts). Same dirt tone as the top
  * variant so a vertical stack reads as one uninterrupted mass. */
-function drawGroundFill(g: Phaser.GameObjects.Graphics, offsetX: number): void {
-  g.fillStyle(DIRT_COLOR, 1);
+function drawGroundFill(g: Phaser.GameObjects.Graphics, offsetX: number, colors: ThemeColors): void {
+  g.fillStyle(colors.dirt, 1);
   g.fillRect(offsetX, 0, TILE_SIZE, TILE_SIZE);
-  g.fillStyle(DOT_COLOR, 1);
+  g.fillStyle(colors.dot, 1);
   g.fillRect(offsetX + 6, 4, 4, 4);
   g.fillRect(offsetX + 22, 10, 4, 4);
   g.fillRect(offsetX + 2, 18, 4, 4);
@@ -51,19 +49,23 @@ function drawGroundFill(g: Phaser.GameObjects.Graphics, offsetX: number): void {
 export function generateTextures(scene: Phaser.Scene): void {
   const g = scene.add.graphics();
 
-  // Palette icon: always shows the grass-top look, regardless of what
-  // actually renders in the level (that's decided per-cell by neighbors).
-  g.clear();
-  drawGroundTop(g, 0);
-  g.generateTexture("tile-ground-icon", TILE_SIZE, TILE_SIZE);
+  // One ground tileset + palette icon per theme, all sharing the same two
+  // frames (0 = grass-top, 1 = buried fill) — see groundAutotile.ts. Which
+  // texture key a level actually uses is picked at scene-creation time from
+  // LevelData.theme (see EditorScene/PlayScene), so this loop is the only
+  // place that needs to know the full theme list.
+  for (const themeId of Object.keys(THEMES) as (keyof typeof THEMES)[]) {
+    const colors = THEMES[themeId];
 
-  // Ground tileset for the tilemap: frame 0 = top (grass), frame 1 = fill
-  // (buried). EditorScene/PlayScene pick the frame per cell via
-  // groundAutotile.ts rather than always using frame 0.
-  g.clear();
-  drawGroundTop(g, 0);
-  drawGroundFill(g, TILE_SIZE);
-  g.generateTexture("tile-ground-tileset", TILE_SIZE * 2, TILE_SIZE);
+    g.clear();
+    drawGroundTop(g, 0, colors);
+    g.generateTexture(groundIconKey(themeId), TILE_SIZE, TILE_SIZE);
+
+    g.clear();
+    drawGroundTop(g, 0, colors);
+    drawGroundFill(g, TILE_SIZE, colors);
+    g.generateTexture(groundTilesetKey(themeId), TILE_SIZE * 2, TILE_SIZE);
+  }
 
   // Eraser palette icon: red X on light gray.
   g.clear();
