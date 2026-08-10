@@ -13,13 +13,25 @@ import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, Wizar
 import { buildRenderGrid } from "../level/groundAutotile";
 import { LevelData } from "../level/LevelSchema";
 import { groundTilesetKey, THEMES } from "../level/themes";
+import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
+import { StorageAdapter } from "../persistence/StorageAdapter";
+
+/** Present only when this level was launched from a World (WorldBrowserScene
+ * "Play") rather than a standalone Test Play — see onWin/nextLevel. */
+interface WorldPlayContext {
+  levelIds: string[];
+  index: number;
+}
 
 interface PlaySceneData {
   level: LevelData;
+  world?: WorldPlayContext;
 }
 
 export class PlayScene extends Phaser.Scene {
   private level!: LevelData;
+  private world?: WorldPlayContext;
+  private levelStorage: StorageAdapter = new LocalStorageAdapter();
   private player!: Phaser.Physics.Arcade.Sprite;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private input$!: PlayerInputKeys;
@@ -36,6 +48,7 @@ export class PlayScene extends Phaser.Scene {
 
   init(data: PlaySceneData): void {
     this.level = data.level;
+    this.world = data.world;
     this.outcome = "playing";
     this.wizardAnim = createWizardAnimState();
     this.ghost = undefined;
@@ -117,7 +130,7 @@ export class PlayScene extends Phaser.Scene {
       .setVisible(false);
 
     const backLabel = this.add
-      .text(8, 8, "← Back to Editor (Esc)", {
+      .text(8, 8, this.world ? "← Back to Worlds (Esc)" : "← Back to Editor (Esc)", {
         fontSize: "13px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
@@ -130,6 +143,7 @@ export class PlayScene extends Phaser.Scene {
 
     this.input.keyboard?.on("keydown-ESC", () => this.backToEditor());
     this.input.keyboard?.on("keydown-R", () => this.restart());
+    this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
   }
 
   update(time: number, delta: number): void {
@@ -165,8 +179,38 @@ export class PlayScene extends Phaser.Scene {
     this.player.setVelocity(0, 0);
     applyWizardTexture(this.player, "wizard-cast");
     this.physics.pause();
-    this.banner.setText("You Win!").setVisible(true);
-    this.hint.setText("Press R to play again, or Esc for the editor").setVisible(true);
+
+    const hasNextLevel = this.world && this.world.index + 1 < this.world.levelIds.length;
+    if (hasNextLevel) {
+      this.banner.setText("Level Complete!").setVisible(true);
+      this.hint.setText("Press N for the next level, R to replay, or Esc for Worlds").setVisible(true);
+    } else if (this.world) {
+      this.banner.setText("World Complete!").setVisible(true);
+      this.hint.setText("Press R to replay this level, or Esc for Worlds").setVisible(true);
+    } else {
+      this.banner.setText("You Win!").setVisible(true);
+      this.hint.setText("Press R to play again, or Esc for the editor").setVisible(true);
+    }
+  }
+
+  /** Only reachable once `onWin` has confirmed a next level exists (see the
+   * hint text) — a stray N press elsewhere in the world flow, or outside
+   * one entirely, is a no-op via the outcome/world guards below. */
+  private async nextLevel(): Promise<void> {
+    if (this.outcome !== "won" || !this.world) return;
+    const nextIndex = this.world.index + 1;
+    if (nextIndex >= this.world.levelIds.length) return;
+
+    const nextLevel = await this.levelStorage.load(this.world.levelIds[nextIndex]);
+    if (!nextLevel) {
+      // The next level was deleted from My Levels after this world was
+      // built — end the world here rather than crashing.
+      this.banner.setText("World Complete!").setVisible(true);
+      this.hint.setText("(the next level was deleted) Press Esc for Worlds").setVisible(true);
+      this.world = undefined;
+      return;
+    }
+    this.scene.start("Play", { level: nextLevel, world: { levelIds: this.world.levelIds, index: nextIndex } });
   }
 
   private onLose(): void {
@@ -179,11 +223,12 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private restart(): void {
-    this.scene.restart({ level: this.level });
+    this.scene.restart({ level: this.level, world: this.world });
   }
 
   private backToEditor(): void {
     this.scene.stop();
-    this.scene.resume("Editor");
+    if (this.world) this.scene.start("WorldBrowser");
+    else this.scene.resume("Editor");
   }
 }

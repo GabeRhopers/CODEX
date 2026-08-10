@@ -7,21 +7,24 @@ the full architecture, data model, and milestone plan.
 ## Status
 
 **MVP + M1 (undo/redo) + first M2 content (enemy + real goal art) + M4
-(home page / level browser) + 3 themed sample levels done.** The game now
-opens on a **Menu** (home page) instead of dropping straight into the
-editor: New Level or My Levels, with a live count of saved levels. **My
-Levels** lists every saved level (not just a single most-recent slot)
-with Edit and Delete per row — and on a visitor's first-ever visit it's
-pre-seeded with 3 ready-to-play sample levels, one per visual theme (see
-"Sample levels" under Art below). Paint a level → Test Play → win/lose →
-Save → Menu → My Levels → Edit round-trips identically, every
-paint/erase/entity edit is undoable — a whole paint drag reverts as one
-step, not tile by tile — and a level can include a patrolling ghost-pillow
-enemy (stomp it from above to kill it, touch it any other way and you
-lose) plus a dream-cloud portal as the goal. See the plan doc §9.1 for the
-exact MVP scope and §9.2/§9.3 for what's still deliberately deferred (more
-tile/enemy variety, scrolling, IndexedDB, backend sharing, renaming levels
-from the browser).
+(home page / level browser) + 3 themed sample levels + M8 (World Maker
+v1) done.** The game opens on a **Menu** (home page) instead of dropping
+straight into the editor: **New Level**, **My Levels**, or **Worlds**,
+each with a live status line. **My Levels** lists every saved level (not
+just a single most-recent slot) with Edit and Delete per row — and on a
+visitor's first-ever visit it's pre-seeded with 3 ready-to-play sample
+levels, one per visual theme (see "Sample levels" under Art below).
+**Worlds** chains any of your saved levels into a played-in-order course
+— see "World Maker" under Controls, and plan doc §9.3 M8 for the v1
+scope and what's deliberately deferred from it. Paint a level → Test
+Play → win/lose → Save → Menu → My Levels → Edit round-trips identically,
+every paint/erase/entity edit is undoable — a whole paint drag reverts as
+one step, not tile by tile — and a level can include a patrolling
+ghost-pillow enemy (stomp it from above to kill it, touch it any other
+way and you lose) plus a dream-cloud portal as the goal. See the plan doc
+§9.1 for the exact MVP scope and §9.2/§9.3 for what's still deliberately
+deferred (more tile/enemy variety, scrolling, IndexedDB, backend sharing,
+renaming levels/worlds from the browser).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
 plus matching toolbar buttons.
@@ -50,11 +53,20 @@ npm run typecheck # type-check only, no build
 Open the dev server URL in a browser. Controls:
 
 - **Home page** (opens on load): **New Level** starts a fresh empty
-  editor; **My Levels** opens the level browser. A status line shows how
-  many levels you've saved.
+  editor; **My Levels** opens the level browser; **Worlds** opens the
+  world browser. Status lines show how many levels/Worlds you've saved.
 - **My Levels**: every saved level as a row (name + last-updated time)
   with **Edit** (opens it in the editor) and **Delete**. **New Level**
   and **← Back** (to the home page) are also here.
+- **Worlds** (course maker): **My Worlds** lists every saved World (name +
+  level count) with **Play**, **Edit**, and **Delete**; **New World**
+  opens **World Maker** — click a saved level on the left to append it to
+  the world's play order on the right, click an entry on the right to
+  remove it, then **Save World**. **Play** runs the first level; winning a
+  level that isn't the last one shows "Level Complete!" — press **N** to
+  advance to the next level, or **R** to replay the current one; winning
+  the last level shows "World Complete!"; **Esc** at any point returns to
+  My Worlds (not the editor, since a World isn't edited through it).
 - **Palette** (bottom-left, in the editor): click a brush — Ground,
   Erase, Spawn, Goal (dream portal), Ghost (enemy) — then click/drag on
   the grid above to paint or place.
@@ -154,10 +166,12 @@ src/
 ├── main.ts                  Phaser game config + boot
 ├── scenes/
 │   ├── BootScene.ts          loads wizard/entity art + procedural textures, starts Menu
-│   ├── MenuScene.ts          home page: New Level / My Levels
+│   ├── MenuScene.ts          home page: New Level / My Levels / Worlds
 │   ├── LevelBrowserScene.ts  lists saved levels with Edit/Delete
 │   ├── EditorScene.ts        palette + grid painting + save/test-play
-│   └── PlayScene.ts          runs a level with Arcade Physics
+│   ├── PlayScene.ts          runs a level with Arcade Physics (optionally chained via a World)
+│   ├── WorldBrowserScene.ts  lists saved Worlds with Play/Edit/Delete
+│   └── WorldMakerScene.ts    build/edit a World's level order
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
@@ -181,8 +195,12 @@ src/
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 │   └── EnemyBehaviors.ts     ghost patrol/bob + stomp-vs-hit rule (+ unit tests)
 ├── persistence/
-│   ├── StorageAdapter.ts     interface (list/save/load/remove)
-│   └── LocalStorageAdapter.ts
+│   ├── StorageAdapter.ts       interface (list/save/load/remove)
+│   ├── LocalStorageAdapter.ts
+│   ├── WorldStorageAdapter.ts  same interface, one level down, for Worlds
+│   └── LocalWorldStorageAdapter.ts
+├── world/
+│   └── WorldSchema.ts        WorldData: an ordered list of level ids + a name
 ├── config/
 │   └── gameConfig.ts         tile size, grid dimensions, physics constants
 └── assets/

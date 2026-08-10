@@ -400,6 +400,35 @@ solid, per the original research's explicit recommendation. Introduce
 `SupabaseAdapter`, auth, and a public level browse/list view. Out of
 scope for this plan; revisit with its own design pass when triggered.
 
+**M8 — World Maker (course builder), v1.** Done, deliberately cut down to
+the simplest thing that's still genuinely useful, matching this project's
+habit of shipping the smallest walking skeleton first (§9.1's guiding
+principle) rather than the full-featured version. A **World** is just an
+ordered list of already-saved level ids (`WorldData` in
+`src/world/WorldSchema.ts`) — no branching paths, no visual world map, no
+per-level unlocking/stars, no in-app renaming (same cut as levels
+already make). `WorldMakerScene` builds one by clicking saved levels
+into play order (click again on the right side to remove); `PlayScene`
+gained an optional `world` context so winning a non-final level shows
+"Level Complete!" with an N-to-advance hint instead of "You Win!", and
+winning the last one shows "World Complete!"; Esc during world play
+returns to `WorldBrowserScene` instead of resuming a (nonexistent, in
+this flow) paused Editor scene. If a level referenced by a world is later
+deleted, the world just ends early there rather than erroring — no
+integrity constraint links `WorldData.levelIds` to `LevelData.id` beyond
+that runtime check. *Acceptance:* build a 2+ level World from existing
+levels, Play it, win the first level, advance with N into the next one,
+and reach "World Complete" on the last — verified end-to-end in a
+headless browser.
+
+*Deferred from v1 (safe to add later without reopening the above):*
+drag-to-reorder (click-to-add already establishes an order; reordering
+is a `WorldMakerScene`-only UI change, `WorldData.levelIds` is already
+just an array), a persistent per-level "stars/best time" scoreboard, a
+visual world-map screen (SMB3-style node graph) in place of the plain
+list, level unlocking/gating, and in-app renaming of worlds/levels
+(would land as one shared text-input component, not two).
+
 Each milestone (MVP included) should land as its own PR/commit set so
 review stays scoped.
 
