@@ -3,20 +3,29 @@ import { TILE_SIZE } from "../config/gameConfig";
 import { groundIconKey, groundTilesetKey, ThemeColors, THEMES } from "../level/themes";
 
 /**
- * Procedurally generated placeholder pixel art for tiles/markers/UI/basic
- * enemies. The build sandbox's network proxy blocks kenney.nl / OpenGameArt
- * / unpkg / jsdelivr (only the npm registry and github.com are reachable),
- * so real Kenney CC0 assets can't be fetched from here. These textures are
- * simple, deliberately blocky shapes drawn with Phaser's Graphics API and
- * baked via generateTexture — zero licensing risk, zero network
- * dependency, and (with `pixelArt: true` in the game config) they still
- * validate that nearest-neighbor rendering is crisp. Swap these for real
- * Kenney PNGs later by changing only the `scene.load.image(...)` calls
- * that would replace this module.
+ * Procedurally generated pixel art for the pieces that still don't have a
+ * real-art equivalent, plus pure UI chrome. Most tile/enemy art used to
+ * live here as placeholders (the build sandbox's network proxy blocks
+ * kenney.nl / OpenGameArt / unpkg / jsdelivr — only the npm registry and
+ * github.com are reachable, so real Kenney assets couldn't be *fetched*
+ * from here) — that changed once the user supplied Kenney's CC0 "Pixel
+ * Platformer" pack directly as an upload. See BootScene.preload for what's
+ * now real art loaded from public/assets/: the grass/desert ground tiles,
+ * brick, bounce, the bat, and the spike crawler (all pre-composited to
+ * this project's tile/entity sizes by a one-off `PIL` prep script, since
+ * the pack's native tiles are 18px/24px, not this project's 32px/40px).
  *
- * The player, the goal, and the ghost-pillow enemy are the exceptions:
- * they're real drawn art (see public/assets/), loaded like any other
- * image asset rather than generated here.
+ * What's still generated here:
+ *   - The **castle** theme's ground tileset — the pack has grass/sand/snow
+ *     ground caps but no stone/castle one, so castle keeps its original
+ *     procedural grey look (including its own brick/bounce frames, so a
+ *     castle-themed level never mixes real art with procedural art within
+ *     itself — only *between* different levels' themes).
+ *   - Pure UI chrome with no asset-pack equivalent: the eraser icon, the
+ *     spawn marker, the hover highlight, and the palette selection outline.
+ *
+ * The player, the goal, and the ghost-pillow enemy are hand-drawn (see
+ * public/assets/) rather than from either source.
  */
 
 /** Grass-capped dirt — used where a ground cell has open air above it. No
@@ -50,9 +59,6 @@ const BRICK_COLOR = 0x8a8a94;
 const BRICK_MORTAR = 0x53535c;
 const BRICK_OUTLINE = 0x2c2c33;
 
-/** A standalone solid block — unlike ground, its look never depends on
- * neighbors (see groundFrameAt), and it's the same across every theme
- * (masonry reads fine on grass, sand, or stone alike). */
 function drawBrick(g: Phaser.GameObjects.Graphics, offsetX: number): void {
   g.fillStyle(BRICK_COLOR, 1);
   g.fillRect(offsetX, 0, TILE_SIZE, TILE_SIZE);
@@ -71,9 +77,6 @@ const BOUNCE_BASE = 0xd98e2b;
 const BOUNCE_PAD = 0xffd166;
 const BOUNCE_OUTLINE = 0x5c3a12;
 
-/** Spring pad — also theme-independent, and its "pad" band always sits at
- * the same offset from the tile top regardless of theme so the launch
- * point reads consistently. */
 function drawBounce(g: Phaser.GameObjects.Graphics, offsetX: number): void {
   g.fillStyle(BOUNCE_BASE, 1);
   g.fillRect(offsetX, 10, TILE_SIZE, TILE_SIZE - 10);
@@ -88,87 +91,22 @@ function drawBounce(g: Phaser.GameObjects.Graphics, offsetX: number): void {
   g.lineBetween(offsetX + 16, 27, offsetX + 22, 34);
 }
 
-const SPIKE_BODY = 0x8d5b6b;
-const SPIKE_BODY_DARK = 0x5c3a44;
-const SPIKE_EYE = 0x1a1a2e;
-
-/** Non-stompable ground enemy — a low, spiky silhouette (vs. the ghost's
- * round pillow shape) so its "don't jump on this one" rule reads visually
- * even before a player learns it the hard way. */
-function drawSpikeCrawler(g: Phaser.GameObjects.Graphics): void {
-  const cx = 20;
-  const cy = 24;
-  g.fillStyle(SPIKE_BODY_DARK, 1);
-  for (const dx of [-10, -3, 4, 11]) {
-    g.fillTriangle(cx + dx - 4, cy - 8, cx + dx + 4, cy - 8, cx + dx, cy - 18);
-  }
-  g.fillStyle(SPIKE_BODY, 1);
-  g.fillEllipse(cx, cy, 34, 26);
-  g.lineStyle(2, SPIKE_BODY_DARK, 1);
-  g.strokeEllipse(cx, cy, 34, 26);
-  g.fillStyle(SPIKE_EYE, 1);
-  g.fillCircle(cx - 6, cy, 3);
-  g.fillCircle(cx + 6, cy, 3);
-}
-
-const BAT_BODY = 0x3b3854;
-const BAT_BODY_DARK = 0x1f1d33;
-const BAT_EYE = 0xffe082;
-
-/** Flies the same patrol+bob path as the ghost (see EnemyBehaviors.ts) —
- * winged silhouette reads as "airborne" at a glance, distinct from the
- * ghost's floating-pillow look even though the movement code is shared. */
-function drawBat(g: Phaser.GameObjects.Graphics): void {
-  const cx = 20;
-  const cy = 20;
-  g.fillStyle(BAT_BODY, 1);
-  g.fillTriangle(cx - 4, cy - 2, cx - 20, cy - 10, cx - 6, cy + 10);
-  g.fillTriangle(cx + 4, cy - 2, cx + 20, cy - 10, cx + 6, cy + 10);
-  g.fillTriangle(cx - 6, cy - 8, cx - 2, cy - 8, cx - 4, cy - 15);
-  g.fillTriangle(cx + 2, cy - 8, cx + 6, cy - 8, cx + 4, cy - 15);
-  g.fillCircle(cx, cy, 9);
-  g.lineStyle(2, BAT_BODY_DARK, 1);
-  g.strokeCircle(cx, cy, 9);
-  g.fillStyle(BAT_EYE, 1);
-  g.fillCircle(cx - 3, cy, 2);
-  g.fillCircle(cx + 3, cy, 2);
-}
-
 export function generateTextures(scene: Phaser.Scene): void {
   const g = scene.add.graphics();
 
-  // One ground tileset + palette icon per theme, all sharing the same four
-  // frames (0 = grass-top, 1 = buried fill, 2 = brick, 3 = bounce pad) —
-  // see groundAutotile.ts. Brick/bounce look identical across themes
-  // (masonry/spring hardware, not terrain), so they're drawn once per
-  // theme loop iteration but with theme-independent colors. Which texture
-  // key a level actually uses is picked at scene-creation time from
-  // LevelData.theme (see EditorScene/PlayScene), so this loop is the only
-  // place that needs to know the full theme list.
-  for (const themeId of Object.keys(THEMES) as (keyof typeof THEMES)[]) {
-    const colors = THEMES[themeId];
-
-    g.clear();
-    drawGroundTop(g, 0, colors);
-    g.generateTexture(groundIconKey(themeId), TILE_SIZE, TILE_SIZE);
-
-    g.clear();
-    drawGroundTop(g, 0, colors);
-    drawGroundFill(g, TILE_SIZE, colors);
-    drawBrick(g, TILE_SIZE * 2);
-    drawBounce(g, TILE_SIZE * 3);
-    g.generateTexture(groundTilesetKey(themeId), TILE_SIZE * 4, TILE_SIZE);
-  }
-
-  // Standalone palette icons for the two new blocks (theme-independent, so
-  // one texture each rather than one per theme like the ground icon).
+  // Castle only — grass/desert ground tilesets are real art, loaded in
+  // BootScene.preload (see groundTilesetKey/groundIconKey there).
+  const castleColors = THEMES.castle;
   g.clear();
-  drawBrick(g, 0);
-  g.generateTexture("tile-brick-icon", TILE_SIZE, TILE_SIZE);
+  drawGroundTop(g, 0, castleColors);
+  g.generateTexture(groundIconKey("castle"), TILE_SIZE, TILE_SIZE);
 
   g.clear();
-  drawBounce(g, 0);
-  g.generateTexture("tile-bounce-icon", TILE_SIZE, TILE_SIZE);
+  drawGroundTop(g, 0, castleColors);
+  drawGroundFill(g, TILE_SIZE, castleColors);
+  drawBrick(g, TILE_SIZE * 2);
+  drawBounce(g, TILE_SIZE * 3);
+  g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 4, TILE_SIZE);
 
   // Eraser palette icon: red X on light gray.
   g.clear();
@@ -188,21 +126,11 @@ export function generateTextures(scene: Phaser.Scene): void {
   g.fillTriangle(TILE_SIZE / 2 - 9, 16, TILE_SIZE / 2 + 9, 16, TILE_SIZE / 2, 28);
   g.generateTexture("marker-spawn", TILE_SIZE, TILE_SIZE);
 
-  // Two new enemies, drawn at 40x40 to match the hand-drawn ghost-pillow's
-  // native size (see public/assets/entities/) so they read at a
-  // consistent scale next to it.
-  g.clear();
-  drawSpikeCrawler(g);
-  g.generateTexture("enemy-spike-crawler", 40, 40);
-
-  g.clear();
-  drawBat(g);
-  g.generateTexture("enemy-bat", 40, 40);
-
   // Player character, the goal (dream cloud portal), and the ghost-pillow
   // enemy are all loaded from public/assets/ rather than generated here —
   // see BootScene.preload, gameplay/wizardAnimation.ts, and
-  // gameplay/EnemyBehaviors.ts.
+  // gameplay/EnemyBehaviors.ts. The bat and spike crawler are now real
+  // Kenney art too (also loaded in BootScene.preload).
 
   // Hover highlight overlay for the editor grid.
   g.clear();

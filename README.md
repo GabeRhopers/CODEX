@@ -203,19 +203,45 @@ hit-points concept the game doesn't have yet):
   any contact costs the player regardless of direction — same
   `isStompFromAbove` check, just gated per enemy type.
 
-All four are procedurally generated in `generateTextures.ts` (Graphics
-primitives, same technique as the tiles) rather than hand-drawn like the
-wizard/ghost/portal, to stay within this session's reach — see "Tiles/
-markers/UI" below for why real art isn't fetchable here.
+**Real art: Kenney's "Pixel Platformer" (CC0).** The plan doc always
+recommended Kenney's CC0 packs for this, but the build sandbox's network
+proxy can't *fetch* them (only npm/github.com are reachable) — so
+everything above shipped as procedural placeholder art instead, generated
+at runtime with Phaser's Graphics API. That changed once the user
+supplied the actual pack as a direct upload, sidestepping the network
+restriction entirely. It now provides:
+- **Grass and desert ground tiles** — real grass-cap and sand-cap dirt,
+  replacing their procedural equivalents. **Castle keeps its original
+  procedural grey stone** — the pack is a nature/outdoor set with no
+  stone/castle-style tile, so there's nothing to swap it for; this is a
+  deliberate, permanent split, not a TODO.
+- **Brick and Bounce** — a real wooden crate and a real compressed spring
+  pad, used in every theme *except* castle (which keeps procedural
+  versions of these too, so a castle-themed level never mixes real and
+  procedural art within itself — only *between* different levels' themes).
+- **Bat and Spike Crawler** — real character art from the pack (a winged
+  creature and a red pointy-topped ground crawler) in place of the
+  Graphics-drawn placeholders from the previous pass.
+- The **wizard, ghost-pillow, and dream-cloud portal stay hand-drawn** —
+  they're deliberate, already-validated custom art in a specific shared
+  style (see below), not placeholders, so swapping the asset pack doesn't
+  touch them.
 
-**Tiles/markers/UI:** generated procedurally in
-`src/assets/generateTextures.ts` rather than loaded from Kenney's CC0
-packs, because this project's build sandbox only allows outbound network
-access to the npm registry and github.com — `kenney.nl`, OpenGameArt,
-unpkg, and jsdelivr are all blocked here. The plan doc's asset-sourcing
-recommendation (Kenney CC0 pixel-platformer packs) still stands for these;
-swapping real Kenney PNGs in is a change to that one file's
-texture-loading calls, not an architecture change.
+The pack's tiles are natively 18px (24px for characters), not this
+project's 32px (40px for entities), so `scripts/prepare-kenney-assets.py`
+(run once, offline — not part of the build) nearest-neighbor-upscales and
+composites exactly the pieces used above into the small PNGs actually
+committed under `public/assets/tiles/` and `public/assets/entities/`
+(loaded in `BootScene.preload`) — the full third-party pack itself isn't
+committed to the repo, only these derived outputs. See that script's
+docstring for the exact source tile indices and how to regenerate with
+different ones.
+
+**Tiles/markers/UI still procedural:** the castle theme (see above) and
+pure UI chrome with no asset-pack equivalent — the eraser icon, the spawn
+marker, the hover highlight, and the palette selection outline — are
+still generated at runtime in `src/assets/generateTextures.ts`, same
+technique as before.
 
 *Palette/marker scaling:* entity art varies in native resolution (32px
 icons vs. the larger ghost/portal illustrations), so both the editor
@@ -232,7 +258,7 @@ full layout. Implemented so far:
 src/
 ├── main.ts                  Phaser game config + boot
 ├── scenes/
-│   ├── BootScene.ts          loads wizard/entity art + procedural textures, starts Menu
+│   ├── BootScene.ts          loads wizard/Kenney/entity art + procedural textures, starts Menu
 │   ├── MenuScene.ts          home page: New Level / My Levels / Worlds
 │   ├── LevelBrowserScene.ts  lists saved levels with Edit/Delete
 │   ├── EditorScene.ts        palette + grid painting + save/test-play
@@ -271,9 +297,13 @@ src/
 ├── config/
 │   └── gameConfig.ts         tile size, grid dimensions, physics constants
 └── assets/
-    └── generateTextures.ts   procedural placeholder pixel art (tiles/markers/UI)
+    └── generateTextures.ts   procedural art still in use: castle theme + UI chrome
 
 public/assets/
-├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png
-└── entities/                 ghost-pillow.png, dream-portal.png
+├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png (hand-drawn)
+├── entities/                 ghost-pillow.png, dream-portal.png (hand-drawn); bat.png, spike-crawler.png (Kenney)
+└── tiles/                    tileset-grass.png, tileset-desert.png, icon-*.png (Kenney, derived — see scripts/)
+
+scripts/
+└── prepare-kenney-assets.py  derives public/assets/{tiles,entities}' Kenney-sourced PNGs (one-off, not part of the build)
 ```

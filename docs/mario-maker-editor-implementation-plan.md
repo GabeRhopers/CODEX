@@ -74,13 +74,24 @@ added later at zero cost whenever playtesting-by-URL is needed).
 **Asset-sourcing deviation:** the build sandbox's network proxy only
 allows the npm registry and `github.com`/`raw.githubusercontent.com` —
 `kenney.nl`, OpenGameArt, unpkg, and jsdelivr all return 403. Since Kenney
-assets can't be fetched from here, the MVP uses **simple placeholder
+assets can't be *fetched* from here, the MVP used **simple placeholder
 pixel art generated procedurally in code** (solid-color tiles/sprites
 drawn via Phaser `Graphics.generateTexture`, rendered with `pixelArt:
-true` so the crisp-rendering risk is still validated). This is a
-zero-licensing-risk, zero-network-dependency substitute for Stage 1 only;
-swapping in real Kenney CC0 pixel-platformer PNGs later is a drop-in
-change to `PreloadScene`'s asset keys, not an architecture change.
+true` so the crisp-rendering risk is still validated) for everything
+that wasn't hand-drawn custom art.
+
+**Resolved (2026-08-10):** the user worked around the fetch restriction
+by uploading Kenney's "Pixel Platformer" pack directly. `scripts/
+prepare-kenney-assets.py` derives this project's actual tile/entity PNGs
+from it (nearest-neighbor upscaled from the pack's native 18px/24px to
+this project's 32px/40px, composited into the small per-theme strips
+`generateTextures.ts`/`BootScene.preload` already expected) — see the
+README's "Real art: Kenney's Pixel Platformer (CC0)" section for exactly
+what did and didn't get swapped, and why castle keeps its procedural
+look permanently (the pack has no stone/castle-style tile). Procedural
+generation remains in place for the castle theme and pure UI chrome
+(eraser icon, spawn marker, highlight, selection outline) — there was
+never a plan to source those from an asset pack.
 
 ## 4. Proposed repository layout
 
@@ -385,11 +396,11 @@ entry + new switch case," since a few require genuinely new engine
 concepts, not just content:
 
 *Blocks* (new ground-tile variants; today there's `GROUND_TILE`, `BRICK_TILE`, `BOUNCE_TILE`):
-1. **Brick** ✅ built — a second solid tile, visually distinct from dirt/grass. `BRICK_TILE`/`GROUND_FRAME_BRICK`; renders as a fixed frame regardless of neighbors, unlike ground's autotiling.
+1. **Brick** ✅ built — a second solid tile, visually distinct from dirt/grass. `BRICK_TILE`/`GROUND_FRAME_BRICK`; renders as a fixed frame regardless of neighbors, unlike ground's autotiling. Now real Kenney art (see the "Asset-sourcing deviation" resolution above), except in the castle theme, which still draws it procedurally.
 2. **Cloud Platform** — stand on top, jump up through from below, walk off the sides. Needs one-way collision (Arcade Physics `checkCollision.up`-only, or a `collider` `process` callback keyed off the player's velocity/position), not just a new texture.
 3. **Ice** — low-friction surface; player keeps sliding after releasing left/right. Needs a per-tile friction/drag value threaded into `PlayerController`, which currently has none.
 4. **Crumbling Block** — solid until stood on, then shakes and disappears ~1s later. Needs per-instance timer state, so it can't be pure tile-grid data the way ground is — closer to a lightweight entity that happens to render/collide like a tile.
-5. **Bounce Block** ✅ built — spring pad; contact overrides the player's Y velocity upward, higher than a normal jump. `BOUNCE_TILE`/`GROUND_FRAME_BOUNCE`; `PlayScene.onGroundCollide` checks the collided tile's index and `body.blocked.down` (so it only fires landing on the top face, not a side bump).
+5. **Bounce Block** ✅ built — spring pad; contact overrides the player's Y velocity upward, higher than a normal jump. `BOUNCE_TILE`/`GROUND_FRAME_BOUNCE`; `PlayScene.onGroundCollide` checks the collided tile's index and `body.blocked.down` (so it only fires landing on the top face, not a side bump). Now real Kenney art, same castle exception as Brick.
 
 *Items* (collectibles; there are none today — this category needs a scoring/inventory concept the game currently has zero of):
 1. **Coin** — the baseline collectible; needs a running score display and a "collected" flag per placed instance so it doesn't respawn on revisit within a play session.
@@ -399,8 +410,8 @@ concepts, not just content:
 5. **Shield Bubble** — temporary invincibility (absorbs one hit or lasts N seconds); same hit-points prerequisite as Extra Heart.
 
 *Enemies* (new `EntityType`s alongside `enemy-ghost`; this category is the cheapest to add — the pattern already exists end to end):
-1. **Spike Crawler** ✅ built — patrols like the ghost, but never stompable (`stompable: false` in `PlayScene`'s `ENEMY_DEFS`) — any contact costs the player regardless of direction.
-2. **Bat** ✅ built — flies the exact same patrol+bob path as the ghost (100% shared code — `EnemyBehaviors.createPatrolEnemy` was generalized to take a texture key); same stomp-from-above rule as the ghost.
+1. **Spike Crawler** ✅ built — patrols like the ghost, but never stompable (`stompable: false` in `PlayScene`'s `ENEMY_DEFS`) — any contact costs the player regardless of direction. Now real Kenney character art in place of the original Graphics-drawn placeholder.
+2. **Bat** ✅ built — flies the exact same patrol+bob path as the ghost (100% shared code — `EnemyBehaviors.createPatrolEnemy` was generalized to take a texture key); same stomp-from-above rule as the ghost. Now real Kenney character art too.
 3. **Totem Shooter** — stationary, periodically fires a slow projectile; first enemy needing its own projectile entity and a lifetime/cleanup.
 4. **Hopper** — bounces in place or toward the player on a timer; stomp only counts while it's on the ground (mid-air stomp shouldn't count), a variant of the existing `isStompFromAbove` check.
 5. **Big Ghost (mini-boss)** — larger sprite, takes 3 stomps instead of 1; needs a hit-counter on the enemy itself (currently enemies are one-hit-and-`destroy()`).
