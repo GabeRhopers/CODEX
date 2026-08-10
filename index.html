@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Mario Maker–Style Level Editor</title>
     <style>
       html, body {
@@ -10,6 +13,10 @@
         padding: 0;
         background: #1a1a2e;
         overflow: hidden;
+        /* Stop the browser from turning taps on the on-screen game
+           controls into scroll/pinch/double-tap-zoom gestures. */
+        touch-action: none;
+        overscroll-behavior: none;
       }
       #app {
         display: flex;
@@ -17,10 +24,12 @@
         align-items: center;
         width: 100vw;
         height: 100vh;
+        touch-action: none;
       }
       canvas {
         image-rendering: pixelated;
         image-rendering: crisp-edges;
+        touch-action: none;
       }
     </style>
   </head>

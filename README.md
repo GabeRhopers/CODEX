@@ -75,7 +75,10 @@ Open the dev server URL in a browser. Controls:
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump,
   **Esc** back to the editor, **R** to restart after winning/losing. Jump
   on top of the ghost to squish it; touching it any other way costs you
-  the level.
+  the level. On a touchscreen, semi-transparent **◀ ▶ ▲** buttons in the
+  corners (see "Mobile/touch" below) do the same three things and the
+  win/lose screen grows tappable **Restart**/**Next Level** buttons next
+  to its keyboard-only hint text, since there's no R/N/Esc key to press.
 - **Save**: persists the current level to `localStorage` under its own
   id — every level you save is kept (see My Levels), not just the most
   recent one.
@@ -85,6 +88,38 @@ Open the dev server URL in a browser. Controls:
   paint drag or single entity placement/move undoes as one step. Clear
   resets the undo history (undoing past a full level swap doesn't make
   sense); so does loading a different level via My Levels → Edit.
+
+## Mobile / touch
+
+Fully playable on a phone, no separate build or mode — the same page
+adapts. Three things make that true, all in `main.ts`/`index.html` unless
+noted:
+
+- **Scaling**: the game's internal resolution stays a fixed 920×448 (every
+  scene's layout math is untouched), but Phaser's Scale Manager runs in
+  `FIT` + `CENTER_BOTH` mode, so it's letterboxed down (or up) to whatever
+  viewport it's opened in, phone included, instead of getting clipped or
+  forcing page scroll. `index.html`'s viewport meta tag disables pinch/
+  double-tap zoom and `touch-action: none` stops taps on the on-screen
+  buttons from also scrolling the page.
+- **Editor & menus**: every button/palette icon/list row is already a
+  Phaser interactive object driven by pointer events, which Phaser treats
+  identically whether the pointer is a mouse or a finger — no separate
+  touch-specific UI code was needed there. `input.activePointers: 3` in
+  the game config raises the simultaneous-touch budget above the default
+  of 1, for Play mode's move+jump-at-once case below.
+- **Play mode**: `src/gameplay/TouchControls.ts` draws three
+  semi-transparent ◀ ▶ ▲ buttons pinned to the corners; their pressed
+  state is OR'd into keyboard input in `PlayerController.updatePlayerMovement`
+  rather than replacing it, so the same function drives movement
+  regardless of input source and the buttons are just as clickable (if
+  redundant) with a mouse. `PlayScene`'s win/lose screen also grows real
+  **Restart**/**Next Level** buttons (`makeOverlayButton`) alongside the
+  existing R/N/Esc hint text, which is keyboard-only wording that's
+  useless without a keyboard. `MenuScene` adds a one-time "rotate your
+  phone sideways" hint when `window.innerWidth < window.innerHeight`,
+  since this landscape-shaped game gets letterboxed quite small in
+  portrait — advisory only, everything still works either way.
 
 ## Art
 

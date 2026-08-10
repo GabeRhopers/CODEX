@@ -76,11 +76,28 @@ export class MenuScene extends Phaser.Scene {
     });
 
     this.add
-      .text(cx, GAME_HEIGHT - 20, "Arrow keys / WASD to move, Space to jump, once you're playing", {
+      .text(cx, GAME_HEIGHT - 20, "Arrow keys/WASD/on-screen buttons to move, Space/▲ to jump, once you're playing", {
         fontSize: "11px",
         color: "#666688",
       })
       .setOrigin(0.5);
+
+    // The game's internal resolution is landscape (920x448); on a phone
+    // held in portrait that gets letterboxed quite small by Scale.FIT (see
+    // main.ts). Playable either way — touch buttons still work — but a
+    // one-time nudge toward landscape is worth it for how much bigger
+    // everything gets. window.innerWidth/innerHeight reflect the actual
+    // device viewport, unlike this.scale's always-landscape internal size.
+    if (window.innerWidth < window.innerHeight) {
+      this.add
+        .text(cx, 130, "Tip: rotate your phone sideways for a bigger view", {
+          fontSize: "12px",
+          color: "#ffd166",
+          backgroundColor: "#000000aa",
+          padding: { x: 8, y: 4 },
+        })
+        .setOrigin(0.5);
+    }
   }
 
   private makeMenuButton(cx: number, y: number, label: string, onClick: () => void): void {

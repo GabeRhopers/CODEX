@@ -9,6 +9,7 @@ import {
   updateGhostPatrol,
 } from "../gameplay/EnemyBehaviors";
 import { createPlayerInput, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
+import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { buildRenderGrid } from "../level/groundAutotile";
 import { LevelData } from "../level/LevelSchema";
@@ -35,12 +36,15 @@ export class PlayScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private input$!: PlayerInputKeys;
+  private touch!: TouchControls;
   private wizardAnim: WizardAnimState = createWizardAnimState();
   private ghost?: Phaser.Physics.Arcade.Sprite;
   private ghostState?: GhostState;
   private outcome: "playing" | "won" | "lost" = "playing";
   private banner!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
+  private restartButton!: Phaser.GameObjects.Text;
+  private nextButton!: Phaser.GameObjects.Text;
 
   constructor() {
     super("Play");
@@ -106,6 +110,7 @@ export class PlayScene extends Phaser.Scene {
     }
 
     this.input$ = createPlayerInput(this);
+    this.touch = new TouchControls(this);
 
     this.banner = this.add
       .text(this.scale.width / 2, this.scale.height / 2 - 20, "", {
@@ -129,6 +134,16 @@ export class PlayScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setVisible(false);
 
+    // Tappable equivalents of the R/N/Esc hints above — the hint text is
+    // keyboard-only wording, but there's no keyboard on a phone, so the win
+    // and lose screens need real buttons too, not just a label.
+    this.restartButton = this.makeOverlayButton(this.scale.width / 2 - 74, this.scale.height / 2 + 66, "Restart", () =>
+      this.restart(),
+    );
+    this.nextButton = this.makeOverlayButton(this.scale.width / 2 + 74, this.scale.height / 2 + 66, "Next Level", () =>
+      void this.nextLevel(),
+    );
+
     const backLabel = this.add
       .text(8, 8, this.world ? "← Back to Worlds (Esc)" : "← Back to Editor (Esc)", {
         fontSize: "13px",
@@ -146,10 +161,27 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
   }
 
+  private makeOverlayButton(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
+    const text = this.add
+      .text(x, y, label, {
+        fontSize: "13px",
+        color: "#ffffff",
+        backgroundColor: "#0f3460",
+        padding: { x: 10, y: 6 },
+      })
+      .setOrigin(0.5)
+      .setDepth(30)
+      .setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .setVisible(false);
+    text.on("pointerdown", onClick);
+    return text;
+  }
+
   update(time: number, delta: number): void {
     if (this.outcome !== "playing") return;
 
-    updatePlayerMovement(this.player, this.input$);
+    updatePlayerMovement(this.player, this.input$, this.touch.get());
     updateWizardAnimation(this.player, this.wizardAnim, delta);
 
     if (this.ghost && this.ghostState) {
@@ -184,6 +216,7 @@ export class PlayScene extends Phaser.Scene {
     if (hasNextLevel) {
       this.banner.setText("Level Complete!").setVisible(true);
       this.hint.setText("Press N for the next level, R to replay, or Esc for Worlds").setVisible(true);
+      this.nextButton.setVisible(true);
     } else if (this.world) {
       this.banner.setText("World Complete!").setVisible(true);
       this.hint.setText("Press R to replay this level, or Esc for Worlds").setVisible(true);
@@ -191,6 +224,7 @@ export class PlayScene extends Phaser.Scene {
       this.banner.setText("You Win!").setVisible(true);
       this.hint.setText("Press R to play again, or Esc for the editor").setVisible(true);
     }
+    this.restartButton.setVisible(true);
   }
 
   /** Only reachable once `onWin` has confirmed a next level exists (see the
@@ -207,6 +241,7 @@ export class PlayScene extends Phaser.Scene {
       // built — end the world here rather than crashing.
       this.banner.setText("World Complete!").setVisible(true);
       this.hint.setText("(the next level was deleted) Press Esc for Worlds").setVisible(true);
+      this.nextButton.setVisible(false);
       this.world = undefined;
       return;
     }
@@ -220,6 +255,7 @@ export class PlayScene extends Phaser.Scene {
     this.physics.pause();
     this.banner.setText("You Lose").setVisible(true);
     this.hint.setText("Press R to try again, or Esc for the editor").setVisible(true);
+    this.restartButton.setVisible(true);
   }
 
   private restart(): void {
