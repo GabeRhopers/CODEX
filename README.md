@@ -6,15 +6,19 @@ the full architecture, data model, and milestone plan.
 
 ## Status
 
-**MVP + M1 (undo/redo) + first M2 content (enemy + real goal art) done.**
-Paint a level → Test Play → win/lose → Save → reload → Load round-trips
-identically, every paint/erase/entity edit is undoable — a whole paint
-drag reverts as one step, not tile by tile — and a level can now include
-a patrolling ghost-pillow enemy (stomp it from above to kill it, touch it
-any other way and you lose) plus a dream-cloud portal as the goal. See
-the plan doc §9.1 for the exact MVP scope and §9.2/§9.3 for what's still
-deliberately deferred (more tile/enemy variety, level browser, scrolling,
-IndexedDB, backend sharing).
+**MVP + M1 (undo/redo) + first M2 content (enemy + real goal art) + M4
+(home page / level browser) done.** The game now opens on a **Menu**
+(home page) instead of dropping straight into the editor: New Level or
+My Levels, with a live count of saved levels. **My Levels** lists every
+saved level (not just a single most-recent slot) with Edit and Delete per
+row. Paint a level → Test Play → win/lose → Save → Menu → My Levels →
+Edit round-trips identically, every paint/erase/entity edit is undoable —
+a whole paint drag reverts as one step, not tile by tile — and a level
+can include a patrolling ghost-pillow enemy (stomp it from above to kill
+it, touch it any other way and you lose) plus a dream-cloud portal as the
+goal. See the plan doc §9.1 for the exact MVP scope and §9.2/§9.3 for
+what's still deliberately deferred (more tile/enemy variety, scrolling,
+IndexedDB, backend sharing, renaming levels from the browser).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
 plus matching toolbar buttons.
@@ -42,22 +46,30 @@ npm run typecheck # type-check only, no build
 
 Open the dev server URL in a browser. Controls:
 
-- **Palette** (bottom-left): click a brush — Ground, Erase, Spawn, Goal
-  (dream portal), Ghost (enemy) — then click/drag on the grid above to
-  paint or place.
+- **Home page** (opens on load): **New Level** starts a fresh empty
+  editor; **My Levels** opens the level browser. A status line shows how
+  many levels you've saved.
+- **My Levels**: every saved level as a row (name + last-updated time)
+  with **Edit** (opens it in the editor) and **Delete**. **New Level**
+  and **← Back** (to the home page) are also here.
+- **Palette** (bottom-left, in the editor): click a brush — Ground,
+  Erase, Spawn, Goal (dream portal), Ghost (enemy) — then click/drag on
+  the grid above to paint or place.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; the Ghost is optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump,
   **Esc** back to the editor, **R** to restart after winning/losing. Jump
   on top of the ghost to squish it; touching it any other way costs you
   the level.
-- **Save** / **Load**: persists to `localStorage` (single most-recent
-  slot for now — a multi-level browser is a planned post-MVP milestone).
+- **Save**: persists the current level to `localStorage` under its own
+  id — every level you save is kept (see My Levels), not just the most
+  recent one.
+- **Menu**: back to the home page.
 - **Clear**: wipes the current grid and entities.
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
-  paint drag or single entity placement/move undoes as one step. Load and
-  Clear reset the undo history (undoing past a full level swap doesn't
-  make sense).
+  paint drag or single entity placement/move undoes as one step. Clear
+  resets the undo history (undoing past a full level swap doesn't make
+  sense); so does loading a different level via My Levels → Edit.
 
 ## Art
 
@@ -108,8 +120,10 @@ full layout. Implemented so far:
 src/
 ├── main.ts                  Phaser game config + boot
 ├── scenes/
-│   ├── BootScene.ts          loads wizard art + procedural textures, starts Editor
-│   ├── EditorScene.ts        palette + grid painting + save/load/test-play
+│   ├── BootScene.ts          loads wizard/entity art + procedural textures, starts Menu
+│   ├── MenuScene.ts          home page: New Level / My Levels
+│   ├── LevelBrowserScene.ts  lists saved levels with Edit/Delete
+│   ├── EditorScene.ts        palette + grid painting + save/test-play
 │   └── PlayScene.ts          runs a level with Arcade Physics
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions

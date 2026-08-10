@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH, GRAVITY_Y } from "./config/gameConfig";
 import { BootScene } from "./scenes/BootScene";
 import { EditorScene } from "./scenes/EditorScene";
+import { LevelBrowserScene } from "./scenes/LevelBrowserScene";
+import { MenuScene } from "./scenes/MenuScene";
 import { PlayScene } from "./scenes/PlayScene";
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -18,7 +20,7 @@ const config: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [BootScene, EditorScene, PlayScene],
+  scene: [BootScene, MenuScene, LevelBrowserScene, EditorScene, PlayScene],
 };
 
 new Phaser.Game(config);

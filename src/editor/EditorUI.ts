@@ -7,7 +7,7 @@ export interface EditorUICallbacks {
   onSelectBrush: (brush: Brush) => void;
   onTestPlay: () => void;
   onSave: () => void;
-  onLoad: () => void;
+  onMenu: () => void;
   onClear: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -53,7 +53,7 @@ export class EditorUI {
     };
     addButton("Test Play (Space)", () => this.callbacks.onTestPlay());
     addButton("Save", () => this.callbacks.onSave());
-    addButton("Load", () => this.callbacks.onLoad());
+    addButton("Menu", () => this.callbacks.onMenu());
     addButton("Clear", () => this.callbacks.onClear());
     addButton("Undo (Ctrl+Z)", () => this.callbacks.onUndo());
     addButton("Redo (Ctrl+Y)", () => this.callbacks.onRedo());

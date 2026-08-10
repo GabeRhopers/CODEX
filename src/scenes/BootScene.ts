@@ -20,6 +20,6 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     generateTextures(this);
-    this.scene.start("Editor");
+    this.scene.start("Menu");
   }
 }

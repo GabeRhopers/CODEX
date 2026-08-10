@@ -14,7 +14,12 @@ import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
+interface EditorSceneData {
+  level?: LevelData;
+}
+
 export class EditorScene extends Phaser.Scene {
+  private initialLevel?: LevelData;
   private level!: LevelData;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private painter!: TilePainter;
@@ -35,8 +40,12 @@ export class EditorScene extends Phaser.Scene {
     super("Editor");
   }
 
+  init(data: EditorSceneData): void {
+    this.initialLevel = data?.level;
+  }
+
   create(): void {
-    this.level = createEmptyLevel();
+    this.level = this.initialLevel ?? createEmptyLevel();
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }
@@ -59,11 +68,13 @@ export class EditorScene extends Phaser.Scene {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),
-      onLoad: () => void this.loadLevel(),
+      onMenu: () => this.scene.start("Menu"),
       onClear: () => this.clearLevel(),
       onUndo: () => this.undo(),
       onRedo: () => this.redo(),
     });
+
+    if (this.initialLevel) this.rebuildVisualsFromLevel();
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (pointer.y >= GRID_ROWS * TILE_SIZE) return; // toolbar area, not the grid
@@ -194,23 +205,6 @@ export class EditorScene extends Phaser.Scene {
     this.level.updatedAt = new Date().toISOString();
     await this.storage.save(this.level);
     this.ui.setStatus("Saved");
-  }
-
-  private async loadLevel(): Promise<void> {
-    const levels = await this.storage.list();
-    if (levels.length === 0) {
-      this.ui.setStatus("No saved levels yet");
-      return;
-    }
-    const loaded = await this.storage.load(levels[0].id);
-    if (!loaded) {
-      this.ui.setStatus("Load failed");
-      return;
-    }
-    this.level = loaded;
-    this.rebuildVisualsFromLevel();
-    this.history.clear(); // undoing past a level swap makes no sense
-    this.ui.setStatus(`Loaded "${loaded.name}"`);
   }
 
   private clearLevel(): void {
