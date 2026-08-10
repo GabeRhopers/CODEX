@@ -13,13 +13,22 @@ export interface GhostState {
   direction: 1 | -1;
 }
 
-export function createGhostEnemy(scene: Phaser.Scene, tileX: number, tileY: number): Phaser.Physics.Arcade.Sprite {
+/** Shared constructor for every floating-patrol enemy (ghost, bat, spike
+ * crawler) — same movement, same bob, same stomp geometry; only the
+ * texture (and, at the call site, whether it's stompable) differs. See
+ * PlayScene's enemyDefs for the per-type wiring. */
+export function createPatrolEnemy(
+  scene: Phaser.Scene,
+  tileX: number,
+  tileY: number,
+  textureKey: string,
+): Phaser.Physics.Arcade.Sprite {
   const worldX = tileX * TILE_SIZE + TILE_SIZE / 2;
   const worldY = tileY * TILE_SIZE + TILE_SIZE / 2;
-  const ghost = scene.physics.add.sprite(worldX, worldY, "enemy-ghost-pillow");
-  const body = ghost.body as Phaser.Physics.Arcade.Body;
+  const enemy = scene.physics.add.sprite(worldX, worldY, textureKey);
+  const body = enemy.body as Phaser.Physics.Arcade.Body;
   body.setAllowGravity(false);
-  return ghost;
+  return enemy;
 }
 
 export function createGhostState(ghost: Phaser.Physics.Arcade.Sprite): GhostState {

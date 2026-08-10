@@ -375,20 +375,21 @@ one enemy (patrol + stomp-kill) and coins, all as new palette/entity
 entries. *Acceptance:* a level using every brush type is playable and
 scores/behaves correctly.
 
-**M2 candidate content list (2026-08-10, not yet built).** Five each
-across four categories, picked to fit the existing dream/wizard aesthetic
-and stay buildable on top of the current architecture — the ground grid,
-the open-string `EntityType`, and `PlayScene`'s entity-spawn switch (see
-the M2 cut note in §9.2). Each entry notes what it needs beyond "new
-palette entry + new switch case," since a few require genuinely new
-engine concepts, not just content:
+**M2 candidate content list (2026-08-10; Brick/Bounce/Spike Crawler/Bat
+built the same day, the rest not yet).** Five each across four
+categories, picked to fit the existing dream/wizard aesthetic and stay
+buildable on top of the current architecture — the ground grid, the
+open-string `EntityType`, and `PlayScene`'s entity-spawn switch (see the
+M2 cut note in §9.2). Each entry notes what it needs beyond "new palette
+entry + new switch case," since a few require genuinely new engine
+concepts, not just content:
 
-*Blocks* (new ground-tile variants; today there's exactly one, `GROUND_TILE`):
-1. **Brick** — a second solid tile, visually distinct from dirt/grass (stone), no new behavior.
+*Blocks* (new ground-tile variants; today there's `GROUND_TILE`, `BRICK_TILE`, `BOUNCE_TILE`):
+1. **Brick** ✅ built — a second solid tile, visually distinct from dirt/grass. `BRICK_TILE`/`GROUND_FRAME_BRICK`; renders as a fixed frame regardless of neighbors, unlike ground's autotiling.
 2. **Cloud Platform** — stand on top, jump up through from below, walk off the sides. Needs one-way collision (Arcade Physics `checkCollision.up`-only, or a `collider` `process` callback keyed off the player's velocity/position), not just a new texture.
 3. **Ice** — low-friction surface; player keeps sliding after releasing left/right. Needs a per-tile friction/drag value threaded into `PlayerController`, which currently has none.
 4. **Crumbling Block** — solid until stood on, then shakes and disappears ~1s later. Needs per-instance timer state, so it can't be pure tile-grid data the way ground is — closer to a lightweight entity that happens to render/collide like a tile.
-5. **Bounce Block** — spring pad; contact overrides the player's Y velocity upward, higher than a normal jump. Cheap: one collision-callback special case, similar to the existing stomp-bounce on the ghost.
+5. **Bounce Block** ✅ built — spring pad; contact overrides the player's Y velocity upward, higher than a normal jump. `BOUNCE_TILE`/`GROUND_FRAME_BOUNCE`; `PlayScene.onGroundCollide` checks the collided tile's index and `body.blocked.down` (so it only fires landing on the top face, not a side bump).
 
 *Items* (collectibles; there are none today — this category needs a scoring/inventory concept the game currently has zero of):
 1. **Coin** — the baseline collectible; needs a running score display and a "collected" flag per placed instance so it doesn't respawn on revisit within a play session.
@@ -398,8 +399,8 @@ engine concepts, not just content:
 5. **Shield Bubble** — temporary invincibility (absorbs one hit or lasts N seconds); same hit-points prerequisite as Extra Heart.
 
 *Enemies* (new `EntityType`s alongside `enemy-ghost`; this category is the cheapest to add — the pattern already exists end to end):
-1. **Spike Crawler** — ground patroller like the ghost, but never stompable (always costs a hit/loss on contact) — a pure "avoid or jump over" enemy.
-2. **Bat** — flies a sine-wave or vertical path instead of ground-patrolling; same stomp-from-above rule as the ghost.
+1. **Spike Crawler** ✅ built — patrols like the ghost, but never stompable (`stompable: false` in `PlayScene`'s `ENEMY_DEFS`) — any contact costs the player regardless of direction.
+2. **Bat** ✅ built — flies the exact same patrol+bob path as the ghost (100% shared code — `EnemyBehaviors.createPatrolEnemy` was generalized to take a texture key); same stomp-from-above rule as the ghost.
 3. **Totem Shooter** — stationary, periodically fires a slow projectile; first enemy needing its own projectile entity and a lifetime/cleanup.
 4. **Hopper** — bounces in place or toward the player on a timer; stomp only counts while it's on the ground (mid-air stomp shouldn't count), a variant of the existing `isStompFromAbove` check.
 5. **Big Ghost (mini-boss)** — larger sprite, takes 3 stomps instead of 1; needs a hit-counter on the enemy itself (currently enemies are one-hit-and-`destroy()`).
@@ -417,10 +418,11 @@ or falling off is an immediate loss, restart the whole level. Hearts,
 shields, and checkpoints all assume some form of "you can take a hit and
 keep going," which is a real gameplay-rules decision, not just content,
 and is worth deciding deliberately rather than backing into by shipping
-Extra Heart first. *Recommendation:* build the Blocks and Enemies
-categories first — they slot into the existing architecture with no new
-rules — then decide on hit-points/checkpoints as its own small design
-pass before Items/Hazards' harder half.
+Extra Heart first. *Recommendation:* the remaining no-new-rules half of
+Blocks and Enemies (Cloud Platform, Ice, Crumbling Block, Totem Shooter,
+Hopper, Big Ghost) is still fair game to build incrementally the same
+way Brick/Bounce/Spike Crawler/Bat were; decide on hit-points/checkpoints
+as its own small design pass before starting Items/Hazards' harder half.
 
 **M3 — Bigger levels.** Lift the one-screen cap, add camera-follow and
 scrolling in both editor and play mode; keep a sane upper bound per the

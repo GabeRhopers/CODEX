@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildRenderGrid, groundFrameAt, GROUND_FRAME_FILL, GROUND_FRAME_TOP } from "./groundAutotile";
-import { EMPTY_TILE, GROUND_TILE } from "./LevelSchema";
+import { buildRenderGrid, groundFrameAt, GROUND_FRAME_BOUNCE, GROUND_FRAME_BRICK, GROUND_FRAME_FILL, GROUND_FRAME_TOP } from "./groundAutotile";
+import { BOUNCE_TILE, BRICK_TILE, EMPTY_TILE, GROUND_TILE } from "./LevelSchema";
 
 const E = EMPTY_TILE;
 const T = GROUND_TILE;
+const B = BRICK_TILE;
+const P = BOUNCE_TILE; // "P" for sPring, avoids clashing with B (brick)
 
 describe("groundFrameAt", () => {
   it("is TOP when there is nothing above (open air)", () => {
@@ -34,6 +36,28 @@ describe("groundFrameAt", () => {
     ];
     // (1,1) has ground diagonally up-left, but nothing directly above (1,0) is E.
     expect(groundFrameAt(grid, 1, 1)).toBe(GROUND_FRAME_TOP);
+  });
+
+  it("is BRICK for a brick cell regardless of what's above it", () => {
+    const grid = [
+      [T, E],
+      [B, B],
+    ];
+    expect(groundFrameAt(grid, 0, 1)).toBe(GROUND_FRAME_BRICK);
+    expect(groundFrameAt(grid, 1, 1)).toBe(GROUND_FRAME_BRICK);
+  });
+
+  it("is BOUNCE for a bounce cell regardless of what's above it", () => {
+    const grid = [[P]];
+    expect(groundFrameAt(grid, 0, 0)).toBe(GROUND_FRAME_BOUNCE);
+  });
+
+  it("a ground cell buried under a brick still reads as FILL (still solid above it)", () => {
+    const grid = [
+      [B],
+      [T],
+    ];
+    expect(groundFrameAt(grid, 0, 1)).toBe(GROUND_FRAME_FILL);
   });
 });
 

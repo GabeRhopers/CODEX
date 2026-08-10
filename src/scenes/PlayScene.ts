@@ -2,8 +2,8 @@ import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
 import {
   applyStompBounce,
-  createGhostEnemy,
   createGhostState,
+  createPatrolEnemy,
   GhostState,
   isStompFromAbove,
   updateGhostPatrol,
@@ -11,11 +11,29 @@ import {
 import { createPlayerInput, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
-import { buildRenderGrid } from "../level/groundAutotile";
-import { LevelData } from "../level/LevelSchema";
+import { buildRenderGrid, GROUND_FRAME_BOUNCE } from "../level/groundAutotile";
+import { EntityType, LevelData } from "../level/LevelSchema";
 import { groundTilesetKey, THEMES } from "../level/themes";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
+
+const BOUNCE_VELOCITY_Y = -650;
+
+/** One entry per placeable enemy type — see the enemyDefs loop in create().
+ * All three share the exact same patrol/bob movement (EnemyBehaviors.ts);
+ * only the texture and whether a from-above hit stomps it (vs. costing the
+ * player no matter how it's touched) differ. */
+const ENEMY_DEFS: { type: EntityType; textureKey: string; stompable: boolean }[] = [
+  { type: "enemy-ghost", textureKey: "enemy-ghost-pillow", stompable: true },
+  { type: "enemy-bat", textureKey: "enemy-bat", stompable: true },
+  { type: "enemy-spike", textureKey: "enemy-spike-crawler", stompable: false },
+];
+
+interface ActiveEnemy {
+  sprite: Phaser.Physics.Arcade.Sprite;
+  state: GhostState;
+  stompable: boolean;
+}
 
 /** Present only when this level was launched from a World (WorldBrowserScene
  * "Play") rather than a standalone Test Play — see onWin/nextLevel. */
@@ -38,8 +56,7 @@ export class PlayScene extends Phaser.Scene {
   private input$!: PlayerInputKeys;
   private touch!: TouchControls;
   private wizardAnim: WizardAnimState = createWizardAnimState();
-  private ghost?: Phaser.Physics.Arcade.Sprite;
-  private ghostState?: GhostState;
+  private enemies: ActiveEnemy[] = [];
   private outcome: "playing" | "won" | "lost" = "playing";
   private banner!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
@@ -55,8 +72,7 @@ export class PlayScene extends Phaser.Scene {
     this.world = data.world;
     this.outcome = "playing";
     this.wizardAnim = createWizardAnimState();
-    this.ghost = undefined;
-    this.ghostState = undefined;
+    this.enemies = [];
   }
 
   create(): void {
@@ -82,7 +98,7 @@ export class PlayScene extends Phaser.Scene {
     this.player.setOrigin(0.5, 1);
     applyWizardTexture(this.player, "wizard-idle");
     this.player.setCollideWorldBounds(false);
-    this.physics.add.collider(this.player, this.groundLayer);
+    this.physics.add.collider(this.player, this.groundLayer, (_player, tile) => this.onGroundCollide(tile as Phaser.Tilemaps.Tile));
 
     const goal = this.level.entities.find((e) => e.type === "goal");
     if (goal) {
@@ -102,11 +118,13 @@ export class PlayScene extends Phaser.Scene {
       this.physics.add.overlap(this.player, goalZone, () => this.onWin());
     }
 
-    const ghostEntity = this.level.entities.find((e) => e.type === "enemy-ghost");
-    if (ghostEntity) {
-      this.ghost = createGhostEnemy(this, ghostEntity.x, ghostEntity.y);
-      this.ghostState = createGhostState(this.ghost);
-      this.physics.add.overlap(this.player, this.ghost, () => this.onPlayerGhostOverlap());
+    for (const def of ENEMY_DEFS) {
+      const entity = this.level.entities.find((e) => e.type === def.type);
+      if (!entity) continue;
+      const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
+      const state = createGhostState(sprite);
+      this.enemies.push({ sprite, state, stompable: def.stompable });
+      this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable));
     }
 
     this.input$ = createPlayerInput(this);
@@ -184,8 +202,8 @@ export class PlayScene extends Phaser.Scene {
     updatePlayerMovement(this.player, this.input$, this.touch.get());
     updateWizardAnimation(this.player, this.wizardAnim, delta);
 
-    if (this.ghost && this.ghostState) {
-      updateGhostPatrol(this.ghost, this.ghostState, time);
+    for (const enemy of this.enemies) {
+      updateGhostPatrol(enemy.sprite, enemy.state, time);
     }
 
     if (this.player.y > this.level.height * TILE_SIZE + 200) {
@@ -193,12 +211,23 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
-  private onPlayerGhostOverlap(): void {
-    if (this.outcome !== "playing" || !this.ghost) return;
-    if (isStompFromAbove(this.player, this.ghost)) {
-      this.ghost.destroy();
-      this.ghost = undefined;
-      this.ghostState = undefined;
+  /** Bounce blocks are just another ground-layer tile (see groundAutotile's
+   * GROUND_FRAME_BOUNCE) — solid collision is already automatic via
+   * setCollisionByExclusion, this only adds the extra launch-upward effect
+   * on top of it. `body.blocked.down` restricts it to landing on the pad's
+   * top face, so bumping one from the side doesn't launch the player. */
+  private onGroundCollide(tile: Phaser.Tilemaps.Tile): void {
+    if (tile.index !== GROUND_FRAME_BOUNCE) return;
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    if (!body.blocked.down) return;
+    body.setVelocityY(BOUNCE_VELOCITY_Y);
+  }
+
+  private onPlayerEnemyOverlap(enemySprite: Phaser.Physics.Arcade.Sprite, stompable: boolean): void {
+    if (this.outcome !== "playing") return;
+    if (stompable && isStompFromAbove(this.player, enemySprite)) {
+      this.enemies = this.enemies.filter((e) => e.sprite !== enemySprite);
+      enemySprite.destroy();
       applyStompBounce(this.player);
     } else {
       this.onLose();

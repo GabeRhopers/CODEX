@@ -6,9 +6,9 @@ the full architecture, data model, and milestone plan.
 
 ## Status
 
-**MVP + M1 (undo/redo) + first M2 content (enemy + real goal art) + M4
-(home page / level browser) + 3 themed sample levels + M8 (World Maker
-v1) done.** The game opens on a **Menu** (home page) instead of dropping
+**MVP + M1 (undo/redo) + M2 content (enemy + real goal art, plus Brick/
+Bounce/Spike Crawler/Bat) + M4 (home page / level browser) + 3 themed
+sample levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home page) instead of dropping
 straight into the editor: **New Level**, **My Levels**, or **Worlds**,
 each with a live status line. **My Levels** lists every saved level (not
 just a single most-recent slot) with Edit and Delete per row — and on a
@@ -68,17 +68,21 @@ Open the dev server URL in a browser. Controls:
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
 - **Palette** (bottom-left, in the editor): click a brush — Ground,
-  Erase, Spawn, Goal (dream portal), Ghost (enemy) — then click/drag on
-  the grid above to paint or place.
+  Brick, Bounce, Erase, Spawn, Goal (dream portal), Ghost, Spike, Bat —
+  then click/drag on the grid above to paint or place. See "New blocks
+  & enemies" under Art for what each one does.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; the Ghost is optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump,
   **Esc** back to the editor, **R** to restart after winning/losing. Jump
-  on top of the ghost to squish it; touching it any other way costs you
-  the level. On a touchscreen, semi-transparent **◀ ▶ ▲** buttons in the
-  corners (see "Mobile/touch" below) do the same three things and the
-  win/lose screen grows tappable **Restart**/**Next Level** buttons next
-  to its keyboard-only hint text, since there's no R/N/Esc key to press.
+  on top of the Ghost or Bat to squish it; touching either any other way,
+  or touching a Spike Crawler at all (it can't be stomped), costs you the
+  level. A Bounce block launches you noticeably higher than a normal
+  jump; a Brick is just solid ground with a different look. On a
+  touchscreen, semi-transparent **◀ ▶ ▲** buttons in the corners (see
+  "Mobile/touch" below) do the same three things and the win/lose screen
+  grows tappable **Restart**/**Next Level** buttons next to its
+  keyboard-only hint text, since there's no R/N/Esc key to press.
 - **Save**: persists the current level to `localStorage` under its own
   id — every level you save is kept (see My Levels), not just the most
   recent one.
@@ -176,6 +180,34 @@ gaps and steps sized well within the player's jump range, and seeds all
 three into My Levels on a visitor's first-ever visit via a one-time
 `localStorage` flag (deleting a sample afterward doesn't bring it back).
 
+**New blocks & enemies (first slice of the M2 content list).** Two blocks
+and two enemies, picked because they slot into the existing architecture
+with zero new gameplay rules (see the plan doc's M2 candidate list for
+the full 20-item list and why the rest need more, like a scoring or
+hit-points concept the game doesn't have yet):
+- **Brick** (`BRICK_TILE`) — a second solid ground-layer value alongside
+  plain ground; always renders as its own fixed frame regardless of
+  neighbors, unlike ground's neighbor-derived autotiling (see
+  `groundFrameAt` in `groundAutotile.ts`).
+- **Bounce** (`BOUNCE_TILE`) — same idea, but `PlayScene`'s ground
+  collider callback checks `tile.index` against the bounce frame and, if
+  the player is landing on its top face (`body.blocked.down`), overrides
+  their Y velocity upward past a normal jump — one extra branch on the
+  collider Test Play already had, not a new collision system.
+- **Spike Crawler** & **Bat** — new `EntityType`s alongside `enemy-ghost`,
+  sharing 100% of the ghost's movement code. `EnemyBehaviors.createPatrolEnemy`
+  was generalized to take a texture key instead of being ghost-specific;
+  `PlayScene` now spawns from a small `ENEMY_DEFS` table (type, texture,
+  stompable) instead of one-off ghost-only fields. The Bat is stompable
+  exactly like the ghost; the Spike Crawler sets `stompable: false`, so
+  any contact costs the player regardless of direction — same
+  `isStompFromAbove` check, just gated per enemy type.
+
+All four are procedurally generated in `generateTextures.ts` (Graphics
+primitives, same technique as the tiles) rather than hand-drawn like the
+wizard/ghost/portal, to stay within this session's reach — see "Tiles/
+markers/UI" below for why real art isn't fetchable here.
+
 **Tiles/markers/UI:** generated procedurally in
 `src/assets/generateTextures.ts` rather than loaded from Kenney's CC0
 packs, because this project's build sandbox only allows outbound network
@@ -228,7 +260,7 @@ src/
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
-│   └── EnemyBehaviors.ts     ghost patrol/bob + stomp-vs-hit rule (+ unit tests)
+│   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
 ├── persistence/
 │   ├── StorageAdapter.ts       interface (list/save/load/remove)
 │   ├── LocalStorageAdapter.ts
