@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { groundFrameAt } from "../level/groundAutotile";
 import { EMPTY_TILE, LevelData } from "../level/LevelSchema";
 
 /**
@@ -24,12 +25,24 @@ export class TilePainter {
     if (this.level.layers.ground[tileY][tileX] === tileIndex) return false;
 
     this.level.layers.ground[tileY][tileX] = tileIndex;
-    if (tileIndex === EMPTY_TILE) {
-      this.layer.removeTileAt(tileX, tileY);
-    } else {
-      this.layer.putTileAt(tileIndex, tileX, tileY);
+    this.renderCell(tileX, tileY);
+
+    // The cell directly below just gained/lost a neighbor above it, which
+    // is the only thing its rendered frame (grass-top vs. buried-fill)
+    // depends on — see groundAutotile.ts.
+    if (this.inBounds(tileX, tileY + 1) && this.level.layers.ground[tileY + 1][tileX] !== EMPTY_TILE) {
+      this.renderCell(tileX, tileY + 1);
     }
     return true;
+  }
+
+  private renderCell(tileX: number, tileY: number): void {
+    const value = this.level.layers.ground[tileY][tileX];
+    if (value === EMPTY_TILE) {
+      this.layer.removeTileAt(tileX, tileY);
+    } else {
+      this.layer.putTileAt(groundFrameAt(this.level.layers.ground, tileX, tileY), tileX, tileY);
+    }
   }
 
   private inBounds(tileX: number, tileY: number): boolean {

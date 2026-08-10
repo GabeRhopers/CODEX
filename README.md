@@ -96,6 +96,20 @@ consistent family. See `public/assets/entities/*.png` and
 `src/gameplay/EnemyBehaviors.ts` (patrol + bob + the stomp-from-above
 rule, unit-tested in `EnemyBehaviors.test.ts`).
 
+**Ground tiles merge with their neighbors.** Ground tiles have no border,
+and which of two dirt/grass frames a cell renders as (grass-capped
+"exposed to air" vs. plain "buried under another ground tile") is derived
+purely from its neighbor above at render time — never stored. A whole
+row of ground reads as one continuous strip, and a vertical stack shows
+grass only on the true top surface, not as a stripe partway up a pillar.
+See `src/level/groundAutotile.ts` (unit-tested) — `TilePainter` re-derives
+the frame for the painted cell and the cell directly below it (the only
+neighbor whose correct frame can change) on every paint/erase, and
+`PlayScene`/`EditorScene.rebuildVisualsFromLevel` derive a full render
+grid the same way when building/reloading a level. The saved level format
+is untouched: it still stores one ground/empty value per cell, exactly as
+before.
+
 **Tiles/markers/UI:** generated procedurally in
 `src/assets/generateTextures.ts` rather than loaded from Kenney's CC0
 packs, because this project's build sandbox only allows outbound network
@@ -140,6 +154,7 @@ src/
 ├── level/
 │   ├── LevelSchema.ts        LevelData / LevelEntity types
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
+│   └── groundAutotile.ts     derives the grass-top/buried tile frame from neighbors (+ unit tests)
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering

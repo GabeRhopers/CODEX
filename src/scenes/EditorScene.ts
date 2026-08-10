@@ -9,6 +9,7 @@ import { EditorUI } from "../editor/EditorUI";
 import { EntityPlacer } from "../editor/EntityPlacer";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
+import { groundFrameAt } from "../level/groundAutotile";
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
@@ -56,7 +57,7 @@ export class EditorScene extends Phaser.Scene {
       width: this.level.width,
       height: this.level.height,
     });
-    const tileset = map.addTilesetImage("tile-ground", "tile-ground", TILE_SIZE, TILE_SIZE, 0, 0)!;
+    const tileset = map.addTilesetImage("tile-ground-tileset", "tile-ground-tileset", TILE_SIZE, TILE_SIZE, 0, 0)!;
     this.groundLayer = map.createBlankLayer("ground", tileset, 0, 0)!;
 
     this.painter = new TilePainter(this.level, this.groundLayer);
@@ -225,7 +226,7 @@ export class EditorScene extends Phaser.Scene {
       for (let x = 0; x < this.level.width; x++) {
         const index = this.level.layers.ground[y][x];
         if (index === -1) this.groundLayer.removeTileAt(x, y);
-        else this.groundLayer.putTileAt(index, x, y);
+        else this.groundLayer.putTileAt(groundFrameAt(this.level.layers.ground, x, y), x, y);
       }
     }
     this.entityPlacer = new EntityPlacer(this, this.level, TILE_SIZE);
