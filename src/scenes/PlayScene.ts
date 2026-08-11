@@ -8,7 +8,23 @@ import {
   isStompFromAbove,
   updateGhostPatrol,
 } from "../gameplay/EnemyBehaviors";
-import { createPlayerInput, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
+import { createPlayerInput, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
+import { ParallaxBackground } from "../gameplay/ParallaxBackground";
+import {
+  canDoubleJump,
+  collectCoin,
+  collectFeather,
+  collectHeart,
+  collectShield,
+  collectSpeed,
+  createPlayerStats,
+  isInvincible,
+  PlayerStats,
+  registerHit,
+  resetDoubleJump,
+  speedMultiplierAt,
+  useDoubleJump,
+} from "../gameplay/PlayerStats";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { buildRenderGrid, GROUND_FRAME_BOUNCE } from "../level/groundAutotile";
@@ -18,6 +34,12 @@ import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
 const BOUNCE_VELOCITY_Y = -650;
+
+/** Every item brush's textureKey equals its EntityType (see Palette.ts), so
+ * spawning just needs the type list — no separate texture lookup like
+ * ENEMY_DEFS needs. Items are collected via a static overlap zone, same
+ * pattern as the goal portal below. */
+const ITEM_TYPES: EntityType[] = ["item-coin", "item-heart", "item-speed", "item-feather", "item-shield"];
 
 /** One entry per placeable enemy type — see the enemyDefs loop in create().
  * All three share the exact same patrol/bob movement (EnemyBehaviors.ts);
@@ -69,6 +91,10 @@ export class PlayScene extends Phaser.Scene {
   private hint!: Phaser.GameObjects.Text;
   private restartButton!: Phaser.GameObjects.Text;
   private nextButton!: Phaser.GameObjects.Text;
+  private stats: PlayerStats = createPlayerStats();
+  private jumpWasDown = false;
+  private parallax!: ParallaxBackground;
+  private hud!: Phaser.GameObjects.Text;
 
   constructor() {
     super("Play");
@@ -81,10 +107,13 @@ export class PlayScene extends Phaser.Scene {
     this.outcome = "playing";
     this.wizardAnim = createWizardAnimState();
     this.enemies = [];
+    this.stats = createPlayerStats();
+    this.jumpWasDown = false;
   }
 
   create(): void {
     this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
+    this.parallax = new ParallaxBackground(this, this.level.theme);
 
     const tilesetKey = groundTilesetKey(this.level.theme);
     const map = this.make.tilemap({
@@ -135,8 +164,33 @@ export class PlayScene extends Phaser.Scene {
       this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable));
     }
 
+    for (const type of ITEM_TYPES) {
+      const entity = this.level.entities.find((e) => e.type === type);
+      if (!entity) continue;
+      const x = entity.x * TILE_SIZE + TILE_SIZE / 2;
+      const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
+      // textureKey === entityType for every item brush (see Palette.ts).
+      const icon = this.add.image(x, y, type).setDepth(5);
+      this.tweens.add({ targets: icon, y: y - 6, yoyo: true, repeat: -1, duration: 700, ease: "Sine.easeInOut" });
+      const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+      this.physics.add.existing(zone, true);
+      this.physics.add.overlap(this.player, zone, () => this.collectItem(type, icon, zone));
+    }
+
     this.input$ = createPlayerInput(this);
     this.touch = new TouchControls(this);
+
+    this.hud = this.add
+      .text(this.scale.width - 12, 8, "", {
+        fontSize: "13px",
+        color: "#ffffff",
+        backgroundColor: "#000000aa",
+        padding: { x: 8, y: 4 },
+      })
+      .setOrigin(1, 0)
+      .setDepth(30)
+      .setScrollFactor(0);
+    this.updateHud();
 
     this.banner = this.add
       .text(this.scale.width / 2, this.scale.height / 2 - 20, "", {
@@ -222,13 +276,32 @@ export class PlayScene extends Phaser.Scene {
   update(time: number, delta: number): void {
     if (this.outcome !== "playing") return;
 
-    updatePlayerMovement(this.player, this.input$, this.touch.get());
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    const touch = this.touch.get();
+    const jumpDown = isJumpPressed(this.input$, touch);
+    const justPressedJump = jumpDown && !this.jumpWasDown;
+    this.jumpWasDown = jumpDown;
+
+    if (body.blocked.down) {
+      resetDoubleJump(this.stats);
+    } else if (justPressedJump && canDoubleJump(this.stats, body.blocked.down)) {
+      body.setVelocityY(JUMP_VELOCITY);
+      useDoubleJump(this.stats);
+    }
+
+    updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time));
     updateWizardAnimation(this.player, this.wizardAnim, delta);
+    this.updateBuffVisuals(time);
+    this.parallax.update(this.player.x);
 
     for (const enemy of this.enemies) {
       updateGhostPatrol(enemy.sprite, enemy.state, time);
     }
 
+    // Falling off the level is unconditional instant-loss, unlike a bad
+    // enemy/hazard touch — Hearts and Shield don't apply here, since
+    // "bounce back and keep playing" doesn't fit falling the way it fits
+    // an on-screen hit.
     if (this.player.y > this.level.height * TILE_SIZE + 200) {
       this.onLose();
     }
@@ -253,7 +326,70 @@ export class PlayScene extends Phaser.Scene {
       enemySprite.destroy();
       applyStompBounce(this.player);
     } else {
+      this.takeHit();
+    }
+  }
+
+  /** One-per-type item pickup (see Palette.ts's docstring on that scope
+   * cut) — applies the matching PlayerStats effect, removes the sprite and
+   * its overlap zone, and refreshes the HUD. Guarded by `icon.active` since
+   * a physics overlap can fire more than once in the same frame pair. */
+  private collectItem(type: EntityType, icon: Phaser.GameObjects.Image, zone: Phaser.GameObjects.Zone): void {
+    if (!icon.active) return;
+    const now = this.time.now;
+    switch (type) {
+      case "item-coin":
+        collectCoin(this.stats);
+        break;
+      case "item-heart":
+        collectHeart(this.stats);
+        break;
+      case "item-speed":
+        collectSpeed(this.stats, now);
+        break;
+      case "item-feather":
+        collectFeather(this.stats);
+        break;
+      case "item-shield":
+        collectShield(this.stats, now);
+        break;
+      default:
+        return;
+    }
+    icon.destroy();
+    zone.destroy();
+    this.updateHud();
+  }
+
+  private updateHud(): void {
+    const hearts = "♥".repeat(this.stats.extraHits);
+    this.hud.setText(`Score: ${this.stats.score}${hearts ? "  " + hearts : ""}`);
+  }
+
+  /** Cyan while a Shield (or the post-hit grace period) makes any bad
+   * contact free; yellow while a Speed Potion is active; otherwise no
+   * tint. Shield takes priority since it's the stronger effect and the two
+   * can't meaningfully be told apart by tint alone. */
+  private updateBuffVisuals(now: number): void {
+    if (isInvincible(this.stats, now)) {
+      this.player.setTint(0x66e0ff);
+    } else if (speedMultiplierAt(this.stats, now) > 1) {
+      this.player.setTint(0xffe066);
+    } else {
+      this.player.clearTint();
+    }
+  }
+
+  /** The single entry point for "player touched something bad" outside of
+   * the unconditional fall-off-bottom check — see registerHit's docstring
+   * for the invincible/absorbed/fatal decision. */
+  private takeHit(): void {
+    const result = registerHit(this.stats, this.time.now);
+    if (result === "fatal") {
       this.onLose();
+    } else if (result === "absorbed") {
+      applyStompBounce(this.player);
+      this.updateHud();
     }
   }
 

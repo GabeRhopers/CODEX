@@ -8,7 +8,17 @@ export const BOUNCE_TILE = 2;
 
 export const SCHEMA_VERSION = 1 as const;
 
-export type EntityType = "player-spawn" | "goal" | "enemy-ghost" | "enemy-spike" | "enemy-bat";
+export type EntityType =
+  | "player-spawn"
+  | "goal"
+  | "enemy-ghost"
+  | "enemy-spike"
+  | "enemy-bat"
+  | "item-coin"
+  | "item-heart"
+  | "item-speed"
+  | "item-feather"
+  | "item-shield";
 
 export interface LevelEntity {
   type: EntityType;

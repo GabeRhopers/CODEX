@@ -7,8 +7,13 @@ the full architecture, data model, and milestone plan.
 ## Status
 
 **MVP + M1 (undo/redo) + M2 content (enemy + real goal art, plus Brick/
-Bounce/Spike Crawler/Bat) + M4 (home page / level browser) + 5 template
-levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home
+Bounce/Spike Crawler/Bat, plus a full Items set — Coin/Heart/Speed
+Potion/Feather/Shield, all with real gameplay effects, resolving the M2
+hit-points open question — see "Items & hit-points" under Art) + a
+tabbed, categorized palette (Blocks/Markers/Enemies/Items — replacing the
+single ever-widening icon row) + a parallax scrolling background (see
+"Parallax background" under Art) + M4 (home page / level browser) + 5
+template levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home
 page) — a 2x2 card grid, each with a live status line, covering
 everything there is to do: **New Level** (blank grid), **Templates**
 (5 pre-built levels to play or remix — see below), **My Levels** (your
@@ -79,21 +84,28 @@ Open the dev server URL in a browser. Controls:
   advance to the next level, or **R** to replay the current one; winning
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
-- **Palette** (bottom-left, in the editor): click a brush — Ground,
-  Brick, Bounce, Erase, Spawn, Goal (dream portal), Ghost, Spike, Bat —
-  then click/drag on the grid above to paint or place. See "New blocks
-  & enemies" under Art for what each one does.
+- **Palette** (bottom of the editor): a row of **category tabs** — Blocks,
+  Markers, Enemies, Items — switches which row of brushes shows below it;
+  click a brush, then click/drag on the grid above to paint or place. See
+  "Categorized palette" under Art for why it's tabbed and "New blocks &
+  enemies" / "Items & hit-points" for what each brush does. Items are
+  ordinary brushes like anything else in the palette — not limited to any
+  specific template — so any level, new or existing, can place any of the
+  5 items.
 - **Test Play** (button or Space): plays the level you've built. Requires
-  a Spawn and a Goal to be placed first; the Ghost is optional.
-- In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump,
+  a Spawn and a Goal to be placed first; enemies and items are optional.
+- In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
+  (press again mid-air for a second jump if you've collected a Feather),
   **Esc** back to wherever you launched Play from (the editor for Test
   Play, My Worlds for a World, or Templates for a template's Play
   button — the on-screen hint always names the right one), **R** to
   restart after winning/losing. Jump
   on top of the Ghost or Bat to squish it; touching either any other way,
   or touching a Spike Crawler at all (it can't be stomped), costs you the
-  level. A Bounce block launches you noticeably higher than a normal
-  jump; a Brick is just solid ground with a different look. On a
+  level **unless** you're holding a Heart in reserve or are currently
+  Shield-protected — see "Items & hit-points" under Art. A Bounce block
+  launches you noticeably higher than a normal jump; a Brick is just
+  solid ground with a different look. On a
   touchscreen, semi-transparent **◀ ▶ ▲** buttons in the corners (see
   "Mobile/touch" below) do the same three things and the win/lose screen
   grows tappable **Restart**/**Next Level** buttons next to its
@@ -114,7 +126,8 @@ Fully playable on a phone, no separate build or mode — the same page
 adapts. Three things make that true, all in `main.ts`/`index.html` unless
 noted:
 
-- **Scaling**: the game's internal resolution stays a fixed 920×448 (every
+- **Scaling**: the game's internal resolution stays a fixed
+  `GAME_WIDTH`×`GAME_HEIGHT` (1180×476 — see `config/gameConfig.ts`; every
   scene's layout math is untouched), but Phaser's Scale Manager runs in
   `FIT` + `CENTER_BOTH` mode, so it's letterboxed down (or up) to whatever
   viewport it's opened in, phone included, instead of getting clipped or
@@ -235,6 +248,73 @@ hit-points concept the game doesn't have yet):
   any contact costs the player regardless of direction — same
   `isStompFromAbove` check, just gated per enemy type.
 
+**Categorized palette.** The palette used to be a single row of every
+brush at once — fine at 9 icons, unworkable once Items brought the count
+to 14 and climbing. `src/editor/Palette.ts` now tags every brush with a
+`BrushCategory` (`blocks` / `markers` / `enemies` / `items`); `EditorUI`
+renders one row of small category-tab buttons plus, below it, only the
+brushes belonging to whichever tab is active — the icon row stays a fixed,
+manageable width no matter how many brushes a future pass adds to any one
+category. Switching tabs rebuilds just that icon row; the selection
+outline hides itself (without losing the underlying selection) when the
+selected brush's category isn't the one currently showing, and reappears
+when you tab back. The row of active-brush icons lives in a
+`Phaser.GameObjects.Container` — as a single entry in the scene's display
+list, a Container's *own* depth (not its children's) decides whether it
+draws in front of or behind sibling objects like the toolbar's background
+rectangle, so `EditorUI` sets it explicitly above that background; leaving
+it at the default depth was a real bug hit and fixed during this pass —
+every icon silently rendered a layer behind the opaque toolbar and never
+appeared, even though every other property (position, texture, visibility)
+was correct.
+
+**Items & hit-points.** Five collectible brushes, all in the palette's
+Items tab, all ordinary general-purpose brushes usable in any level (not
+hardcoded into specific templates) exactly like a Ground tile or a Ghost:
+- **Coin** — +1 to the score shown in Play mode's top-right HUD.
+- **Heart** — banks one extra hit. The next time you'd normally lose from
+  touching a hazard, it's absorbed instead (the heart is spent, and you
+  get a brief post-hit grace period so the same continued-contact overlap
+  can't drain two hearts from one touch) — until then, contact is
+  unforgiving exactly as before Hearts existed.
+- **Shield** — a timed window (8s) where *any* bad contact is completely
+  free, no heart spent; the player tints cyan for its duration.
+- **Speed Potion** — a timed (6s) 1.6× move-speed multiplier.
+- **Feather** — grants a second mid-air jump (press jump again while
+  airborne); resets the moment you land.
+
+This is deliberately the game's first hit-points/buff system — earlier
+content passes (Brick, Bounce, Spike Crawler, Bat) explicitly skipped
+scoring/hit-points-shaped ideas for lack of one. The rules live in
+`src/gameplay/PlayerStats.ts` as pure, unit-tested functions operating on
+a plain `PlayerStats` object (score/extraHits/buff timestamps) — no Phaser
+types touch that module; `PlayScene` owns spawning the item sprites (a
+gentle bob tween, a static overlap zone, one-per-type exactly like
+Spawn/Goal/enemies already are — see `Palette.ts`'s docstring on that
+scope cut), calling into `PlayerStats`, and reflecting the result as a HUD
+string and a player tint. One deliberate asymmetry: **falling off the
+bottom of the level stays unconditional instant-loss**, untouched by
+Hearts or Shield — "bounce back and keep playing" fits absorbing a
+hazard/enemy touch, but doesn't fit falling the way it fits an on-screen
+hit, so `PlayScene.update`'s fall check is unchanged from before Items
+existed.
+
+**Parallax background.** Every themed scene (grass/desert/castle) now
+renders two background layers behind the level — a slow-scrolling far
+layer and a faster-scrolling near layer — for a sense of depth as the
+player moves. This project's levels are still single-screen (no camera
+panning/scrolling — that's deferred to plan doc milestone M3), so there's
+no camera to actually pan; `src/gameplay/ParallaxBackground.ts` fakes the
+effect instead by offsetting each background `TileSprite`'s
+`tilePositionX` by the player's X position times a small per-layer factor
+every frame, called from `PlayScene.update`. Grass and desert reuse real
+Kenney sky art (`bg-grass-{far,near}.png` / `bg-desert-{far,near}.png` —
+see below); castle has no matching sky tile in the pack, so it gets a
+small seeded-pseudo-random starfield generated the same way the rest of
+castle's procedural art is (see `generateTextures.ts`). `EditorScene` also
+gets the same layers, but static (no player position to drive an offset
+while editing) — just a themed backdrop at rest.
+
 **Real art: Kenney's "Pixel Platformer" (CC0).** The plan doc always
 recommended Kenney's CC0 packs for this, but the build sandbox's network
 proxy can't *fetch* them (only npm/github.com are reachable) — so
@@ -254,20 +334,35 @@ restriction entirely. It now provides:
 - **Bat and Spike Crawler** — real character art from the pack (a winged
   creature and a red pointy-topped ground crawler) in place of the
   Graphics-drawn placeholders from the previous pass.
+- **Coin, Heart, Speed Potion, and Shield** — real item-tile art from the
+  pack. **Feather** has no matching tile in the pack, so it's drawn
+  procedurally (a simple two-chevron badge icon) alongside the rest of
+  `generateTextures.ts`'s procedural art — the same "real art where it
+  fits, procedural where it doesn't" split already established for the
+  castle theme.
+- **The grass/desert parallax background layers** — real sky-tile art
+  from the pack's background sheet (a plain-sky "far" tile and a
+  hills/trees or dunes/cactus-silhouette "near" tile per theme); castle's
+  parallax stays procedural (a generated starfield) for the same
+  no-matching-art reason as its ground tileset.
 - The **wizard, ghost-pillow, and dream-cloud portal stay hand-drawn** —
   they're deliberate, already-validated custom art in a specific shared
   style (see below), not placeholders, so swapping the asset pack doesn't
   touch them.
 
-The pack's tiles are natively 18px (24px for characters), not this
-project's 32px (40px for entities), so `scripts/prepare-kenney-assets.py`
-(run once, offline — not part of the build) nearest-neighbor-upscales and
-composites exactly the pieces used above into the small PNGs actually
-committed under `public/assets/tiles/` and `public/assets/entities/`
-(loaded in `BootScene.preload`) — the full third-party pack itself isn't
-committed to the repo, only these derived outputs. See that script's
-docstring for the exact source tile indices and how to regenerate with
-different ones.
+The pack's tiles are natively 18px (24px for characters, 24px for
+background tiles), not this project's 32px (40px for entities), so
+`scripts/prepare-kenney-assets.py` (run once, offline — not part of the
+build) nearest-neighbor-upscales and composites exactly the pieces used
+above into the small PNGs actually committed under `public/assets/tiles/`,
+`public/assets/entities/`, `public/assets/items/`, and
+`public/assets/backgrounds/` (loaded in `BootScene.preload`) — the full
+third-party pack itself isn't committed to the repo, only these derived
+outputs. Background tiles are left at their native 24px (Phaser's
+`TileSprite.setTileScale` scales them at render time instead) since,
+unlike the other pieces, they're tiled rather than shown at a single fixed
+size. See that script's docstring for the exact source tile indices and
+how to regenerate with different ones.
 
 **Tiles/markers/UI still procedural:** the castle theme (see above) and
 pure UI chrome with no asset-pack equivalent — the eraser icon, the spawn
@@ -317,7 +412,9 @@ src/
 │   ├── themes.ts              theme color palettes + themed texture-key naming
 │   └── templateLevels.ts      5 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
 ├── gameplay/
-│   ├── PlayerController.ts   run/jump input handling
+│   ├── PlayerController.ts   run/jump input handling (speed-multiplier aware; exports isJumpPressed for double-jump edge detection)
+│   ├── PlayerStats.ts        pure score/hearts/buffs rules — collect*/registerHit/speedMultiplierAt/canDoubleJump (+ unit tests)
+│   ├── ParallaxBackground.ts two-layer fake-parallax background (TileSprite offset by player X), per theme
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 │   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
 ├── persistence/
@@ -335,7 +432,9 @@ src/
 public/assets/
 ├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png (hand-drawn)
 ├── entities/                 ghost-pillow.png, dream-portal.png (hand-drawn); bat.png, spike-crawler.png (Kenney)
-└── tiles/                    tileset-grass.png, tileset-desert.png, icon-*.png (Kenney, derived — see scripts/)
+├── tiles/                    tileset-grass.png, tileset-desert.png, icon-*.png (Kenney, derived — see scripts/)
+├── items/                    coin.png, heart.png, shield.png, speed.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
+└── backgrounds/               grass-{far,near}.png, desert-{far,near}.png (Kenney, derived — castle's parallax is procedural)
 
 scripts/
 └── prepare-kenney-assets.py  derives public/assets/{tiles,entities}' Kenney-sourced PNGs (one-off, not part of the build)

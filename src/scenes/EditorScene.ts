@@ -9,6 +9,7 @@ import { EditorUI } from "../editor/EditorUI";
 import { EntityPlacer } from "../editor/EntityPlacer";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
+import { ParallaxBackground } from "../gameplay/ParallaxBackground";
 import { groundFrameAt } from "../level/groundAutotile";
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
@@ -49,6 +50,10 @@ export class EditorScene extends Phaser.Scene {
   create(): void {
     this.level = this.initialLevel ?? createEmptyLevel();
     this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
+    // Static (no per-frame update — there's no player position to track
+    // while editing) so it just shows the level's parallax layers at rest;
+    // no reference needs to be kept since nothing calls back into it.
+    new ParallaxBackground(this, this.level.theme);
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }

@@ -35,6 +35,19 @@ Tile index reference (from the pack's Tiles/tile_XXXX.png, a 20-col x
 Characters/tile_00XX.png (24x24, separate sheet):
     25  = bat (brown, wings spread)
     15  = red pointy-topped crawler (spike crawler)
+Items, from the same 20x9 sheet as the ground tiles, upscaled like them:
+    151 = coin
+    44  = heart
+    67  = blue gem/shield shape (used for the Shield item)
+    152 = gold bar/gem (used for the Speed item — no literal potion in
+          this pack; Feather has no source tile at all and is drawn
+          procedurally instead, see generateTextures.ts)
+Backgrounds/tile_00XX.png (24x24, separate sheet, left natively sized —
+Phaser's TileSprite scales these at render time, not baked in):
+    0   = plain light-blue sky (grass theme, far parallax layer)
+    9   = light-blue sky with hills/trees (grass theme, near layer)
+    4   = plain orange sky (desert theme, far layer)
+    13  = orange sky with dunes/cactus silhouette (desert theme, near layer)
 """
 
 import sys
@@ -50,8 +63,16 @@ TILE_INDEX_SAND_TOP = 40
 TILE_INDEX_DIRT_FILL = 120
 TILE_INDEX_BRICK = 6
 TILE_INDEX_BOUNCE = 107
+TILE_INDEX_COIN = 151
+TILE_INDEX_HEART = 44
+TILE_INDEX_SHIELD = 67
+TILE_INDEX_SPEED = 152
 CHARACTER_INDEX_BAT = 25
 CHARACTER_INDEX_SPIKE_CRAWLER = 15
+BACKGROUND_INDEX_GRASS_FAR = 0
+BACKGROUND_INDEX_GRASS_NEAR = 9
+BACKGROUND_INDEX_DESERT_FAR = 4
+BACKGROUND_INDEX_DESERT_NEAR = 13
 
 
 def load_and_upscale(path: Path, size: int) -> Image.Image:
@@ -76,10 +97,13 @@ def main() -> None:
     src = Path(sys.argv[1])
     tiles_dir = src / "Tiles"
     characters_dir = tiles_dir / "Characters"
+    backgrounds_dir = tiles_dir / "Backgrounds"
 
     repo_root = Path(__file__).resolve().parent.parent
     tiles_out = repo_root / "public" / "assets" / "tiles"
     entities_out = repo_root / "public" / "assets" / "entities"
+    items_out = repo_root / "public" / "assets" / "items"
+    backgrounds_out = repo_root / "public" / "assets" / "backgrounds"
 
     def tile(index: int) -> Image.Image:
         return load_and_upscale(tiles_dir / f"tile_{index:04d}.png", TILE_SIZE)
@@ -104,6 +128,23 @@ def main() -> None:
     spike.save(entities_out / "spike-crawler.png")
     print(f"wrote {entities_out / 'bat.png'} {bat.size}")
     print(f"wrote {entities_out / 'spike-crawler.png'} {spike.size}")
+
+    items_out.mkdir(parents=True, exist_ok=True)
+    tile(TILE_INDEX_COIN).save(items_out / "coin.png")
+    tile(TILE_INDEX_HEART).save(items_out / "heart.png")
+    tile(TILE_INDEX_SHIELD).save(items_out / "shield.png")
+    tile(TILE_INDEX_SPEED).save(items_out / "speed.png")
+    print(f"wrote 4 item icons to {items_out}")
+
+    def background(index: int) -> Image.Image:
+        return Image.open(backgrounds_dir / f"tile_{index:04d}.png").convert("RGBA")
+
+    backgrounds_out.mkdir(parents=True, exist_ok=True)
+    background(BACKGROUND_INDEX_GRASS_FAR).save(backgrounds_out / "grass-far.png")
+    background(BACKGROUND_INDEX_GRASS_NEAR).save(backgrounds_out / "grass-near.png")
+    background(BACKGROUND_INDEX_DESERT_FAR).save(backgrounds_out / "desert-far.png")
+    background(BACKGROUND_INDEX_DESERT_NEAR).save(backgrounds_out / "desert-near.png")
+    print(f"wrote 4 background layers to {backgrounds_out}")
 
 
 if __name__ == "__main__":

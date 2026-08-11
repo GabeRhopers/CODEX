@@ -402,12 +402,12 @@ concepts, not just content:
 4. **Crumbling Block** — solid until stood on, then shakes and disappears ~1s later. Needs per-instance timer state, so it can't be pure tile-grid data the way ground is — closer to a lightweight entity that happens to render/collide like a tile.
 5. **Bounce Block** ✅ built — spring pad; contact overrides the player's Y velocity upward, higher than a normal jump. `BOUNCE_TILE`/`GROUND_FRAME_BOUNCE`; `PlayScene.onGroundCollide` checks the collided tile's index and `body.blocked.down` (so it only fires landing on the top face, not a side bump). Now real Kenney art, same castle exception as Brick.
 
-*Items* (collectibles; there are none today — this category needs a scoring/inventory concept the game currently has zero of):
-1. **Coin** — the baseline collectible; needs a running score display and a "collected" flag per placed instance so it doesn't respawn on revisit within a play session.
-2. **Extra Heart** — grants one extra hit before losing. Needs a hit-points concept to replace the current instant-lose-on-any-bad-contact rule (a real design decision, not just an asset — see open question below).
-3. **Speed Potion** — temporary move-speed multiplier with a visible timer/flashing-player cue.
-4. **Feather (double jump)** — grants a second mid-air jump; either for the rest of the level (permanent pickup) or on a timer, needs deciding.
-5. **Shield Bubble** — temporary invincibility (absorbs one hit or lasts N seconds); same hit-points prerequisite as Extra Heart.
+*Items* (collectibles; ✅ all five built 2026-08-11, resolving both the scoring/inventory gap and the hit-points open question below):
+1. **Coin** ✅ built — +1 to a running score shown in Play mode's HUD. One placed instance per level (same one-per-type scope cut as Spawn/Goal/enemies — see `Palette.ts`'s docstring), not a respawn/collected-flag system.
+2. **Extra Heart** ✅ built (as "Heart") — grants one extra absorbed hit before a bad contact costs the level. Resolved the hit-points design question below via `PlayerStats.registerHit`'s invincible/absorbed/fatal three-way branch, plus a brief post-hit grace period so one continued-contact overlap can't drain two hearts.
+3. **Speed Potion** ✅ built — a timed (6s) 1.6× move-speed multiplier; player tints yellow while active (shares the tint channel with Shield's cyan — see `PlayScene.updateBuffVisuals`).
+4. **Feather (double jump)** ✅ built — decided as a permanent-for-the-level pickup (not timed): grants a second mid-air jump, resetting each time the player lands. `PlayerController.isJumpPressed` was factored out as a shared predicate so `PlayScene` can derive its own "just pressed" edge for the second jump, since Phaser's built-in `JustDown()` doesn't work against the custom touch-button boolean state.
+5. **Shield Bubble** ✅ built (as "Shield") — a timed (8s) window of full invincibility (no hit registers at all, not even an absorbed one); reuses the same `invincibleUntil` field and cyan tint as the post-Heart-hit grace period rather than a separate visual channel.
 
 *Enemies* (new `EntityType`s alongside `enemy-ghost`; this category is the cheapest to add — the pattern already exists end to end):
 1. **Spike Crawler** ✅ built — patrols like the ghost, but never stompable (`stompable: false` in `PlayScene`'s `ENEMY_DEFS`) — any contact costs the player regardless of direction. Now real Kenney character art in place of the original Graphics-drawn placeholder.
@@ -424,21 +424,39 @@ concepts, not just content:
 5. **One-Way Warp** — touching it teleports the player to a second, paired warp tile elsewhere in the level; needs a way to link two placed entities to each other, which today's flat `entities: LevelEntity[]` array (no per-entity id/reference field) doesn't support yet.
 
 **Open design question before starting any of Items/Hazards' checkpoint/
-warp entries:** the game is currently strictly binary — any bad contact
-or falling off is an immediate loss, restart the whole level. Hearts,
-shields, and checkpoints all assume some form of "you can take a hit and
-keep going," which is a real gameplay-rules decision, not just content,
-and is worth deciding deliberately rather than backing into by shipping
-Extra Heart first. *Recommendation:* the remaining no-new-rules half of
-Blocks and Enemies (Cloud Platform, Ice, Crumbling Block, Totem Shooter,
-Hopper, Big Ghost) is still fair game to build incrementally the same
-way Brick/Bounce/Spike Crawler/Bat were; decide on hit-points/checkpoints
-as its own small design pass before starting Items/Hazards' harder half.
+warp entries — ✅ resolved 2026-08-11 for Items, still open for
+Checkpoint Flag specifically:** the game used to be strictly binary — any
+bad contact or falling off was an immediate loss, restart the whole
+level. Hearts and shields assume some form of "you can take a hit and
+keep going," which needed a real decision, not just content, before
+building on top of it. **Resolution:** `src/gameplay/PlayerStats.ts`
+introduces `registerHit()` as the single decision point — invincible
+(Shield, or the grace period right after an absorbed hit) absorbs a bad
+contact for free, an available Heart spends itself and absorbs it, no
+Hearts left is still an immediate loss, exactly as before Hearts existed.
+Deliberately **not** touched by this: falling off the bottom of the level
+stays unconditional instant-loss regardless of Hearts/Shield — "bounce
+back and keep going" fits absorbing a hazard touch but not a fall, so
+`PlayScene`'s fall-off check is unchanged. Checkpoint Flag (mid-level
+respawn on loss, not just "take an extra hit") is a bigger step than this
+resolution covers and remains an open question. *Recommendation:* the
+remaining no-new-rules half of Blocks and Enemies (Cloud Platform, Ice,
+Crumbling Block, Totem Shooter, Hopper, Big Ghost) and Hazards' non-
+checkpoint entries are still fair game to build incrementally the same
+way Brick/Bounce/Spike Crawler/Bat/Items were; decide on
+checkpoints/respawn-on-loss as its own small design pass before building
+Checkpoint Flag specifically.
 
 **M3 — Bigger levels.** Lift the one-screen cap, add camera-follow and
 scrolling in both editor and play mode; keep a sane upper bound per the
 research's FPS-on-large-maps finding. *Acceptance:* a multi-screen level
 scrolls smoothly in both editor and play, at or under the size cap.
+*Note (2026-08-11):* a parallax *background* (two themed layers, offset
+by player X) shipped ahead of this milestone — see the README's
+"Parallax background" section — but it's a fake, single-screen effect
+(`TileSprite.tilePositionX` driven by player position, no camera
+movement) that stands in for true depth cueing until this milestone lands
+real camera-follow scrolling; it doesn't reduce M3's scope.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

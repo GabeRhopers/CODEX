@@ -20,7 +20,11 @@ import { groundIconKey, groundTilesetKey, ThemeColors, THEMES } from "../level/t
  *     ground caps but no stone/castle one, so castle keeps its original
  *     procedural grey look (including its own brick/bounce frames, so a
  *     castle-themed level never mixes real art with procedural art within
- *     itself — only *between* different levels' themes).
+ *     itself — only *between* different levels' themes) — and, for the
+ *     same reason, its own procedural starfield parallax background
+ *     (ParallaxBackground.ts) rather than Kenney's daytime sky art.
+ *   - The **Feather** item's icon — the pack has no double-jump-shaped
+ *     asset (or anything close), so it's a simple drawn badge instead.
  *   - Pure UI chrome with no asset-pack equivalent: the eraser icon, the
  *     spawn marker, the hover highlight, and the palette selection outline.
  *
@@ -91,6 +95,56 @@ function drawBounce(g: Phaser.GameObjects.Graphics, offsetX: number): void {
   g.lineBetween(offsetX + 16, 27, offsetX + 22, 34);
 }
 
+const FEATHER_BADGE = 0x7ee8fa;
+const FEATHER_OUTLINE = 0x0e5a66;
+const FEATHER_MARK = 0xffffff;
+
+/** Double-jump power-up icon — styled as a rounded badge to match the real
+ * Kenney item icons' look (coin/heart/shield/speed all read as an outlined
+ * badge with a symbol inside), even though there's no source tile to match
+ * pixel-for-pixel. Two stacked chevrons read as "up, again". */
+function drawFeatherIcon(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(FEATHER_BADGE, 1);
+  g.fillRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 6);
+  g.lineStyle(2, FEATHER_OUTLINE, 1);
+  g.strokeRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 6);
+  g.lineStyle(3, FEATHER_MARK, 1);
+  g.beginPath();
+  g.moveTo(9, 19);
+  g.lineTo(16, 12);
+  g.lineTo(23, 19);
+  g.strokePath();
+  g.beginPath();
+  g.moveTo(9, 26);
+  g.lineTo(16, 19);
+  g.lineTo(23, 26);
+  g.strokePath();
+}
+
+const STAR_COLOR = 0xffffff;
+const BG_TILE_SIZE = 128;
+
+/** Deterministic pseudo-random star scatter (a plain LCG, not
+ * `Math.random`) so regenerating this texture on every boot always
+ * produces the same pattern — otherwise the "far" and "near" starfield
+ * layers would visibly jump every time a scene reloads. */
+function drawStarfield(g: Phaser.GameObjects.Graphics, skyColor: number, starCount: number, starAlpha: number, seed: number): void {
+  g.fillStyle(skyColor, 1);
+  g.fillRect(0, 0, BG_TILE_SIZE, BG_TILE_SIZE);
+  g.fillStyle(STAR_COLOR, starAlpha);
+  let s = seed;
+  const rand = () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return (s % 10000) / 10000;
+  };
+  for (let i = 0; i < starCount; i++) {
+    const x = Math.floor(rand() * BG_TILE_SIZE);
+    const y = Math.floor(rand() * BG_TILE_SIZE);
+    const size = rand() > 0.8 ? 2 : 1;
+    g.fillRect(x, y, size, size);
+  }
+}
+
 export function generateTextures(scene: Phaser.Scene): void {
   const g = scene.add.graphics();
 
@@ -107,6 +161,22 @@ export function generateTextures(scene: Phaser.Scene): void {
   drawBrick(g, TILE_SIZE * 2);
   drawBounce(g, TILE_SIZE * 3);
   g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 4, TILE_SIZE);
+
+  // Castle's parallax background (see ParallaxBackground.ts) — grass/desert
+  // use real Kenney sky art loaded in BootScene.preload instead.
+  g.clear();
+  drawStarfield(g, 0x0d0d1a, 40, 0.5, 7);
+  g.generateTexture("bg-castle-far", BG_TILE_SIZE, BG_TILE_SIZE);
+
+  g.clear();
+  drawStarfield(g, 0x14142a, 70, 0.85, 42);
+  g.generateTexture("bg-castle-near", BG_TILE_SIZE, BG_TILE_SIZE);
+
+  // Feather item icon (double jump) — see drawFeatherIcon's comment for why
+  // this one's drawn rather than sourced from the asset pack.
+  g.clear();
+  drawFeatherIcon(g);
+  g.generateTexture("item-feather", TILE_SIZE, TILE_SIZE);
 
   // Eraser palette icon: red X on light gray.
   g.clear();

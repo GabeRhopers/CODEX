@@ -32,6 +32,19 @@ export class BootScene extends Phaser.Scene {
     this.load.image("tile-bounce-icon", "assets/tiles/icon-bounce.png");
     this.load.image("enemy-bat", "assets/entities/bat.png");
     this.load.image("enemy-spike-crawler", "assets/entities/spike-crawler.png");
+
+    // Item icons (real Kenney art, except Feather — see generateTextures.ts).
+    this.load.image("item-coin", "assets/items/coin.png");
+    this.load.image("item-heart", "assets/items/heart.png");
+    this.load.image("item-speed", "assets/items/speed.png");
+    this.load.image("item-shield", "assets/items/shield.png");
+
+    // Parallax background layers (see gameplay/ParallaxBackground.ts) for
+    // grass/desert; castle's is generated (no matching sky art in the pack).
+    this.load.image("bg-grass-far", "assets/backgrounds/grass-far.png");
+    this.load.image("bg-grass-near", "assets/backgrounds/grass-near.png");
+    this.load.image("bg-desert-far", "assets/backgrounds/desert-far.png");
+    this.load.image("bg-desert-near", "assets/backgrounds/desert-near.png");
   }
 
   create(): void {
