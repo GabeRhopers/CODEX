@@ -11,9 +11,11 @@ Bounce/Spike Crawler/Bat, plus a full Items set — Coin/Heart/Speed
 Potion/Feather/Shield, all with real gameplay effects, resolving the M2
 hit-points open question — see "Items & hit-points" under Art) + a
 tabbed, categorized palette (Blocks/Markers/Enemies/Items — replacing the
-single ever-widening icon row) + a parallax scrolling background (see
-"Parallax background" under Art) + M4 (home page / level browser) + 5
-template levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home
+single ever-widening icon row) + a parallax scrolling background with a
+6-scene picker independent of level theme, including 3 original painted
+scenes (see "Parallax background & background scenes" under Art) + M4
+(home page / level browser) + 5 template levels + M8 (World Maker v1)
+done.** The game opens on a **Menu** (home
 page) — a 2x2 card grid, each with a live status line, covering
 everything there is to do: **New Level** (blank grid), **Templates**
 (5 pre-built levels to play or remix — see below), **My Levels** (your
@@ -115,6 +117,10 @@ Open the dev server URL in a browser. Controls:
   recent one.
 - **Menu**: back to the home page.
 - **Clear**: wipes the current grid and entities.
+- **Background: ▶**: cycles the level's parallax background scene through
+  the pool of 6 (independent of the level's theme — see "Parallax
+  background & background scenes" under Art), previewing live; persists on
+  Save.
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
   paint drag or single entity placement/move undoes as one step. Clear
   resets the undo history (undoing past a full level swap doesn't make
@@ -299,21 +305,54 @@ hazard/enemy touch, but doesn't fit falling the way it fits an on-screen
 hit, so `PlayScene.update`'s fall check is unchanged from before Items
 existed.
 
-**Parallax background.** Every themed scene (grass/desert/castle) now
-renders two background layers behind the level — a slow-scrolling far
-layer and a faster-scrolling near layer — for a sense of depth as the
-player moves. This project's levels are still single-screen (no camera
-panning/scrolling — that's deferred to plan doc milestone M3), so there's
-no camera to actually pan; `src/gameplay/ParallaxBackground.ts` fakes the
+**Parallax background & background scenes.** Every level renders two
+background layers behind it — a slow-scrolling far layer and a
+faster-scrolling near layer — for a sense of depth as the player moves.
+This project's levels are still single-screen (no camera panning/
+scrolling — that's deferred to plan doc milestone M3), so there's no
+camera to actually pan; `src/gameplay/ParallaxBackground.ts` fakes the
 effect instead by offsetting each background `TileSprite`'s
 `tilePositionX` by the player's X position times a small per-layer factor
-every frame, called from `PlayScene.update`. Grass and desert reuse real
-Kenney sky art (`bg-grass-{far,near}.png` / `bg-desert-{far,near}.png` —
-see below); castle has no matching sky tile in the pack, so it gets a
-small seeded-pseudo-random starfield generated the same way the rest of
-castle's procedural art is (see `generateTextures.ts`). `EditorScene` also
-gets the same layers, but static (no player position to drive an offset
-while editing) — just a themed backdrop at rest.
+every frame, called from `PlayScene.update`. `EditorScene` gets the same
+layers too, but static (no player position to drive an offset while
+editing) — just a backdrop at rest.
+
+*Which* scene renders is a level-level choice, deliberately independent
+of the level's `theme` (grass/desert/castle only recolor the ground
+tileset and the flat fallback color — see themes.ts) — a grass-themed
+level can show the snowy-mountain scene, a castle level can show the
+pirate cove, etc. `src/level/backgrounds.ts` is the pool (`BACKGROUND_SCENES`)
+and `LevelData.background` is the optional field a level stores its
+choice in (falling back to the theme's traditionally-matching scene via
+`resolveBackground` when unset, so levels saved before this feature
+existed — and the hand-authored templates, which never set it — render
+exactly as before). The editor's toolbar has a **"Background: ▶"** button
+(far right of the action-buttons row) that cycles through the pool,
+live-updating the preview (destroying and recreating the
+`ParallaxBackground` instance, since different scenes have different
+layer textures) and persisting the choice to the level on Save.
+
+The pool has six scenes. Three reuse pre-existing art as-is: `grass-sky`/
+`desert-sky` (real Kenney sky tiles) and `starfield` (the procedural
+castle night sky). The other three — `pirate-cove`, `overgrown-ruins`,
+`snowy-peaks` — are original painted scenes added specifically to replace
+an early version of this feature, which reused the small 24px Kenney sky
+tiles at 4x scale (96px effective tile width): fine as a *themed* sky, but
+its repeat became obviously visible once players moved more than a
+screen-width or two, which is exactly what prompted this rework. Each new
+scene is a wide (2048px — roughly 4x the game's own canvas width) pair of
+PNGs (`<scene>-far.png` opaque sky+stars+moon, `<scene>-near.png`
+transparent above a hand-drawn silhouette — rolling waves + distant ship
+masts for the cove, a jagged building skyline with rooftop greenery for
+the ruins, a snow-capped mountain ridge with one small volcano accent for
+the peaks) generated by `scripts/generate-painted-backgrounds.py` — see
+that script's docstring for the exact math on why 2048px means the tile
+boundary is never actually seen at today's level-size cap. Not derived
+from the Kenney pack (original art, unlike everything in the next
+section) — Pillow was used the same way it was for the ghost-pillow and
+dream-cloud portal art (vector shapes: gradients, circles, seeded random
+silhouettes), just applied to landscape scenes instead of a character
+sprite.
 
 **Real art: Kenney's "Pixel Platformer" (CC0).** The plan doc always
 recommended Kenney's CC0 packs for this, but the build sandbox's network
@@ -340,11 +379,13 @@ restriction entirely. It now provides:
   `generateTextures.ts`'s procedural art — the same "real art where it
   fits, procedural where it doesn't" split already established for the
   castle theme.
-- **The grass/desert parallax background layers** — real sky-tile art
-  from the pack's background sheet (a plain-sky "far" tile and a
-  hills/trees or dunes/cactus-silhouette "near" tile per theme); castle's
-  parallax stays procedural (a generated starfield) for the same
-  no-matching-art reason as its ground tileset.
+- **The `grass-sky`/`desert-sky` background-scene layers** — real sky-tile
+  art from the pack's background sheet (a plain-sky "far" tile and a
+  hills/trees or dunes/cactus-silhouette "near" tile); `starfield` (the
+  castle-matching scene) stays procedural for the same no-matching-art
+  reason as the castle ground tileset. The other three scenes in the pool
+  (`pirate-cove`/`overgrown-ruins`/`snowy-peaks`) are original painted art,
+  not from this pack — see "Parallax background & background scenes" above.
 - The **wizard, ghost-pillow, and dream-cloud portal stay hand-drawn** —
   they're deliberate, already-validated custom art in a specific shared
   style (see below), not placeholders, so swapping the asset pack doesn't
@@ -410,11 +451,12 @@ src/
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
 │   ├── groundAutotile.ts     derives the grass-top/buried tile frame from neighbors (+ unit tests)
 │   ├── themes.ts              theme color palettes + themed texture-key naming
+│   ├── backgrounds.ts         the theme-independent background-scene pool + resolveBackground/nextBackgroundId
 │   └── templateLevels.ts      5 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling (speed-multiplier aware; exports isJumpPressed for double-jump edge detection)
 │   ├── PlayerStats.ts        pure score/hearts/buffs rules — collect*/registerHit/speedMultiplierAt/canDoubleJump (+ unit tests)
-│   ├── ParallaxBackground.ts two-layer fake-parallax background (TileSprite offset by player X), per theme
+│   ├── ParallaxBackground.ts two-layer fake-parallax background (TileSprite offset by player X), keyed by BackgroundSceneId
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 │   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
 ├── persistence/
@@ -434,8 +476,11 @@ public/assets/
 ├── entities/                 ghost-pillow.png, dream-portal.png (hand-drawn); bat.png, spike-crawler.png (Kenney)
 ├── tiles/                    tileset-grass.png, tileset-desert.png, icon-*.png (Kenney, derived — see scripts/)
 ├── items/                    coin.png, heart.png, shield.png, speed.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
-└── backgrounds/               grass-{far,near}.png, desert-{far,near}.png (Kenney, derived — castle's parallax is procedural)
+└── backgrounds/
+    ├── grass-{far,near}.png, desert-{far,near}.png   (Kenney, derived — castle's "starfield" scene is procedural)
+    └── scenes/               pirate-cove-{far,near}.png, overgrown-ruins-{far,near}.png, snowy-peaks-{far,near}.png (original painted art)
 
 scripts/
-└── prepare-kenney-assets.py  derives public/assets/{tiles,entities}' Kenney-sourced PNGs (one-off, not part of the build)
+├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,backgrounds}' Kenney-sourced PNGs (one-off, not part of the build)
+└── generate-painted-backgrounds.py derives public/assets/backgrounds/scenes/'s original painted PNGs (one-off, not part of the build)
 ```

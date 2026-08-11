@@ -451,12 +451,21 @@ Checkpoint Flag specifically.
 scrolling in both editor and play mode; keep a sane upper bound per the
 research's FPS-on-large-maps finding. *Acceptance:* a multi-screen level
 scrolls smoothly in both editor and play, at or under the size cap.
-*Note (2026-08-11):* a parallax *background* (two themed layers, offset
-by player X) shipped ahead of this milestone — see the README's
-"Parallax background" section — but it's a fake, single-screen effect
-(`TileSprite.tilePositionX` driven by player position, no camera
+*Note (2026-08-11):* a parallax *background* (two layers, offset by
+player X) shipped ahead of this milestone — see the README's "Parallax
+background & background scenes" section — but it's a fake, single-screen
+effect (`TileSprite.tilePositionX` driven by player position, no camera
 movement) that stands in for true depth cueing until this milestone lands
 real camera-follow scrolling; it doesn't reduce M3's scope.
+*Note (2026-08-11, later same day):* the background-scene pool grew from
+3 theme-matched entries to 6 selectable ones (3 original painted scenes
+added), and background choice was decoupled from `theme` into its own
+`LevelData.background` field with an editor picker — see
+`src/level/backgrounds.ts`. Prompted by the original 3-scene version's
+small Kenney sky tiles (96px effective width) having an obviously visible
+repeat once a player crossed more than a screen-width or two; the new
+painted scenes are ~2048px wide specifically so that never happens at
+today's level-size cap.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

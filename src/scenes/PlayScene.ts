@@ -10,6 +10,7 @@ import {
 } from "../gameplay/EnemyBehaviors";
 import { createPlayerInput, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { ParallaxBackground } from "../gameplay/ParallaxBackground";
+import { resolveBackground } from "../level/backgrounds";
 import {
   canDoubleJump,
   collectCoin,
@@ -113,7 +114,7 @@ export class PlayScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
-    this.parallax = new ParallaxBackground(this, this.level.theme);
+    this.parallax = new ParallaxBackground(this, resolveBackground(this.level));
 
     const tilesetKey = groundTilesetKey(this.level.theme);
     const map = this.make.tilemap({

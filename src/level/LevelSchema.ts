@@ -1,4 +1,5 @@
 import { GRID_COLS, GRID_ROWS, MAX_GRID_COLS, MAX_GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
+import { BackgroundSceneId } from "./backgrounds";
 import { DEFAULT_THEME, LevelTheme } from "./themes";
 
 export const EMPTY_TILE = -1;
@@ -31,6 +32,11 @@ export interface LevelData {
   id: string;
   name: string;
   theme: LevelTheme;
+  /** Which parallax scene shows behind the level — independent of `theme`
+   * (see backgrounds.ts). Optional so old saved levels (and hand-authored
+   * template levels) with no field yet fall back to the theme's matching
+   * scene via `resolveBackground`, rather than needing a migration. */
+  background?: BackgroundSceneId;
   createdAt: string;
   updatedAt: string;
   width: number;
