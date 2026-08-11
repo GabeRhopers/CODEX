@@ -45,11 +45,18 @@ interface WorldPlayContext {
 interface PlaySceneData {
   level: LevelData;
   world?: WorldPlayContext;
+  /** Scene key to return to on Esc/loss when there's no `world` context —
+   * e.g. "Templates" when launched from TemplateBrowserScene's Play button
+   * (a plain scene.start, same as Worlds, not a launch/pause of Editor).
+   * Defaults to resuming the paused Editor scene, the original Test Play
+   * behavior, when omitted. */
+  returnScene?: string;
 }
 
 export class PlayScene extends Phaser.Scene {
   private level!: LevelData;
   private world?: WorldPlayContext;
+  private returnScene?: string;
   private levelStorage: StorageAdapter = new LocalStorageAdapter();
   private player!: Phaser.Physics.Arcade.Sprite;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
@@ -70,6 +77,7 @@ export class PlayScene extends Phaser.Scene {
   init(data: PlaySceneData): void {
     this.level = data.level;
     this.world = data.world;
+    this.returnScene = data.returnScene;
     this.outcome = "playing";
     this.wizardAnim = createWizardAnimState();
     this.enemies = [];
@@ -163,7 +171,7 @@ export class PlayScene extends Phaser.Scene {
     );
 
     const backLabel = this.add
-      .text(8, 8, this.world ? "← Back to Worlds (Esc)" : "← Back to Editor (Esc)", {
+      .text(8, 8, `← Back to ${this.backDestinationLabel()} (Esc)`, {
         fontSize: "13px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
@@ -177,6 +185,21 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-ESC", () => this.backToEditor());
     this.input.keyboard?.on("keydown-R", () => this.restart());
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
+  }
+
+  /** "Editor"/"Worlds"/"Templates" for the top-left back button; see
+   * backDestinationPhrase for the lowercase, mid-sentence form used in the
+   * win/lose hint text. */
+  private backDestinationLabel(): string {
+    if (this.world) return "Worlds";
+    if (this.returnScene === "Templates") return "Templates";
+    return "Editor";
+  }
+
+  private backDestinationPhrase(): string {
+    if (this.world) return "Worlds";
+    if (this.returnScene === "Templates") return "Templates";
+    return "the editor";
   }
 
   private makeOverlayButton(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
@@ -251,7 +274,7 @@ export class PlayScene extends Phaser.Scene {
       this.hint.setText("Press R to replay this level, or Esc for Worlds").setVisible(true);
     } else {
       this.banner.setText("You Win!").setVisible(true);
-      this.hint.setText("Press R to play again, or Esc for the editor").setVisible(true);
+      this.hint.setText(`Press R to play again, or Esc for ${this.backDestinationPhrase()}`).setVisible(true);
     }
     this.restartButton.setVisible(true);
   }
@@ -283,17 +306,18 @@ export class PlayScene extends Phaser.Scene {
     this.player.setVelocity(0, 0);
     this.physics.pause();
     this.banner.setText("You Lose").setVisible(true);
-    this.hint.setText("Press R to try again, or Esc for the editor").setVisible(true);
+    this.hint.setText(`Press R to try again, or Esc for ${this.backDestinationPhrase()}`).setVisible(true);
     this.restartButton.setVisible(true);
   }
 
   private restart(): void {
-    this.scene.restart({ level: this.level, world: this.world });
+    this.scene.restart({ level: this.level, world: this.world, returnScene: this.returnScene });
   }
 
   private backToEditor(): void {
     this.scene.stop();
     if (this.world) this.scene.start("WorldBrowser");
+    else if (this.returnScene) this.scene.start(this.returnScene);
     else this.scene.resume("Editor");
   }
 }

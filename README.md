@@ -7,24 +7,28 @@ the full architecture, data model, and milestone plan.
 ## Status
 
 **MVP + M1 (undo/redo) + M2 content (enemy + real goal art, plus Brick/
-Bounce/Spike Crawler/Bat) + M4 (home page / level browser) + 3 themed
-sample levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home page) instead of dropping
-straight into the editor: **New Level**, **My Levels**, or **Worlds**,
-each with a live status line. **My Levels** lists every saved level (not
-just a single most-recent slot) with Edit and Delete per row — and on a
-visitor's first-ever visit it's pre-seeded with 3 ready-to-play sample
-levels, one per visual theme (see "Sample levels" under Art below).
-**Worlds** chains any of your saved levels into a played-in-order course
-— see "World Maker" under Controls, and plan doc §9.3 M8 for the v1
-scope and what's deliberately deferred from it. Paint a level → Test
-Play → win/lose → Save → Menu → My Levels → Edit round-trips identically,
-every paint/erase/entity edit is undoable — a whole paint drag reverts as
-one step, not tile by tile — and a level can include a patrolling
-ghost-pillow enemy (stomp it from above to kill it, touch it any other
-way and you lose) plus a dream-cloud portal as the goal. See the plan doc
-§9.1 for the exact MVP scope and §9.2/§9.3 for what's still deliberately
-deferred (more tile/enemy variety, scrolling, IndexedDB, backend sharing,
-renaming levels/worlds from the browser).
+Bounce/Spike Crawler/Bat) + M4 (home page / level browser) + 5 template
+levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home
+page) — a 2x2 card grid, each with a live status line, covering
+everything there is to do: **New Level** (blank grid), **Templates**
+(5 pre-built levels to play or remix — see below), **My Levels** (your
+own saved work), **Worlds** (chain levels into a course). **My Levels**
+lists every saved level (not just a single most-recent slot) with Edit
+and Delete per row; unlike an earlier version of this project, Templates
+are no longer copied into it automatically — they live in their own
+always-available, read-only **Templates** screen instead (see "Templates
+& themes" under Art), so deleting one of your own levels never touches
+them and vice versa. **Worlds** chains any of your saved levels into a
+played-in-order course — see "World Maker" under Controls, and plan doc
+§9.3 M8 for the v1 scope and what's deliberately deferred from it. Paint
+a level → Test Play → win/lose → Save → Menu → My Levels → Edit
+round-trips identically, every paint/erase/entity edit is undoable — a
+whole paint drag reverts as one step, not tile by tile — and a level can
+include a patrolling ghost-pillow enemy (stomp it from above to kill it,
+touch it any other way and you lose) plus a dream-cloud portal as the
+goal. See the plan doc §9.1 for the exact MVP scope and §9.2/§9.3 for
+what's still deliberately deferred (more tile/enemy variety, scrolling,
+IndexedDB, backend sharing, renaming levels/worlds from the browser).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
 plus matching toolbar buttons.
@@ -52,9 +56,17 @@ npm run typecheck # type-check only, no build
 
 Open the dev server URL in a browser. Controls:
 
-- **Home page** (opens on load): **New Level** starts a fresh empty
-  editor; **My Levels** opens the level browser; **Worlds** opens the
-  world browser. Status lines show how many levels/Worlds you've saved.
+- **Home page** (opens on load): a 2x2 card grid — **New Level** starts a
+  fresh empty editor; **Templates** opens the template browser; **My
+  Levels** opens your saved-levels browser; **Worlds** opens the world
+  browser. Each card's subtitle is a live status line (how many you've
+  saved, or a nudge toward New Level/Templates when empty).
+- **Templates**: 5 pre-built levels, one per theme plus two showcasing
+  Brick/Bounce/Bat/Spike Crawler together (see "Templates & themes" under
+  Art). **Play** runs it directly; **Use This Template** opens it in the
+  editor as an independent copy (a blank id, so Save creates a new level
+  in My Levels — the template itself is never modified). **← Back**
+  returns to the home page.
 - **My Levels**: every saved level as a row (name + last-updated time)
   with **Edit** (opens it in the editor) and **Delete**. **New Level**
   and **← Back** (to the home page) are also here.
@@ -74,7 +86,10 @@ Open the dev server URL in a browser. Controls:
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; the Ghost is optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump,
-  **Esc** back to the editor, **R** to restart after winning/losing. Jump
+  **Esc** back to wherever you launched Play from (the editor for Test
+  Play, My Worlds for a World, or Templates for a template's Play
+  button — the on-screen hint always names the right one), **R** to
+  restart after winning/losing. Jump
   on top of the Ghost or Bat to squish it; touching either any other way,
   or touching a Spike Crawler at all (it can't be stomped), costs you the
   level. A Bounce block launches you noticeably higher than a normal
@@ -164,8 +179,8 @@ grid the same way when building/reloading a level. The saved level format
 is untouched: it still stores one ground/empty value per cell, exactly as
 before.
 
-**Sample levels & themes.** A level carries a `theme` (`grass`, `desert`,
-or `castle`) — purely a recolor of the ground tileset and the scene's
+**Templates & themes.** A level carries a `theme` (`grass`, `desert`, or
+`castle`) — purely a recolor of the ground tileset and the scene's
 background, never gameplay data, so TilePainter/groundAutotile stay
 theme-agnostic and any level can be reskinned by changing one field. New
 levels default to `grass` (unchanged from before themes existed); old
@@ -173,12 +188,29 @@ saved levels with no `theme` field are treated as `grass` on load (see
 `LevelSerializer.deserializeLevel`). `src/level/themes.ts` holds the
 color palette per theme and the themed texture-key naming; the palette's
 Ground brush icon and the editor/play tileset both follow the current
-level's theme automatically. `src/level/sampleLevels.ts` hand-authors one
-short, beatable level per theme — Sunny Hills (grass), Desert Canyon
-(desert), Castle Ascent (castle, a vertical staircase climb) — each with
-gaps and steps sized well within the player's jump range, and seeds all
-three into My Levels on a visitor's first-ever visit via a one-time
-`localStorage` flag (deleting a sample afterward doesn't bring it back).
+level's theme automatically.
+
+`src/level/templateLevels.ts` hand-authors 5 beatable levels, exported as
+`TEMPLATE_LEVELS` and served by `TemplateBrowserScene` — always
+available, never written to `localStorage` (a change from an earlier
+version of this project, which copied them into My Levels on first
+visit): Sunny Hills (grass), Desert Canyon (desert), and Castle Ascent
+(castle, a vertical staircase climb) each keep gaps/steps sized well
+within the player's normal jump; **Spring Meadow** (grass) and **Crate
+Canyon** (desert) additionally showcase Brick, Bounce, Bat, and Spike
+Crawler together. Both put the goal on a platform reachable only by
+bouncing — `BOUNCE_TILE`'s ~7.3-tile launch (`h = v²/2g` with
+`BOUNCE_VELOCITY_Y=-650`, `GRAVITY_Y=900`) is far past normal-jump range,
+so the platform is placed several tiles *to the side* of the pad rather
+than directly above it: a player is still rising (not falling) when they
+first reach that height, so a platform straight up would hit the
+player's head like a ceiling instead of catching them from below. Placing
+it beside the pad means the player is already descending by the time
+their held-direction drift carries them into its column range — landing
+on top the way a floating platform normally works. Verified in-browser
+with an actual playthrough, not just the math, per this project's usual
+practice of manually re-verifying anything touching physics/rendering
+(see the plan doc §10).
 
 **New blocks & enemies (first slice of the M2 content list).** Two blocks
 and two enemies, picked because they slot into the existing architecture
@@ -259,10 +291,11 @@ src/
 ├── main.ts                  Phaser game config + boot
 ├── scenes/
 │   ├── BootScene.ts          loads wizard/Kenney/entity art + procedural textures, starts Menu
-│   ├── MenuScene.ts          home page: New Level / My Levels / Worlds
+│   ├── MenuScene.ts          home page: 2x2 card grid (New Level / Templates / My Levels / Worlds)
+│   ├── TemplateBrowserScene.ts lists TEMPLATE_LEVELS with Play/Use This Template
 │   ├── LevelBrowserScene.ts  lists saved levels with Edit/Delete
 │   ├── EditorScene.ts        palette + grid painting + save/test-play
-│   ├── PlayScene.ts          runs a level with Arcade Physics (optionally chained via a World)
+│   ├── PlayScene.ts          runs a level with Arcade Physics (optionally chained via a World or returning to Templates)
 │   ├── WorldBrowserScene.ts  lists saved Worlds with Play/Edit/Delete
 │   └── WorldMakerScene.ts    build/edit a World's level order
 ├── editor/
@@ -282,7 +315,7 @@ src/
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
 │   ├── groundAutotile.ts     derives the grass-top/buried tile frame from neighbors (+ unit tests)
 │   ├── themes.ts              theme color palettes + themed texture-key naming
-│   └── sampleLevels.ts        3 hand-authored levels (one per theme) + first-visit seeding
+│   └── templateLevels.ts      5 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering

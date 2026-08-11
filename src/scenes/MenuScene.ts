@@ -1,16 +1,23 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
-import { ensureSampleLevelsSeeded } from "../level/sampleLevels";
+import { TEMPLATE_LEVELS } from "../level/templateLevels";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { LocalWorldStorageAdapter } from "../persistence/LocalWorldStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 
+const CARD_WIDTH = 480;
+const CARD_HEIGHT = 72;
+const CARD_GAP_X = 24;
+const CARD_GAP_Y = 16;
+const GRID_TOP = 112;
+
 /**
- * Home page: the game's entry point after boot. Three ways in from here —
- * start a fresh level, browse/manage previously saved ones, or chain
- * levels into a World — rather than always dropping straight into an
- * empty editor.
+ * Home page: the game's entry point after boot. A 2x2 card grid covers the
+ * four things there are to do — start something new, browse ready-made
+ * templates, pick up your own saved work, or chain levels into a course —
+ * each with a live status line instead of a bare button label, so the
+ * whole picture (how much you've built) is visible without navigating in.
  */
 export class MenuScene extends Phaser.Scene {
   private levelStorage: StorageAdapter = new LocalStorageAdapter();
@@ -23,55 +30,66 @@ export class MenuScene extends Phaser.Scene {
   create(): void {
     const cx = GAME_WIDTH / 2;
 
-    this.add.image(cx - 260, 130, "wizard-idle").setScale(1.6);
-    this.add.image(cx + 220, 150, "enemy-ghost-pillow").setScale(1.3);
-    this.add.image(cx + 300, 100, "goal-portal").setScale(1.1);
+    this.add.image(50, 34, "wizard-idle").setScale(1.1);
+    this.add.image(GAME_WIDTH - 66, 34, "enemy-ghost-pillow").setScale(0.9);
+    this.add.image(GAME_WIDTH - 34, 34, "goal-portal").setScale(0.75);
 
     this.add
-      .text(cx, 62, "Mario Maker–Style Level Editor", {
-        fontSize: "26px",
+      .text(cx, 26, "Mario Maker–Style Level Editor", {
+        fontSize: "24px",
         color: "#ffffff",
         fontStyle: "bold",
       })
       .setOrigin(0.5);
 
     this.add
-      .text(cx, 98, "Paint a level, place a spawn and a goal, then play it — or chain a few into a World.", {
-        fontSize: "13px",
+      .text(cx, 56, "Paint a level, place a spawn and a goal, then play it — or chain a few into a World.", {
+        fontSize: "12px",
         color: "#c8c8e0",
       })
       .setOrigin(0.5);
 
-    this.makeMenuButton(cx, 192, "New Level", () => this.scene.start("Editor"));
-    this.makeMenuButton(cx, 244, "My Levels", () => this.scene.start("LevelBrowser"));
-    this.makeMenuButton(cx, 296, "Worlds", () => this.scene.start("WorldBrowser"));
+    const leftX = cx - CARD_WIDTH - CARD_GAP_X / 2;
+    const rightX = cx + CARD_GAP_X / 2;
+    const row1Y = GRID_TOP;
+    const row2Y = GRID_TOP + CARD_HEIGHT + CARD_GAP_Y;
 
-    const levelStatusText = this.add
-      .text(cx, 348, "Checking saved levels…", { fontSize: "13px", color: "#8888aa" })
-      .setOrigin(0.5);
-    const worldStatusText = this.add
-      .text(cx, 366, "", { fontSize: "11px", color: "#666688" })
-      .setOrigin(0.5);
+    this.makeCard(leftX, row1Y, "marker-spawn", "New Level", "Start from a blank grid", () =>
+      this.scene.start("Editor"),
+    );
 
-    // First-ever visit seeds 3 ready-to-play sample levels, one per visual
-    // theme (grass/desert/castle) so My Levels isn't empty; a flag in
-    // localStorage makes this run once per browser, so deleting a sample
-    // later doesn't bring it back.
-    void ensureSampleLevelsSeeded(this.levelStorage)
-      .then(() => this.levelStorage.list())
-      .then((levels) => {
-        levelStatusText.setText(
-          levels.length === 0
-            ? "No saved levels yet — start with New Level."
-            : `${levels.length} saved level${levels.length === 1 ? "" : "s"} waiting in My Levels.`,
-        );
-      });
+    const templateSubtitle = this.makeCard(
+      rightX,
+      row1Y,
+      "tile-brick-icon",
+      "Templates",
+      "Checking templates…",
+      () => this.scene.start("Templates"),
+    );
+    templateSubtitle.setText(
+      `${TEMPLATE_LEVELS.length} pre-built levels — play one, or use it as a starting point`,
+    );
+
+    const myLevelsSubtitle = this.makeCard(leftX, row2Y, "wizard-idle", "My Levels", "Checking saved levels…", () =>
+      this.scene.start("LevelBrowser"),
+    );
+    const worldsSubtitle = this.makeCard(rightX, row2Y, "goal-portal", "Worlds", "Checking Worlds…", () =>
+      this.scene.start("WorldBrowser"),
+    );
+
+    void this.levelStorage.list().then((levels) => {
+      myLevelsSubtitle.setText(
+        levels.length === 0
+          ? "No saved levels yet — start with New Level or a Template"
+          : `${levels.length} saved level${levels.length === 1 ? "" : "s"}`,
+      );
+    });
 
     void this.worldStorage.list().then((worlds) => {
-      worldStatusText.setText(
+      worldsSubtitle.setText(
         worlds.length === 0
-          ? "No Worlds yet — chain a few levels together in Worlds."
-          : `${worlds.length} World${worlds.length === 1 ? "" : "s"} saved.`,
+          ? "No Worlds yet — chain a few levels together"
+          : `${worlds.length} World${worlds.length === 1 ? "" : "s"} saved`,
       );
     });
 
@@ -90,7 +108,7 @@ export class MenuScene extends Phaser.Scene {
     // device viewport, unlike this.scale's always-landscape internal size.
     if (window.innerWidth < window.innerHeight) {
       this.add
-        .text(cx, 130, "Tip: rotate your phone sideways for a bigger view", {
+        .text(cx, row2Y + CARD_HEIGHT + 20, "Tip: rotate your phone sideways for a bigger view", {
           fontSize: "12px",
           color: "#ffd166",
           backgroundColor: "#000000aa",
@@ -100,18 +118,36 @@ export class MenuScene extends Phaser.Scene {
     }
   }
 
-  private makeMenuButton(cx: number, y: number, label: string, onClick: () => void): void {
-    const text = this.add
-      .text(cx, y, label, {
-        fontSize: "20px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 24, y: 12 },
-      })
-      .setOrigin(0.5)
+  /** Returns the subtitle Text object so callers can swap in a live status
+   * line once an async list() resolves, instead of a separate footer row. */
+  private makeCard(
+    x: number,
+    y: number,
+    iconKey: string,
+    title: string,
+    subtitle: string,
+    onClick: () => void,
+  ): Phaser.GameObjects.Text {
+    const bg = this.add
+      .rectangle(x, y, CARD_WIDTH, CARD_HEIGHT, 0x0f3460)
+      .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true });
-    text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: "#0f3460" }));
+
+    const icon = this.add.image(x + 38, y + CARD_HEIGHT / 2, iconKey).setOrigin(0.5);
+    const scale = Math.min(1, 38 / icon.width, 38 / icon.height);
+    icon.setScale(scale);
+
+    this.add.text(x + 76, y + 14, title, { fontSize: "18px", color: "#ffffff", fontStyle: "bold" });
+    const subtitleText = this.add.text(x + 76, y + 40, subtitle, {
+      fontSize: "11px",
+      color: "#b8b8d0",
+      wordWrap: { width: CARD_WIDTH - 92 },
+    });
+
+    bg.on("pointerdown", onClick);
+    bg.on("pointerover", () => bg.setFillStyle(0x3a5a9c));
+    bg.on("pointerout", () => bg.setFillStyle(0x0f3460));
+
+    return subtitleText;
   }
 }
