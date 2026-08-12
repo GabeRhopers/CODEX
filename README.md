@@ -198,6 +198,22 @@ grid the same way when building/reloading a level. The saved level format
 is untouched: it still stores one ground/empty value per cell, exactly as
 before.
 
+Picking the right frame is only half of "no border," though — the source
+art matters too. The Kenney grass/sand/dirt tiles this project uses
+(`TILE_INDEX_GRASS_TOP`/`SAND_TOP`/`DIRT_FILL` in
+`prepare-kenney-assets.py`) turned out to be the pack's standalone-block
+variants, not the seamless-interior ones Kenney's own demo actually
+composites together — each has a ~2px bevel baked into some or all of its
+4 edges, confirmed pixel-exact against the untouched 18x18 source (not an
+upscaling artifact). Two placed-adjacent ground tiles each contributing
+their own half of that bevel is exactly what produced the "huge gaps
+between blocks" look — visible as a grid of individually-outlined blocks
+instead of one solid mass, even though the autotile logic above was
+already correctly picking one continuous frame. `load_terrain_tile()` in
+the prep script crops that border away before upscaling, for ground tiles
+only; Brick keeps its border on purpose (see below) since it's meant to
+read as a distinct block, not merging terrain.
+
 **Templates & themes.** A level carries a `theme` (`grass`, `desert`, or
 `castle`) — purely a recolor of the ground tileset and the scene's
 background, never gameplay data, so TilePainter/groundAutotile stay
@@ -239,7 +255,10 @@ hit-points concept the game doesn't have yet):
 - **Brick** (`BRICK_TILE`) — a second solid ground-layer value alongside
   plain ground; always renders as its own fixed frame regardless of
   neighbors, unlike ground's neighbor-derived autotiling (see
-  `groundFrameAt` in `groundAutotile.ts`).
+  `groundFrameAt` in `groundAutotile.ts`). Its Kenney source art keeps its
+  visible border (unlike Ground's, which is stripped — see "Ground tiles
+  merge with their neighbors" above) so it reads as a distinct block type
+  at a glance, not as a variant of plain terrain.
 - **Bounce** (`BOUNCE_TILE`) — same idea, but `PlayScene`'s ground
   collider callback checks `tile.index` against the bounce frame and, if
   the player is landing on its top face (`body.blocked.down`), overrides
@@ -365,7 +384,10 @@ restriction entirely. It now provides:
   replacing their procedural equivalents. **Castle keeps its original
   procedural grey stone** — the pack is a nature/outdoor set with no
   stone/castle-style tile, so there's nothing to swap it for; this is a
-  deliberate, permanent split, not a TODO.
+  deliberate, permanent split, not a TODO. *Ground tiles merge with no
+  outline, by design* — see "Ground tiles merge with their neighbors"
+  above for the autotile logic, and note below for why the raw source art
+  needed one extra processing step to actually achieve that.
 - **Brick and Bounce** — a real wooden crate and a real compressed spring
   pad, used in every theme *except* castle (which keeps procedural
   versions of these too, so a castle-themed level never mixes real and

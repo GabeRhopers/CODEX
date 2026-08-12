@@ -32,6 +32,21 @@ Tile index reference (from the pack's Tiles/tile_XXXX.png, a 20-col x
     120 = plain dirt, no cap ("buried" fill — shared by every theme)
     6   = brick/crate block (shared by every real-art theme)
     107 = compressed spring/bounce pad (shared by every real-art theme)
+
+Ground tiles need their baked-in border stripped; Brick/Bounce don't:
+these particular indices (0/40/120) are Kenney's standalone-block
+variants of grass/dirt, not the seamless-interior variants their own
+Preview.png/SampleA.png demo actually uses — each one has a solid ~2px
+bevel (RGB 67,74,95) baked into some or all of its 4 edges (confirmed
+pixel-exact against the untouched 18x18 source, so it's not an artifact
+of this script's own upscaling). Left in place, two placed-adjacent
+ground tiles each contribute their own half of that bevel, and the
+combined ~4px stripe reads as a visible gap/outline between blocks —
+exactly the "huge gaps between blocks" bug this function fixes. Brick
+keeps its border on purpose: unlike ground, it's meant to read as a
+discrete block (matches the genre convention of a visibly-bordered brick
+block, and this game already uses it as something visually distinct from
+plain ground) — see load_terrain_tile below for the actual crop.
 Characters/tile_00XX.png (24x24, separate sheet):
     25  = bat (brown, wings spread)
     15  = red pointy-topped crawler (spike crawler)
@@ -80,6 +95,25 @@ def load_and_upscale(path: Path, size: int) -> Image.Image:
     return im.resize((size, size), Image.NEAREST)
 
 
+# Thickness (at the source's native 18px resolution) of the baked-in bevel
+# border on Kenney's grass/sand/dirt tiles — see the module docstring.
+TERRAIN_BORDER_PX = 2
+
+
+def load_terrain_tile(path: Path, size: int) -> Image.Image:
+    """Like load_and_upscale, but for ground tiles only: crops away the
+    source's baked-in border first so adjacent placed tiles merge into one
+    seamless mass instead of each showing its own outline. Safe to apply
+    uniformly on all 4 sides even where a given tile has no border on some
+    of them (e.g. dirt_fill's top/bottom) — there's no border there to
+    strip, so that edge just loses 2px of ordinary interior pattern, which
+    tiles exactly the same way the un-cropped interior did."""
+    im = Image.open(path).convert("RGBA")
+    w, h = im.size
+    interior = im.crop((TERRAIN_BORDER_PX, TERRAIN_BORDER_PX, w - TERRAIN_BORDER_PX, h - TERRAIN_BORDER_PX))
+    return interior.resize((size, size), Image.NEAREST)
+
+
 def save_strip(frames: list[Image.Image], path: Path) -> None:
     strip = Image.new("RGBA", (TILE_SIZE * len(frames), TILE_SIZE), (0, 0, 0, 0))
     for i, frame in enumerate(frames):
@@ -108,9 +142,12 @@ def main() -> None:
     def tile(index: int) -> Image.Image:
         return load_and_upscale(tiles_dir / f"tile_{index:04d}.png", TILE_SIZE)
 
-    grass_top = tile(TILE_INDEX_GRASS_TOP)
-    sand_top = tile(TILE_INDEX_SAND_TOP)
-    dirt_fill = tile(TILE_INDEX_DIRT_FILL)
+    # Ground tiles merge seamlessly (border stripped); Brick/Bounce keep
+    # their border, since they're meant to read as distinct blocks — see
+    # load_terrain_tile's docstring.
+    grass_top = load_terrain_tile(tiles_dir / f"tile_{TILE_INDEX_GRASS_TOP:04d}.png", TILE_SIZE)
+    sand_top = load_terrain_tile(tiles_dir / f"tile_{TILE_INDEX_SAND_TOP:04d}.png", TILE_SIZE)
+    dirt_fill = load_terrain_tile(tiles_dir / f"tile_{TILE_INDEX_DIRT_FILL:04d}.png", TILE_SIZE)
     brick = tile(TILE_INDEX_BRICK)
     bounce = tile(TILE_INDEX_BOUNCE)
 
