@@ -59,16 +59,16 @@ export class BootScene extends Phaser.Scene {
 
     // Parallax background layers (see gameplay/ParallaxBackground.ts and
     // level/backgrounds.ts for the theme-independent "background scene"
-    // pool). Grass/desert use real Kenney sky art; castle's starfield is
-    // generated (no matching sky art in the pack) — see generateTextures.ts.
-    this.load.image("bg-grass-far", "assets/backgrounds/grass-far.png");
-    this.load.image("bg-grass-near", "assets/backgrounds/grass-near.png");
-    this.load.image("bg-desert-far", "assets/backgrounds/desert-far.png");
-    this.load.image("bg-desert-near", "assets/backgrounds/desert-near.png");
-
-    // Two more real-Kenney-sky background scenes (icy/jungle), not tied to
-    // any one theme — same "scenes" folder as the painted ones below, but
-    // real art like grass/desert's, loaded the same simple way.
+    // pool). Every layer is a large, fixed-size (2048x476) baked image —
+    // grass/desert/icy/jungle started as tiny real Kenney sky tiles and
+    // were pre-tiled up to this format by scripts/composite-sky-backgrounds.py
+    // (so ParallaxBackground's zoom+pan never stretches a small source);
+    // castle's starfield is generated directly at this size (no matching
+    // sky art in the pack) — see generateTextures.ts.
+    this.load.image("bg-grass-far", "assets/backgrounds/scenes/grass-sky-far.png");
+    this.load.image("bg-grass-near", "assets/backgrounds/scenes/grass-sky-near.png");
+    this.load.image("bg-desert-far", "assets/backgrounds/scenes/desert-sky-far.png");
+    this.load.image("bg-desert-near", "assets/backgrounds/scenes/desert-sky-near.png");
     this.load.image("bg-icy-sky-far", "assets/backgrounds/scenes/icy-sky-far.png");
     this.load.image("bg-icy-sky-near", "assets/backgrounds/scenes/icy-sky-near.png");
     this.load.image("bg-jungle-sky-far", "assets/backgrounds/scenes/jungle-sky-far.png");

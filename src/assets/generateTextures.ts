@@ -146,7 +146,11 @@ function drawFeatherIcon(g: Phaser.GameObjects.Graphics): void {
 }
 
 const STAR_COLOR = 0xffffff;
-const BG_TILE_SIZE = 128;
+// Matches the painted scenes' baked-background format (see
+// ParallaxBackground.ts) — large and fixed rather than a small tile, so the
+// new zoom+pan renderer never has to stretch a small source image.
+const BG_SCENE_WIDTH = 2048;
+const BG_SCENE_HEIGHT = 476;
 
 /** Deterministic pseudo-random star scatter (a plain LCG, not
  * `Math.random`) so regenerating this texture on every boot always
@@ -154,7 +158,7 @@ const BG_TILE_SIZE = 128;
  * layers would visibly jump every time a scene reloads. */
 function drawStarfield(g: Phaser.GameObjects.Graphics, skyColor: number, starCount: number, starAlpha: number, seed: number): void {
   g.fillStyle(skyColor, 1);
-  g.fillRect(0, 0, BG_TILE_SIZE, BG_TILE_SIZE);
+  g.fillRect(0, 0, BG_SCENE_WIDTH, BG_SCENE_HEIGHT);
   g.fillStyle(STAR_COLOR, starAlpha);
   let s = seed;
   const rand = () => {
@@ -162,8 +166,8 @@ function drawStarfield(g: Phaser.GameObjects.Graphics, skyColor: number, starCou
     return (s % 10000) / 10000;
   };
   for (let i = 0; i < starCount; i++) {
-    const x = Math.floor(rand() * BG_TILE_SIZE);
-    const y = Math.floor(rand() * BG_TILE_SIZE);
+    const x = Math.floor(rand() * BG_SCENE_WIDTH);
+    const y = Math.floor(rand() * BG_SCENE_HEIGHT);
     const size = rand() > 0.8 ? 2 : 1;
     g.fillRect(x, y, size, size);
   }
@@ -190,12 +194,12 @@ export function generateTextures(scene: Phaser.Scene): void {
   // Castle's parallax background (see ParallaxBackground.ts) — grass/desert
   // use real Kenney sky art loaded in BootScene.preload instead.
   g.clear();
-  drawStarfield(g, 0x0d0d1a, 40, 0.5, 7);
-  g.generateTexture("bg-castle-far", BG_TILE_SIZE, BG_TILE_SIZE);
+  drawStarfield(g, 0x0d0d1a, 900, 0.5, 7);
+  g.generateTexture("bg-castle-far", BG_SCENE_WIDTH, BG_SCENE_HEIGHT);
 
   g.clear();
-  drawStarfield(g, 0x14142a, 70, 0.85, 42);
-  g.generateTexture("bg-castle-near", BG_TILE_SIZE, BG_TILE_SIZE);
+  drawStarfield(g, 0x14142a, 1500, 0.85, 42);
+  g.generateTexture("bg-castle-near", BG_SCENE_WIDTH, BG_SCENE_HEIGHT);
 
   // Feather item icon (double jump) — see drawFeatherIcon's comment for why
   // this one's drawn rather than sourced from the asset pack.

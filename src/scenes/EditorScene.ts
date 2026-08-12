@@ -56,7 +56,9 @@ export class EditorScene extends Phaser.Scene {
     this.backgroundId = resolveBackground(this.level);
     // Static (no per-frame update — there's no player position to track
     // while editing) so it just shows the level's parallax layers at rest.
-    this.parallax = new ParallaxBackground(this, this.backgroundId);
+    // Bounded to the level's actual placeable width, not the (often wider,
+    // to fit the toolbar) canvas — see ParallaxBackground's docstring.
+    this.parallax = new ParallaxBackground(this, this.backgroundId, this.level.width * TILE_SIZE);
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }
@@ -201,7 +203,7 @@ export class EditorScene extends Phaser.Scene {
     this.backgroundId = nextBackgroundId(this.backgroundId);
     this.level.background = this.backgroundId;
     this.parallax.destroy();
-    this.parallax = new ParallaxBackground(this, this.backgroundId);
+    this.parallax = new ParallaxBackground(this, this.backgroundId, this.level.width * TILE_SIZE);
     this.ui.setBackgroundLabel(backgroundScene(this.backgroundId).label);
   }
 

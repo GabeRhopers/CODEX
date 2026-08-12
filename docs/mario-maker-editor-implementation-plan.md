@@ -473,6 +473,27 @@ small Kenney sky tiles (96px effective width) having an obviously visible
 repeat once a player crossed more than a screen-width or two; the new
 painted scenes are ~2048px wide specifically so that never happens at
 today's level-size cap.
+*Note (2026-08-12):* `ParallaxBackground.ts` was rewritten from a
+live-tiling `TileSprite` (offset by `tilePositionX`) to a "zoom and
+clamped pan" `Image` renderer — see the README's "Parallax background &
+background scenes" section for the full mechanism. Two things prompted
+it: (1) the old technique rendered across the full canvas width
+(`GAME_WIDTH`, padded out to fit the toolbar), which is usually wider than
+a level's actual placeable grid — the unplaceable margin got painted with
+scenery, making it look like part of the level even though placement
+there was always silently rejected, which was reported as "can't place
+anything on the right half of the screen." (2) even setting that aside,
+a `TileSprite`'s repeat is a "not visible at today's size caps" argument,
+not a structural guarantee. The new renderer fixes both: a `GeometryMask`
+clips every layer to exactly the level's real pixel width, and the pan
+offset is clamped to the zoomed image's own actual excess width, so a
+repeat/edge is impossible regardless of level size. The pool now also has
+8 scenes (`icy-sky`/`jungle-sky` had already been added since the note
+above); all eight — including the four that started as small 24x24 Kenney
+sky tiles — are now baked to the same fixed 2048x476 canvas
+(`scripts/composite-sky-backgrounds.py` for the Kenney-derived four,
+`drawStarfield` at that size for the procedural one) so one renderer
+handles every scene with no special-casing.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

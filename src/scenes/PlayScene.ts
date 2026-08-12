@@ -134,7 +134,9 @@ export class PlayScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
-    this.parallax = new ParallaxBackground(this, resolveBackground(this.level));
+    // Bounded to the level's actual width, not the (often wider, to fit the
+    // editor toolbar) canvas — see ParallaxBackground's docstring.
+    this.parallax = new ParallaxBackground(this, resolveBackground(this.level), this.level.width * TILE_SIZE);
 
     const tilesetKey = groundTilesetKey(this.level.theme);
     const map = this.make.tilemap({
