@@ -498,6 +498,20 @@ patched further (along with `scripts/composite-sky-backgrounds.py` and
 the Kenney background-sheet extraction in prepare-kenney-assets.py, both
 now unused), leaving 4 scenes: `starfield` (procedural, no tiling
 involved) plus the three original painted scenes.
+*Note (2026-08-12, still later the same day):* the project owner pasted
+the reference images the three painted scenes were originally
+commissioned to match, plus a new fourth reference (a sunny green
+valley) — but pasted images aren't saved anywhere this session can read
+as files, only shown inline, so `scripts/generate-painted-backgrounds.py`
+recreates each one as closer original art (much more detail/color than
+the previous silhouette-only version) rather than reproducing the
+references pixel-for-pixel. Added `green-valley` as a new scene and
+reordered the pool so all four painted scenes lead (`starfield` moved
+last, since it's the only non-painted one) — pool order is now
+`green-valley`, `pirate-cove`, `overgrown-ruins`, `snowy-peaks`,
+`starfield`. `green-valley` is also the new default for the grass theme
+(`DEFAULT_BY_THEME.grass`), which — since `"grass"` is `DEFAULT_THEME` in
+themes.ts — makes it what a brand-new level shows by default.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

@@ -121,7 +121,7 @@ Open the dev server URL in a browser. Controls:
 - **Menu**: back to the home page.
 - **Clear**: wipes the current grid and entities.
 - **Background: ▶**: cycles the level's parallax background scene through
-  the pool of 4 (independent of the level's theme — see "Parallax
+  the pool of 5 (independent of the level's theme — see "Parallax
   background & background scenes" under Art), previewing live; persists on
   Save.
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
@@ -378,21 +378,34 @@ and recreating the `ParallaxBackground` instance, since different scenes
 have different layer textures) and persisting the choice to the level on
 Save.
 
-The pool has four scenes, and every one of them is a large, fixed
-2048x476 image pair (matching `GAME_HEIGHT` exactly): `starfield` (the
-procedural castle night sky, generated directly at that size by
-`drawStarfield` in `src/assets/generateTextures.ts`) and three original
-painted scenes — `pirate-cove`, `overgrown-ruins`, `snowy-peaks` — from
-`scripts/generate-painted-backgrounds.py` (`<scene>-far.png` opaque
-sky+stars+moon, `<scene>-near.png` transparent above a hand-drawn
-silhouette — rolling waves + distant ship masts for the cove, a jagged
-building skyline with rooftop greenery for the ruins, a snow-capped
-mountain ridge with one small volcano accent for the peaks). Not derived
-from the Kenney pack (original art, unlike everything in the next
-section) — Pillow was used the same way it was for the ghost-pillow and
-dream-cloud portal art (vector shapes: gradients, circles, seeded random
-silhouettes), just applied to landscape scenes instead of a character
-sprite.
+The pool has five scenes, and every one of them is a large, fixed
+2048x476 image pair (matching `GAME_HEIGHT` exactly). Four are original
+painted scenes from `scripts/generate-painted-backgrounds.py`
+(`<scene>-far.png` opaque sky + sun/moon/stars/clouds, `<scene>-near.png`
+transparent above a painted foreground), commissioned to match specific
+reference images the project owner provided — recreated as original art
+rather than reproduced pixel-for-pixel, since the script has no access to
+the reference files themselves. In pool order (see below for why this
+order): `green-valley` (sunny hills, sun, drifting clouds, a winding
+path, grazing sheep, tree-lined slopes — the pool's default), `pirate-cove`
+(a wrecked galleon under a crescent moon, tattered sails, a skull flag,
+flanking palm trees), `overgrown-ruins` (moss-swallowed towers with
+window grids and hanging vines, a stalled elevated train, a "?" block
+easter egg), and `snowy-peaks` (a jagged snow-capped range, a
+lava-glowing volcano with rising smoke, drifting clouds, foreground
+pines). The fifth, `starfield` (the procedural castle night sky,
+generated directly at 2048x476 by `drawStarfield` in
+`src/assets/generateTextures.ts`), is the only one not painted — Pillow
+was used for the four painted scenes the same way it was for the
+ghost-pillow and dream-cloud portal art (vector shapes: gradients,
+circles, seeded random placement), just applied to landscape scenes
+instead of a character sprite.
+
+The four painted scenes lead the pool (in front of `starfield`, which
+used to be first) and `green-valley` is the overall default —
+`DEFAULT_BY_THEME.grass` in backgrounds.ts points to it, and `"grass"` is
+also `DEFAULT_THEME` (themes.ts), so it's what a brand-new level shows
+before anyone touches the background picker.
 
 The pool used to also have `grass-sky`/`desert-sky`/`icy-sky`/
 `jungle-sky` — small (24x24) Kenney sky tiles, first shown via the old
@@ -404,9 +417,9 @@ across a large canvas still reads as an obvious grid of identical tiny
 icons up close — a "wallpaper" look, not real scenery — so all four were
 dropped from the pool entirely rather than patched further. `starfield`
 didn't have this problem (its star scatter is randomized across the
-whole canvas, not one small tile repeated) and neither do the three
+whole canvas, not one small tile repeated) and neither do the four
 painted scenes (authored at full size from the start, no tiling
-involved), which is why those four are what remain.
+involved), which is why those five are what remain.
 
 **Second content pass.** A deliberate push to use a meaningfully larger
 share of the Kenney pack (it has 231 tiles across its three sheets; the
@@ -515,10 +528,10 @@ restriction entirely. It now provides:
   sky-tile art from the pack's background sheet (`grass-sky`/`desert-sky`/
   `icy-sky`/`jungle-sky`) was tried, but even baked up to a large canvas a
   small tile repeated across it still reads as an obvious grid of tiny
-  icons, not real scenery — so all four were dropped. The pool is now
-  `starfield` (procedural, for the same no-matching-art reason as the
-  castle ground tileset) plus three original painted scenes
-  (`pirate-cove`/`overgrown-ruins`/`snowy-peaks`) — see "Parallax
+  icons, not real scenery — so all four were dropped. The pool is now four
+  original painted scenes (`green-valley`/`pirate-cove`/`overgrown-ruins`/
+  `snowy-peaks`) plus `starfield` (procedural, for the same
+  no-matching-art reason as the castle ground tileset) — see "Parallax
   background & background scenes" above.
 - The **wizard, ghost-pillow, and dream-cloud portal stay hand-drawn** —
   they're deliberate, already-validated custom art in a specific shared
@@ -613,7 +626,7 @@ public/assets/
 ├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
 ├── decor/                    bush/tree/cactus/lamp/cloud/snowman/sprout/mushroom/rocks.png — purely cosmetic (Kenney, derived)
 └── backgrounds/
-    └── scenes/               every background-scene layer, all a fixed 2048x476: pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art, not Kenney-derived) — castle's "starfield" scene is procedural, generated at the same size
+    └── scenes/               every background-scene layer, all a fixed 2048x476: green-valley/pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art, not Kenney-derived) — castle's "starfield" scene is procedural, generated at the same size
 
 scripts/
 ├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,decor}' Kenney-sourced PNGs (one-off, not part of the build)

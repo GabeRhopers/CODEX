@@ -1,6 +1,6 @@
 import { LevelTheme } from "./themes";
 
-export type BackgroundSceneId = "starfield" | "pirate-cove" | "overgrown-ruins" | "snowy-peaks";
+export type BackgroundSceneId = "green-valley" | "pirate-cove" | "overgrown-ruins" | "snowy-peaks" | "starfield";
 
 interface ParallaxLayerDef {
   textureKey: string;
@@ -33,21 +33,24 @@ interface BackgroundScene {
  * large canvas still reads as an obvious grid of identical tiny icons up
  * close — a "wallpaper" look, not real scenery — so those four were
  * dropped from the pool entirely rather than patched further.
+ * `green-valley`/`pirate-cove`/`overgrown-ruins`/`snowy-peaks` are
+ * original painted scenes from scripts/generate-painted-backgrounds.py,
+ * authored at this size from the start with no tiling involved at all —
+ * commissioned to match specific reference images the project owner
+ * provided (see that script's docstring). They lead the pool, and
+ * `green-valley` is the overall default (see DEFAULT_BY_THEME below).
  * `starfield` (the procedural castle night sky, generated directly at
- * 2048x476 by `drawStarfield`) doesn't have that problem — its star
- * scatter is randomized across the whole canvas, not one small tile
- * repeated — and the other three (`pirate-cove`/`overgrown-ruins`/
- * `snowy-peaks`) are original painted scenes from
- * scripts/generate-painted-backgrounds.py, authored at this size from the
- * start with no tiling involved at all.
+ * 2048x476 by `drawStarfield`) is the one non-painted scene, listed last —
+ * its star scatter is randomized across the whole canvas, not one small
+ * tile repeated, so it never had the tiling problem to begin with.
  */
 export const BACKGROUND_SCENES: BackgroundScene[] = [
   {
-    id: "starfield",
-    label: "Starfield",
+    id: "green-valley",
+    label: "Green Valley",
     layers: [
-      { textureKey: "bg-castle-far", factor: 0.04 },
-      { textureKey: "bg-castle-near", factor: 0.12 },
+      { textureKey: "bg-green-valley-far", factor: 0.05 },
+      { textureKey: "bg-green-valley-near", factor: 0.15 },
     ],
   },
   {
@@ -74,10 +77,18 @@ export const BACKGROUND_SCENES: BackgroundScene[] = [
       { textureKey: "bg-snowy-peaks-near", factor: 0.15 },
     ],
   },
+  {
+    id: "starfield",
+    label: "Starfield",
+    layers: [
+      { textureKey: "bg-castle-far", factor: 0.04 },
+      { textureKey: "bg-castle-near", factor: 0.12 },
+    ],
+  },
 ];
 
 const DEFAULT_BY_THEME: Record<LevelTheme, BackgroundSceneId> = {
-  grass: "overgrown-ruins",
+  grass: "green-valley",
   desert: "pirate-cove",
   castle: "starfield",
   snow: "snowy-peaks",
