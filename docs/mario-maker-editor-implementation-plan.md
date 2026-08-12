@@ -487,13 +487,17 @@ a `TileSprite`'s repeat is a "not visible at today's size caps" argument,
 not a structural guarantee. The new renderer fixes both: a `GeometryMask`
 clips every layer to exactly the level's real pixel width, and the pan
 offset is clamped to the zoomed image's own actual excess width, so a
-repeat/edge is impossible regardless of level size. The pool now also has
-8 scenes (`icy-sky`/`jungle-sky` had already been added since the note
-above); all eight — including the four that started as small 24x24 Kenney
-sky tiles — are now baked to the same fixed 2048x476 canvas
-(`scripts/composite-sky-backgrounds.py` for the Kenney-derived four,
-`drawStarfield` at that size for the procedural one) so one renderer
-handles every scene with no special-casing.
+repeat/edge is impossible regardless of level size.
+*Note (2026-08-12, later same day):* baking the four small Kenney sky
+scenes (`grass-sky`/`desert-sky`/`icy-sky`/`jungle-sky`) up to the large
+canvas fixed their edge/seam problem, but user feedback on the deployed
+build caught that it didn't fix the actual complaint — a small tile
+repeated across a large canvas still visibly reads as a grid of tiny
+icons, not real scenery. All four were dropped from the pool rather than
+patched further (along with `scripts/composite-sky-backgrounds.py` and
+the Kenney background-sheet extraction in prepare-kenney-assets.py, both
+now unused), leaving 4 scenes: `starfield` (procedural, no tiling
+involved) plus the three original painted scenes.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

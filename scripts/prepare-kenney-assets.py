@@ -83,16 +83,13 @@ collision, no gameplay effect; see Palette.ts's "decor" category):
     148 = lamp post       156 = single cloud      145 = snowman
     124 = sprout/vine     108 = mushroom           68 = twin rocks
 
-Backgrounds/tile_00XX.png (24x24, separate sheet, left natively sized —
-Phaser's TileSprite scales these at render time, not baked in):
-    0   = plain light-blue sky (grass theme, far parallax layer)
-    9   = light-blue sky with hills/trees (grass theme, near layer)
-    4   = plain orange sky (desert theme, far layer)
-    13  = orange sky with dunes/cactus silhouette (desert theme, near layer)
-    2   = plain pale-icy sky ("icy-sky" background scene, far layer)
-    10  = pale-icy sky with hill silhouette ("icy-sky" scene, near layer)
-    6   = plain green/mint sky ("jungle-sky" background scene, far layer)
-    14  = green sky with forest silhouette ("jungle-sky" scene, near layer)
+This script no longer touches the pack's Backgrounds/ sheet — the small
+24x24 sky tiles it has (grass/desert/icy/jungle) were tried as parallax
+background scenes, but even baked up to a large canvas they still read as
+an obvious repeating grid of tiny icons up close, so they were dropped
+from the background-scene pool entirely (see src/level/backgrounds.ts).
+The pool's remaining non-procedural scenes are original painted art from
+scripts/generate-painted-backgrounds.py, not derived from this pack.
 """
 
 import sys
@@ -130,14 +127,6 @@ CHARACTER_INDEX_BAT_PERCHED = 24
 CHARACTER_INDEX_SPIKE_CRAWLER = 15
 CHARACTER_INDEX_GOLEM = 8
 CHARACTER_INDEX_TROPHY = 13
-BACKGROUND_INDEX_GRASS_FAR = 0
-BACKGROUND_INDEX_GRASS_NEAR = 9
-BACKGROUND_INDEX_DESERT_FAR = 4
-BACKGROUND_INDEX_DESERT_NEAR = 13
-BACKGROUND_INDEX_ICY_FAR = 2
-BACKGROUND_INDEX_ICY_NEAR = 10
-BACKGROUND_INDEX_JUNGLE_FAR = 6
-BACKGROUND_INDEX_JUNGLE_NEAR = 14
 
 
 def load_and_upscale(path: Path, size: int) -> Image.Image:
@@ -181,14 +170,12 @@ def main() -> None:
     src = Path(sys.argv[1])
     tiles_dir = src / "Tiles"
     characters_dir = tiles_dir / "Characters"
-    backgrounds_dir = tiles_dir / "Backgrounds"
 
     repo_root = Path(__file__).resolve().parent.parent
     tiles_out = repo_root / "public" / "assets" / "tiles"
     entities_out = repo_root / "public" / "assets" / "entities"
     items_out = repo_root / "public" / "assets" / "items"
     decor_out = repo_root / "public" / "assets" / "decor"
-    backgrounds_out = repo_root / "public" / "assets" / "backgrounds"
 
     def tile(index: int) -> Image.Image:
         return load_and_upscale(tiles_dir / f"tile_{index:04d}.png", TILE_SIZE)
@@ -249,22 +236,6 @@ def main() -> None:
     tile(TILE_INDEX_MUSHROOM).save(decor_out / "mushroom.png")
     tile(TILE_INDEX_ROCKS).save(decor_out / "rocks.png")
     print(f"wrote 10 decoration sprites to {decor_out}")
-
-    def background(index: int) -> Image.Image:
-        return Image.open(backgrounds_dir / f"tile_{index:04d}.png").convert("RGBA")
-
-    backgrounds_out.mkdir(parents=True, exist_ok=True)
-    background(BACKGROUND_INDEX_GRASS_FAR).save(backgrounds_out / "grass-far.png")
-    background(BACKGROUND_INDEX_GRASS_NEAR).save(backgrounds_out / "grass-near.png")
-    background(BACKGROUND_INDEX_DESERT_FAR).save(backgrounds_out / "desert-far.png")
-    background(BACKGROUND_INDEX_DESERT_NEAR).save(backgrounds_out / "desert-near.png")
-    scenes_out = backgrounds_out / "scenes"
-    scenes_out.mkdir(parents=True, exist_ok=True)
-    background(BACKGROUND_INDEX_ICY_FAR).save(scenes_out / "icy-sky-far.png")
-    background(BACKGROUND_INDEX_ICY_NEAR).save(scenes_out / "icy-sky-near.png")
-    background(BACKGROUND_INDEX_JUNGLE_FAR).save(scenes_out / "jungle-sky-far.png")
-    background(BACKGROUND_INDEX_JUNGLE_NEAR).save(scenes_out / "jungle-sky-near.png")
-    print(f"wrote 8 background layers to {backgrounds_out}")
 
 
 if __name__ == "__main__":

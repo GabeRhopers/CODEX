@@ -1,14 +1,6 @@
 import { LevelTheme } from "./themes";
 
-export type BackgroundSceneId =
-  | "grass-sky"
-  | "desert-sky"
-  | "starfield"
-  | "icy-sky"
-  | "jungle-sky"
-  | "pirate-cove"
-  | "overgrown-ruins"
-  | "snowy-peaks";
+export type BackgroundSceneId = "starfield" | "pirate-cove" | "overgrown-ruins" | "snowy-peaks";
 
 interface ParallaxLayerDef {
   textureKey: string;
@@ -32,55 +24,30 @@ interface BackgroundScene {
  *
  * Every scene here is a large, fixed-size (2048x476) image per layer,
  * rendered by ParallaxBackground.ts as a single zoomed, clamped-pan Image —
- * never a live-tiling TileSprite — so a repeat/seam is never visible
- * regardless of level size. `grass-sky`/`desert-sky`/`icy-sky`/`jungle-sky`
- * started life as tiny 24x24 Kenney sky tiles and `starfield` as a
- * procedural 128x128 star scatter; both were baked up to this same large
- * canvas format (see scripts/composite-sky-backgrounds.py and
- * generateTextures.ts's drawStarfield) specifically so they could drop the
- * old tiling technique. `pirate-cove`/`overgrown-ruins`/`snowy-peaks` are
- * original painted scenes from scripts/generate-painted-backgrounds.py,
- * already authored at this same 2048x476 size.
+ * never a live-tiling TileSprite. `grass-sky`/`desert-sky`/`icy-sky`/
+ * `jungle-sky` used to live here too — small 24x24 Kenney sky tiles baked
+ * up to this same large-canvas format (see git history and
+ * scripts/composite-sky-backgrounds.py) so the zoom+pan renderer never had
+ * to stretch a small source image. That baking fixed the *edge/seam*
+ * problem, but not the underlying one: a small tile repeated across a
+ * large canvas still reads as an obvious grid of identical tiny icons up
+ * close — a "wallpaper" look, not real scenery — so those four were
+ * dropped from the pool entirely rather than patched further.
+ * `starfield` (the procedural castle night sky, generated directly at
+ * 2048x476 by `drawStarfield`) doesn't have that problem — its star
+ * scatter is randomized across the whole canvas, not one small tile
+ * repeated — and the other three (`pirate-cove`/`overgrown-ruins`/
+ * `snowy-peaks`) are original painted scenes from
+ * scripts/generate-painted-backgrounds.py, authored at this size from the
+ * start with no tiling involved at all.
  */
 export const BACKGROUND_SCENES: BackgroundScene[] = [
-  {
-    id: "grass-sky",
-    label: "Grass Sky",
-    layers: [
-      { textureKey: "bg-grass-far", factor: 0.05 },
-      { textureKey: "bg-grass-near", factor: 0.15 },
-    ],
-  },
-  {
-    id: "desert-sky",
-    label: "Desert Sky",
-    layers: [
-      { textureKey: "bg-desert-far", factor: 0.05 },
-      { textureKey: "bg-desert-near", factor: 0.15 },
-    ],
-  },
   {
     id: "starfield",
     label: "Starfield",
     layers: [
       { textureKey: "bg-castle-far", factor: 0.04 },
       { textureKey: "bg-castle-near", factor: 0.12 },
-    ],
-  },
-  {
-    id: "icy-sky",
-    label: "Icy Sky",
-    layers: [
-      { textureKey: "bg-icy-sky-far", factor: 0.05 },
-      { textureKey: "bg-icy-sky-near", factor: 0.15 },
-    ],
-  },
-  {
-    id: "jungle-sky",
-    label: "Jungle Sky",
-    layers: [
-      { textureKey: "bg-jungle-sky-far", factor: 0.05 },
-      { textureKey: "bg-jungle-sky-near", factor: 0.15 },
     ],
   },
   {
@@ -110,24 +77,34 @@ export const BACKGROUND_SCENES: BackgroundScene[] = [
 ];
 
 const DEFAULT_BY_THEME: Record<LevelTheme, BackgroundSceneId> = {
-  grass: "grass-sky",
-  desert: "desert-sky",
+  grass: "overgrown-ruins",
+  desert: "pirate-cove",
   castle: "starfield",
-  snow: "icy-sky",
+  snow: "snowy-peaks",
 };
 
-/** What a level shows before anyone's touched the background picker — the
- * scene that already matched its theme, so existing levels (saved before
- * this feature existed, with no `background` field) render unchanged. */
+/** What a level shows before anyone's touched the background picker — a
+ * scene that reads reasonably against its theme (exact per-theme sky
+ * tiles no longer exist — see BACKGROUND_SCENES's docstring — so this is
+ * a best-fit pick, not a guaranteed match), so existing levels (saved
+ * before this feature existed, with no `background` field) still render
+ * something sensible. */
 export function defaultBackgroundForTheme(theme: LevelTheme): BackgroundSceneId {
   return DEFAULT_BY_THEME[theme];
 }
 
 /** Takes just the two fields it needs (not a full LevelData) so this module
  * never has to import LevelSchema — LevelSchema imports BackgroundSceneId
- * from here instead, and a cycle would break that. */
+ * from here instead, and a cycle would break that. Falls back to the
+ * theme default not just when `background` is unset but also when it's
+ * set to an id no longer in the pool (e.g. a level saved back when
+ * grass-sky/desert-sky/icy-sky/jungle-sky still existed), so an old save
+ * degrades to a different scene instead of crashing the scene load. */
 export function resolveBackground(level: { background?: BackgroundSceneId; theme: LevelTheme }): BackgroundSceneId {
-  return level.background ?? defaultBackgroundForTheme(level.theme);
+  if (level.background && BACKGROUND_SCENES.some((scene) => scene.id === level.background)) {
+    return level.background;
+  }
+  return defaultBackgroundForTheme(level.theme);
 }
 
 export function backgroundScene(id: BackgroundSceneId): BackgroundScene {

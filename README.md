@@ -121,7 +121,7 @@ Open the dev server URL in a browser. Controls:
 - **Menu**: back to the home page.
 - **Clear**: wipes the current grid and entities.
 - **Background: ▶**: cycles the level's parallax background scene through
-  the pool of 8 (independent of the level's theme — see "Parallax
+  the pool of 4 (independent of the level's theme — see "Parallax
   background & background scenes" under Art), previewing live; persists on
   Save.
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
@@ -368,29 +368,21 @@ tileset and the flat fallback color — see themes.ts) — a grass-themed
 level can show the snowy-mountain scene, a castle level can show the
 pirate cove, etc. `src/level/backgrounds.ts` is the pool (`BACKGROUND_SCENES`)
 and `LevelData.background` is the optional field a level stores its
-choice in (falling back to the theme's traditionally-matching scene via
-`resolveBackground` when unset, so levels saved before this feature
-existed — and the hand-authored templates, which never set it — render
-exactly as before). The editor's toolbar has a **"Background: ▶"** button
-(far right of the action-buttons row) that cycles through the pool,
-live-updating the preview (destroying and recreating the
-`ParallaxBackground` instance, since different scenes have different
-layer textures) and persisting the choice to the level on Save.
+choice in (falling back to a best-fit-by-theme scene via
+`resolveBackground` when unset or when it names a scene no longer in the
+pool — see below — so levels saved before this feature existed, or
+before the pool shrank, still render something sensible). The editor's
+toolbar has a **"Background: ▶"** button (far right of the action-buttons
+row) that cycles through the pool, live-updating the preview (destroying
+and recreating the `ParallaxBackground` instance, since different scenes
+have different layer textures) and persisting the choice to the level on
+Save.
 
-The pool has eight scenes, and every one of them is now a large, fixed
-2048x476 image pair (matching `GAME_HEIGHT` exactly), so the same
-zoom-and-pan renderer handles all eight with no special-casing.
-`grass-sky`/`desert-sky`/`icy-sky`/`jungle-sky` started life as real but
-tiny (24x24) Kenney sky tiles rendered by the old live-tiling technique;
-`scripts/composite-sky-backgrounds.py` now bakes each one (upscaled 4x,
-matching the old tile density) across the full 2048x476 canvas ahead of
-time, so the zoom-and-pan renderer never has to stretch a small source
-image into blurriness. `starfield` (the procedural castle night sky) is
-generated directly at that size by `drawStarfield` in
-`src/assets/generateTextures.ts` — no baking step needed, since it was
-never tile-based to begin with. The other three — `pirate-cove`,
-`overgrown-ruins`, `snowy-peaks` — are original painted scenes, already
-authored at this exact 2048x476 size by
+The pool has four scenes, and every one of them is a large, fixed
+2048x476 image pair (matching `GAME_HEIGHT` exactly): `starfield` (the
+procedural castle night sky, generated directly at that size by
+`drawStarfield` in `src/assets/generateTextures.ts`) and three original
+painted scenes — `pirate-cove`, `overgrown-ruins`, `snowy-peaks` — from
 `scripts/generate-painted-backgrounds.py` (`<scene>-far.png` opaque
 sky+stars+moon, `<scene>-near.png` transparent above a hand-drawn
 silhouette — rolling waves + distant ship masts for the cove, a jagged
@@ -402,6 +394,20 @@ dream-cloud portal art (vector shapes: gradients, circles, seeded random
 silhouettes), just applied to landscape scenes instead of a character
 sprite.
 
+The pool used to also have `grass-sky`/`desert-sky`/`icy-sky`/
+`jungle-sky` — small (24x24) Kenney sky tiles, first shown via the old
+live-tiling technique, then (briefly) baked up to the same 2048x476
+format as everything else so the new zoom-and-pan renderer could handle
+them without stretching a small source into blurriness. Baking fixed the
+*edge/seam* problem, but not the actual complaint: a small tile repeated
+across a large canvas still reads as an obvious grid of identical tiny
+icons up close — a "wallpaper" look, not real scenery — so all four were
+dropped from the pool entirely rather than patched further. `starfield`
+didn't have this problem (its star scatter is randomized across the
+whole canvas, not one small tile repeated) and neither do the three
+painted scenes (authored at full size from the start, no tiling
+involved), which is why those four are what remain.
+
 **Second content pass.** A deliberate push to use a meaningfully larger
 share of the Kenney pack (it has 231 tiles across its three sheets; the
 first few passes above used 15 of them, ~6.5%) with a curated, coherent
@@ -409,7 +415,7 @@ set rather than padding for its own sake — every pick below earns its
 place with a real mechanic, enemy, theme, or decoration, landing at 35
 assets (~15.2%):
 - **Snow theme** (`"snow"`, a 4th `LevelTheme`) — a real Kenney snow-cap
-  ground tile, paired with `icy-sky` (see above) as its default
+  ground tile, paired with `snowy-peaks` (see above) as its default
   background. Reachable the same way Templates always have been
   (**Frozen Cavern**, see below); there's still no in-editor theme
   *picker* (unlike the background picker) — that's a larger, separate
@@ -505,35 +511,34 @@ restriction entirely. It now provides:
 - **10 Decor entities** — Bush, Tree, Cactus, Lamp, Cloud, Snowman,
   Sprout, Mushroom, Rocks, and the Sleeping Bat above — all real Kenney
   tiles, purely cosmetic (see "Second content pass").
-- **The `grass-sky`/`desert-sky`/`icy-sky`/`jungle-sky` background-scene
-  layers** — real sky-tile art from the pack's background sheet (a
-  plain-sky "far" tile and a hills/trees/dunes/forest-silhouette "near"
-  tile per family); `starfield` (the castle-matching scene) stays
-  procedural for the same no-matching-art reason as the castle ground
-  tileset. The other three scenes in the pool (`pirate-cove`/
-  `overgrown-ruins`/`snowy-peaks`) are original painted art, not from this
-  pack — see "Parallax background & background scenes" above.
+- **The background-scene pool is no longer Kenney-derived at all.** Real
+  sky-tile art from the pack's background sheet (`grass-sky`/`desert-sky`/
+  `icy-sky`/`jungle-sky`) was tried, but even baked up to a large canvas a
+  small tile repeated across it still reads as an obvious grid of tiny
+  icons, not real scenery — so all four were dropped. The pool is now
+  `starfield` (procedural, for the same no-matching-art reason as the
+  castle ground tileset) plus three original painted scenes
+  (`pirate-cove`/`overgrown-ruins`/`snowy-peaks`) — see "Parallax
+  background & background scenes" above.
 - The **wizard, ghost-pillow, and dream-cloud portal stay hand-drawn** —
   they're deliberate, already-validated custom art in a specific shared
   style (see below), not placeholders, so swapping the asset pack doesn't
   touch them.
 
-The pack's tiles are natively 18px (24px for characters, 24px for
-background tiles), not this project's 32px (40px for entities), so
-`scripts/prepare-kenney-assets.py` (run once, offline — not part of the
-build) nearest-neighbor-upscales and composites exactly the pieces used
-above into the small PNGs actually committed under `public/assets/tiles/`,
-`public/assets/entities/`, `public/assets/items/`, `public/assets/decor/`,
-and `public/assets/backgrounds/` (loaded in `BootScene.preload`) — the
-full third-party pack itself isn't committed to the repo, only these
-derived outputs. Background tiles come out of that script at their native
-24px; a second, self-contained script,
-`scripts/composite-sky-backgrounds.py`, bakes those small tiles up into
-the large fixed-size images `ParallaxBackground.ts`'s zoom-and-pan
-renderer needs (see "Parallax background & background scenes" above) —
-it only reads the already-committed small PNGs, so it doesn't need the
-original Kenney pack. See both scripts' docstrings for the exact source
-tile indices/baking math and how to regenerate with different ones.
+The pack's tiles are natively 18px (24px for characters), not this
+project's 32px (40px for entities), so `scripts/prepare-kenney-assets.py`
+(run once, offline — not part of the build) nearest-neighbor-upscales and
+composites exactly the pieces used above into the small PNGs actually
+committed under `public/assets/tiles/`, `public/assets/entities/`,
+`public/assets/items/`, and `public/assets/decor/` (loaded in
+`BootScene.preload`) — the full third-party pack itself isn't committed
+to the repo, only these derived outputs. It no longer touches
+`public/assets/backgrounds/` — the pack's small sky tiles were tried
+there and dropped (see "Parallax background & background scenes" above),
+so every remaining background scene is either procedural or original
+painted art from `scripts/generate-painted-backgrounds.py`, not derived
+from this pack. See prepare-kenney-assets.py's docstring for the exact
+source tile indices and how to regenerate with different ones.
 
 **Tiles/markers/UI still procedural:** the castle theme (see above) and
 pure UI chrome with no asset-pack equivalent — the eraser icon, the spawn
@@ -608,10 +613,9 @@ public/assets/
 ├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
 ├── decor/                    bush/tree/cactus/lamp/cloud/snowman/sprout/mushroom/rocks.png — purely cosmetic (Kenney, derived)
 └── backgrounds/
-    └── scenes/               every background-scene layer, all baked to a fixed 2048x476: grass-sky/desert-sky/icy-sky/jungle-sky-{far,near}.png (Kenney, derived+baked) and pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art) — castle's "starfield" scene is procedural, generated at the same size
+    └── scenes/               every background-scene layer, all a fixed 2048x476: pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art, not Kenney-derived) — castle's "starfield" scene is procedural, generated at the same size
 
 scripts/
-├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,decor,backgrounds}' Kenney-sourced PNGs (one-off, not part of the build)
-├── composite-sky-backgrounds.py   bakes the small Kenney sky tiles up to the large fixed canvas ParallaxBackground.ts's zoom-and-pan renderer needs (one-off, not part of the build)
+├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,decor}' Kenney-sourced PNGs (one-off, not part of the build)
 └── generate-painted-backgrounds.py derives public/assets/backgrounds/scenes/'s original painted PNGs (one-off, not part of the build)
 ```
