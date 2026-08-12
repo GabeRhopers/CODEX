@@ -387,13 +387,19 @@ entries. *Acceptance:* a level using every brush type is playable and
 scores/behaves correctly.
 
 **M2 candidate content list (2026-08-10; Brick/Bounce/Spike Crawler/Bat
-built the same day, the rest not yet).** Five each across four
-categories, picked to fit the existing dream/wizard aesthetic and stay
-buildable on top of the current architecture — the ground grid, the
-open-string `EntityType`, and `PlayScene`'s entity-spawn switch (see the
-M2 cut note in §9.2). Each entry notes what it needs beyond "new palette
-entry + new switch case," since a few require genuinely new engine
-concepts, not just content:
+built the same day, Items 2026-08-11, Water/Golem 2026-08-12 — see
+below).** Five each across four categories, picked to fit the existing
+dream/wizard aesthetic and stay buildable on top of the current
+architecture — the ground grid, the open-string `EntityType`, and
+`PlayScene`'s entity-spawn switch (see the M2 cut note in §9.2). Each
+entry notes what it needs beyond "new palette entry + new switch case",
+since a few require genuinely new engine concepts, not just content. A
+**Snow** `LevelTheme` (grass/desert/castle → +snow, real Kenney art) and
+a **Decor** palette category (10 purely cosmetic entity types, no
+gameplay effect at all) also shipped 2026-08-12 as part of the same
+content-usage push — neither was on this original list, since the list
+predates the theme system's snow-cap tile and the idea of a
+zero-gameplay-effect entity category.
 
 *Blocks* (new ground-tile variants; today there's `GROUND_TILE`, `BRICK_TILE`, `BOUNCE_TILE`):
 1. **Brick** ✅ built — a second solid tile, visually distinct from dirt/grass. `BRICK_TILE`/`GROUND_FRAME_BRICK`; renders as a fixed frame regardless of neighbors, unlike ground's autotiling. Now real Kenney art (see the "Asset-sourcing deviation" resolution above), except in the castle theme, which still draws it procedurally.
@@ -412,12 +418,13 @@ concepts, not just content:
 *Enemies* (new `EntityType`s alongside `enemy-ghost`; this category is the cheapest to add — the pattern already exists end to end):
 1. **Spike Crawler** ✅ built — patrols like the ghost, but never stompable (`stompable: false` in `PlayScene`'s `ENEMY_DEFS`) — any contact costs the player regardless of direction. Now real Kenney character art in place of the original Graphics-drawn placeholder.
 2. **Bat** ✅ built — flies the exact same patrol+bob path as the ghost (100% shared code — `EnemyBehaviors.createPatrolEnemy` was generalized to take a texture key); same stomp-from-above rule as the ghost. Now real Kenney character art too.
+2.5. **Golem** ✅ built 2026-08-12 — not on this original list, added in the second content-usage pass (see README's "Second content pass"); same shared patrol/stomp code as the other three, stompable like the ghost/bat. Real Kenney character art (a grey rock-monster face).
 3. **Totem Shooter** — stationary, periodically fires a slow projectile; first enemy needing its own projectile entity and a lifetime/cleanup.
 4. **Hopper** — bounces in place or toward the player on a timer; stomp only counts while it's on the ground (mid-air stomp shouldn't count), a variant of the existing `isStompFromAbove` check.
 5. **Big Ghost (mini-boss)** — larger sprite, takes 3 stomps instead of 1; needs a hit-counter on the enemy itself (currently enemies are one-hit-and-`destroy()`).
 
 *Hazards & special tiles* (obstacles that aren't "enemies" and level-building tools beyond plain terrain):
-1. **Spike Pit** — instant-lose ground tile, visually distinct (no stomping — touching it from any direction loses).
+1. **Spike Pit** — partially covered by **Water** ✅ built 2026-08-12 (see README's "Second content pass"): a 5th ground-layer value, non-solid (the player falls through onto whatever's solid beneath), costs a hit via the same `takeHit()`/hit-points system a bad enemy touch does rather than an unconditional instant-lose. A literal "instant-lose no matter what, Hearts/Shield don't help" Spike Pit is still a small variant away, not built.
 2. **Saw Blade** — patrols a fixed track (like the ghost, but no gravity/bob) and always costs a hit/loss on touch.
 3. **Moving Platform** — patrols horizontally or vertically and carries the player standing on it (the player's X needs to inherit the platform's delta while grounded on it — Arcade Physics doesn't do this for free the way it does static tile collision).
 4. **Checkpoint Flag** — mid-level respawn point; only meaningful once losing doesn't always mean "back to the very start," which ties into the hit-points question above.

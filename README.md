@@ -10,15 +10,17 @@ the full architecture, data model, and milestone plan.
 Bounce/Spike Crawler/Bat, plus a full Items set — Coin/Heart/Speed
 Potion/Feather/Shield, all with real gameplay effects, resolving the M2
 hit-points open question — see "Items & hit-points" under Art) + a
-tabbed, categorized palette (Blocks/Markers/Enemies/Items — replacing the
-single ever-widening icon row) + a parallax scrolling background with a
-6-scene picker independent of level theme, including 3 original painted
-scenes (see "Parallax background & background scenes" under Art) + M4
-(home page / level browser) + 5 template levels + M8 (World Maker v1)
-done.** The game opens on a **Menu** (home
+tabbed, categorized palette (Blocks/Markers/Enemies/Items/Decor — replacing
+the single ever-widening icon row) + a parallax scrolling background with
+a 6-scene picker independent of level theme, including 3 original painted
+scenes (see "Parallax background & background scenes" under Art) + a
+second content pass (Snow theme, Water hazard, Golem enemy, the Key→Chest
+mechanic, 10 purely-cosmetic Decor entities, and a win-screen Trophy — see
+"Second content pass" under Art) + M4 (home page / level browser) + 6
+template levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home
 page) — a 2x2 card grid, each with a live status line, covering
 everything there is to do: **New Level** (blank grid), **Templates**
-(5 pre-built levels to play or remix — see below), **My Levels** (your
+(6 pre-built levels to play or remix — see below), **My Levels** (your
 own saved work), **Worlds** (chain levels into a course). **My Levels**
 lists every saved level (not just a single most-recent slot) with Edit
 and Delete per row; unlike an earlier version of this project, Templates
@@ -68,8 +70,9 @@ Open the dev server URL in a browser. Controls:
   Levels** opens your saved-levels browser; **Worlds** opens the world
   browser. Each card's subtitle is a live status line (how many you've
   saved, or a nudge toward New Level/Templates when empty).
-- **Templates**: 5 pre-built levels, one per theme plus two showcasing
-  Brick/Bounce/Bat/Spike Crawler together (see "Templates & themes" under
+- **Templates**: 6 pre-built levels, one per theme plus two showcasing
+  Brick/Bounce/Bat/Spike Crawler together and one showcasing the second
+  content pass (see "Templates & themes" and "Second content pass" under
   Art). **Play** runs it directly; **Use This Template** opens it in the
   editor as an independent copy (a blank id, so Save creates a new level
   in My Levels — the template itself is never modified). **← Back**
@@ -87,13 +90,13 @@ Open the dev server URL in a browser. Controls:
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
 - **Palette** (bottom of the editor): a row of **category tabs** — Blocks,
-  Markers, Enemies, Items — switches which row of brushes shows below it;
-  click a brush, then click/drag on the grid above to paint or place. See
-  "Categorized palette" under Art for why it's tabbed and "New blocks &
-  enemies" / "Items & hit-points" for what each brush does. Items are
-  ordinary brushes like anything else in the palette — not limited to any
-  specific template — so any level, new or existing, can place any of the
-  5 items.
+  Markers, Enemies, Items, Decor — switches which row of brushes shows
+  below it; click a brush, then click/drag on the grid above to paint or
+  place. See "Categorized palette" under Art for why it's tabbed and "New
+  blocks & enemies" / "Items & hit-points" / "Second content pass" for
+  what each brush does. Every brush is ordinary — not limited to any
+  specific template — so any level, new or existing, can place any of
+  them, from Coin to a Chest to a Sleeping Bat decoration.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; enemies and items are optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
@@ -225,7 +228,7 @@ color palette per theme and the themed texture-key naming; the palette's
 Ground brush icon and the editor/play tileset both follow the current
 level's theme automatically.
 
-`src/level/templateLevels.ts` hand-authors 5 beatable levels, exported as
+`src/level/templateLevels.ts` hand-authors 6 beatable levels, exported as
 `TEMPLATE_LEVELS` and served by `TemplateBrowserScene` — always
 available, never written to `localStorage` (a change from an earlier
 version of this project, which copied them into My Levels on first
@@ -233,7 +236,9 @@ visit): Sunny Hills (grass), Desert Canyon (desert), and Castle Ascent
 (castle, a vertical staircase climb) each keep gaps/steps sized well
 within the player's normal jump; **Spring Meadow** (grass) and **Crate
 Canyon** (desert) additionally showcase Brick, Bounce, Bat, and Spike
-Crawler together. Both put the goal on a platform reachable only by
+Crawler together; **Frozen Cavern** (snow) showcases the second content
+pass — see "Second content pass" under Art. Spring Meadow/Crate Canyon
+both put the goal on a platform reachable only by
 bouncing — `BOUNCE_TILE`'s ~7.3-tile launch (`h = v²/2g` with
 `BOUNCE_VELOCITY_Y=-650`, `GRAVITY_Y=900`) is far past normal-jump range,
 so the platform is placed several tiles *to the side* of the pad rather
@@ -275,8 +280,9 @@ hit-points concept the game doesn't have yet):
 
 **Categorized palette.** The palette used to be a single row of every
 brush at once — fine at 9 icons, unworkable once Items brought the count
-to 14 and climbing. `src/editor/Palette.ts` now tags every brush with a
-`BrushCategory` (`blocks` / `markers` / `enemies` / `items`); `EditorUI`
+to 14 and climbing (now past 30 with the second content pass's Decor
+category). `src/editor/Palette.ts` now tags every brush with a
+`BrushCategory` (`blocks` / `markers` / `enemies` / `items` / `decor`); `EditorUI`
 renders one row of small category-tab buttons plus, below it, only the
 brushes belonging to whichever tab is active — the icon row stays a fixed,
 manageable width no matter how many brushes a future pass adds to any one
@@ -351,11 +357,14 @@ live-updating the preview (destroying and recreating the
 `ParallaxBackground` instance, since different scenes have different
 layer textures) and persisting the choice to the level on Save.
 
-The pool has six scenes. Three reuse pre-existing art as-is: `grass-sky`/
-`desert-sky` (real Kenney sky tiles) and `starfield` (the procedural
-castle night sky). The other three — `pirate-cove`, `overgrown-ruins`,
-`snowy-peaks` — are original painted scenes added specifically to replace
-an early version of this feature, which reused the small 24px Kenney sky
+The pool has eight scenes. Five are real or procedural Kenney-adjacent
+art: `grass-sky`/`desert-sky`/`icy-sky`/`jungle-sky` (real Kenney sky
+tiles — the latter two added in the same pass as the Snow theme below,
+from sky-tile families the pack has that no level used yet) and
+`starfield` (the procedural castle night sky). The other three —
+`pirate-cove`, `overgrown-ruins`, `snowy-peaks` — are original painted
+scenes added specifically to replace an early version of this feature,
+which reused the small 24px Kenney sky
 tiles at 4x scale (96px effective tile width): fine as a *themed* sky, but
 its repeat became obviously visible once players moved more than a
 screen-width or two, which is exactly what prompted this rework. Each new
@@ -373,6 +382,70 @@ dream-cloud portal art (vector shapes: gradients, circles, seeded random
 silhouettes), just applied to landscape scenes instead of a character
 sprite.
 
+**Second content pass.** A deliberate push to use a meaningfully larger
+share of the Kenney pack (it has 231 tiles across its three sheets; the
+first few passes above used 15 of them, ~6.5%) with a curated, coherent
+set rather than padding for its own sake — every pick below earns its
+place with a real mechanic, enemy, theme, or decoration, landing at 35
+assets (~15.2%):
+- **Snow theme** (`"snow"`, a 4th `LevelTheme`) — a real Kenney snow-cap
+  ground tile, paired with `icy-sky` (see above) as its default
+  background. Reachable the same way Templates always have been
+  (**Frozen Cavern**, see below); there's still no in-editor theme
+  *picker* (unlike the background picker) — that's a larger, separate
+  change (recreating the tilemap's tileset at runtime) out of scope for
+  this pass.
+- **Water** (`WATER_TILE`, a 5th ground-layer value alongside Ground/
+  Brick/Bounce) — a hazard, not solid ground: excluded from
+  `setCollisionByExclusion` so the player falls through it onto whatever
+  *is* solid beneath, and `PlayScene.update` checks the tile under the
+  player's feet every frame, calling the same `takeHit()` an enemy touch
+  does (Hearts/Shield apply exactly the same way) — reuses the hit-points
+  system entirely rather than inventing a second one. Real Kenney water
+  art for grass/desert/snow; castle draws its own procedural **lava**
+  frame instead (`drawLava` in `generateTextures.ts`) for the same
+  never-mix-real-and-procedural-within-one-theme reason Brick/Bounce
+  already follow there.
+- **Golem** (`enemy-golem`) — a 4th enemy `EntityType`, added to
+  `ENEMY_DEFS` exactly like Bat/Spike Crawler were (100% shared patrol/
+  stomp code, just a texture and a `stompable` flag) — stompable, like
+  the ghost and bat.
+- **Key → Chest.** `item-key` is an ordinary Items-tab collectible
+  (`PlayerStats.collectKey`, a plain `hasKey` boolean — only one Key can
+  ever be held at a time, matching every entity type's one-per-level
+  placement limit). **Chest** is its own Markers-tab entity: touching it
+  while `hasKey` is true opens it (`PlayerStats.openChest` — spends the
+  key, awards a +5 score bonus, the sprite destroys itself), touching it
+  without a key does nothing and leaves it there to come back to. Unlike
+  a solid gate blocking a path, a Chest was chosen specifically so this
+  needed no new *physics* concept — it's a plain overlap zone like every
+  other collectible, not a collider with a conditional pass-through.
+- **Decor** — a new palette category, 10 entity types
+  (`decor-bush`/`tree`/`cactus`/`lamp`/`cloud`/`snowman`/`sprout`/
+  `mushroom`/`rocks`/`bat`) that are purely cosmetic: `PlayScene` spawns
+  them as plain static images with no physics body and no overlap check
+  at all (see the `DECOR_TYPES` loop, the simplest of the entity-spawn
+  loops in the file) — a level looks identical in Play to how it looked
+  while editing, with zero gameplay effect. `decor-bat` reuses the Bat
+  enemy's perched-pose art as a "Sleeping Bat" decoration rather than as
+  a second animation frame for the live enemy — animating a patrol
+  enemy's sprite over time isn't something `EnemyBehaviors.ts` does yet,
+  and wasn't worth adding just for this.
+- **Trophy** — purely decorative, shown next to the banner text on
+  `PlayScene`'s win screen (any win — level, world, or standalone) via a
+  single `Image` created hidden in `create()` and shown in `onWin()`; no
+  new state, no new rule.
+
+**Frozen Cavern** (snow theme, `template-frozen-cavern`) is the template
+that showcases this pass: a Bush/Golem/Snowman/Key/Rocks run leading into
+a 3-tile Water gap (comfortably jumpable at this game's normal ~6-tile
+reach; walking through it instead costs a hit, same as any hazard) with a
+Cloud floating above it, then a Chest, a Lamp, and the goal — with a
+Sleeping Bat perched up near the end for flavor. Not every one of the 10
+Decor types appears in it (Tree, Cactus, Sprout, Mushroom don't fit this
+particular level's cave/snow framing) — they're still fully usable from
+the palette in any level regardless of what any one template shows.
+
 **Real art: Kenney's "Pixel Platformer" (CC0).** The plan doc always
 recommended Kenney's CC0 packs for this, but the build sandbox's network
 proxy can't *fetch* them (only npm/github.com are reachable) — so
@@ -380,34 +453,46 @@ everything above shipped as procedural placeholder art instead, generated
 at runtime with Phaser's Graphics API. That changed once the user
 supplied the actual pack as a direct upload, sidestepping the network
 restriction entirely. It now provides:
-- **Grass and desert ground tiles** — real grass-cap and sand-cap dirt,
-  replacing their procedural equivalents. **Castle keeps its original
-  procedural grey stone** — the pack is a nature/outdoor set with no
-  stone/castle-style tile, so there's nothing to swap it for; this is a
-  deliberate, permanent split, not a TODO. *Ground tiles merge with no
-  outline, by design* — see "Ground tiles merge with their neighbors"
-  above for the autotile logic, and note below for why the raw source art
-  needed one extra processing step to actually achieve that.
-- **Brick and Bounce** — a real wooden crate and a real compressed spring
-  pad, used in every theme *except* castle (which keeps procedural
-  versions of these too, so a castle-themed level never mixes real and
-  procedural art within itself — only *between* different levels' themes).
-- **Bat and Spike Crawler** — real character art from the pack (a winged
-  creature and a red pointy-topped ground crawler) in place of the
-  Graphics-drawn placeholders from the previous pass.
-- **Coin, Heart, Speed Potion, and Shield** — real item-tile art from the
-  pack. **Feather** has no matching tile in the pack, so it's drawn
+- **Grass, desert, and snow ground tiles** — real grass-cap, sand-cap, and
+  snow-cap dirt, replacing (or, for snow, never having had) a procedural
+  equivalent. **Castle keeps its original procedural grey stone** — the
+  pack is a nature/outdoor set with no stone/castle-style tile, so there's
+  nothing to swap it for; this is a deliberate, permanent split, not a
+  TODO. *Ground tiles merge with no outline, by design* — see "Ground
+  tiles merge with their neighbors" above for the autotile logic, and note
+  below for why the raw source art needed one extra processing step to
+  actually achieve that.
+- **Brick, Bounce, and Water** — a real wooden crate, a real compressed
+  spring pad, and a real water-surface tile, used in every theme *except*
+  castle (which keeps procedural versions of all three — Water's is lava,
+  see "Second content pass" above — so a castle-themed level never mixes
+  real and procedural art within itself — only *between* different
+  levels' themes).
+- **Bat, Spike Crawler, and Golem** — real character art from the pack (a
+  winged creature, a red pointy-topped ground crawler, and a grey
+  rock-monster face) in place of the Graphics-drawn placeholders an
+  earlier pass used for the first two. The Bat's perched pose is also
+  reused as the purely cosmetic "Sleeping Bat" Decor entity.
+- **Coin, Heart, Speed Potion, Shield, and Key** — real item-tile art from
+  the pack. **Feather** has no matching tile in the pack, so it's drawn
   procedurally (a simple two-chevron badge icon) alongside the rest of
   `generateTextures.ts`'s procedural art — the same "real art where it
   fits, procedural where it doesn't" split already established for the
   castle theme.
-- **The `grass-sky`/`desert-sky` background-scene layers** — real sky-tile
-  art from the pack's background sheet (a plain-sky "far" tile and a
-  hills/trees or dunes/cactus-silhouette "near" tile); `starfield` (the
-  castle-matching scene) stays procedural for the same no-matching-art
-  reason as the castle ground tileset. The other three scenes in the pool
-  (`pirate-cove`/`overgrown-ruins`/`snowy-peaks`) are original painted art,
-  not from this pack — see "Parallax background & background scenes" above.
+- **Chest and Trophy** — a real locked-chest tile (the Chest entity — see
+  "Second content pass" above) and a real trophy character-sheet icon
+  (shown on the win screen).
+- **10 Decor entities** — Bush, Tree, Cactus, Lamp, Cloud, Snowman,
+  Sprout, Mushroom, Rocks, and the Sleeping Bat above — all real Kenney
+  tiles, purely cosmetic (see "Second content pass").
+- **The `grass-sky`/`desert-sky`/`icy-sky`/`jungle-sky` background-scene
+  layers** — real sky-tile art from the pack's background sheet (a
+  plain-sky "far" tile and a hills/trees/dunes/forest-silhouette "near"
+  tile per family); `starfield` (the castle-matching scene) stays
+  procedural for the same no-matching-art reason as the castle ground
+  tileset. The other three scenes in the pool (`pirate-cove`/
+  `overgrown-ruins`/`snowy-peaks`) are original painted art, not from this
+  pack — see "Parallax background & background scenes" above.
 - The **wizard, ghost-pillow, and dream-cloud portal stay hand-drawn** —
   they're deliberate, already-validated custom art in a specific shared
   style (see below), not placeholders, so swapping the asset pack doesn't
@@ -418,10 +503,10 @@ background tiles), not this project's 32px (40px for entities), so
 `scripts/prepare-kenney-assets.py` (run once, offline — not part of the
 build) nearest-neighbor-upscales and composites exactly the pieces used
 above into the small PNGs actually committed under `public/assets/tiles/`,
-`public/assets/entities/`, `public/assets/items/`, and
-`public/assets/backgrounds/` (loaded in `BootScene.preload`) — the full
-third-party pack itself isn't committed to the repo, only these derived
-outputs. Background tiles are left at their native 24px (Phaser's
+`public/assets/entities/`, `public/assets/items/`, `public/assets/decor/`,
+and `public/assets/backgrounds/` (loaded in `BootScene.preload`) — the
+full third-party pack itself isn't committed to the repo, only these
+derived outputs. Background tiles are left at their native 24px (Phaser's
 `TileSprite.setTileScale` scales them at render time instead) since,
 unlike the other pieces, they're tiled rather than shown at a single fixed
 size. See that script's docstring for the exact source tile indices and
@@ -474,7 +559,7 @@ src/
 │   ├── groundAutotile.ts     derives the grass-top/buried tile frame from neighbors (+ unit tests)
 │   ├── themes.ts              theme color palettes + themed texture-key naming
 │   ├── backgrounds.ts         the theme-independent background-scene pool + resolveBackground/nextBackgroundId
-│   └── templateLevels.ts      5 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
+│   └── templateLevels.ts      6 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling (speed-multiplier aware; exports isJumpPressed for double-jump edge detection)
 │   ├── PlayerStats.ts        pure score/hearts/buffs rules — collect*/registerHit/speedMultiplierAt/canDoubleJump (+ unit tests)
@@ -495,14 +580,15 @@ src/
 
 public/assets/
 ├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png (hand-drawn)
-├── entities/                 ghost-pillow.png, dream-portal.png (hand-drawn); bat.png, spike-crawler.png (Kenney)
-├── tiles/                    tileset-grass.png, tileset-desert.png, icon-*.png (Kenney, derived — see scripts/)
-├── items/                    coin.png, heart.png, shield.png, speed.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
+├── entities/                 ghost-pillow.png, dream-portal.png (hand-drawn); bat.png, bat-perched.png, spike-crawler.png, golem.png, trophy.png, chest.png (Kenney)
+├── tiles/                    tileset-{grass,desert,snow}.png, icon-*.png (Kenney, derived — see scripts/)
+├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
+├── decor/                    bush/tree/cactus/lamp/cloud/snowman/sprout/mushroom/rocks.png — purely cosmetic (Kenney, derived)
 └── backgrounds/
     ├── grass-{far,near}.png, desert-{far,near}.png   (Kenney, derived — castle's "starfield" scene is procedural)
-    └── scenes/               pirate-cove-{far,near}.png, overgrown-ruins-{far,near}.png, snowy-peaks-{far,near}.png (original painted art)
+    └── scenes/               pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art); icy-sky/jungle-sky-{far,near}.png (Kenney, derived)
 
 scripts/
-├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,backgrounds}' Kenney-sourced PNGs (one-off, not part of the build)
+├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,decor,backgrounds}' Kenney-sourced PNGs (one-off, not part of the build)
 └── generate-painted-backgrounds.py derives public/assets/backgrounds/scenes/'s original painted PNGs (one-off, not part of the build)
 ```

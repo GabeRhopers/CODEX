@@ -6,6 +6,7 @@ export const EMPTY_TILE = -1;
 export const GROUND_TILE = 0;
 export const BRICK_TILE = 1;
 export const BOUNCE_TILE = 2;
+export const WATER_TILE = 3;
 
 export const SCHEMA_VERSION = 1 as const;
 
@@ -15,11 +16,24 @@ export type EntityType =
   | "enemy-ghost"
   | "enemy-spike"
   | "enemy-bat"
+  | "enemy-golem"
   | "item-coin"
   | "item-heart"
   | "item-speed"
   | "item-feather"
-  | "item-shield";
+  | "item-shield"
+  | "item-key"
+  | "chest"
+  | "decor-bush"
+  | "decor-tree"
+  | "decor-cactus"
+  | "decor-lamp"
+  | "decor-cloud"
+  | "decor-snowman"
+  | "decor-sprout"
+  | "decor-mushroom"
+  | "decor-rocks"
+  | "decor-bat";
 
 export interface LevelEntity {
   type: EntityType;

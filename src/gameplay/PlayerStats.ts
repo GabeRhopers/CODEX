@@ -19,12 +19,18 @@ export interface PlayerStats {
    * two hits in one collision. */
   invincibleUntil: number;
   speedBoostUntil: number;
+  /** Held until spent opening a Chest — see openChest(). Only ever one Key
+   * at a time (matching the one-per-type placement every entity type
+   * already uses — see Palette.ts's docstring), so a plain boolean is
+   * enough; a level with multiple Chests isn't supported by this field. */
+  hasKey: boolean;
 }
 
 export const HIT_GRACE_MS = 1200;
 export const SHIELD_DURATION_MS = 8000;
 export const SPEED_DURATION_MS = 6000;
 export const SPEED_MULTIPLIER = 1.6;
+export const CHEST_SCORE_BONUS = 5;
 
 export function createPlayerStats(): PlayerStats {
   return {
@@ -34,6 +40,7 @@ export function createPlayerStats(): PlayerStats {
     doubleJumpUsed: false,
     invincibleUntil: 0,
     speedBoostUntil: 0,
+    hasKey: false,
   };
 }
 
@@ -94,4 +101,24 @@ export function collectShield(stats: PlayerStats, now: number): void {
 
 export function collectSpeed(stats: PlayerStats, now: number): void {
   stats.speedBoostUntil = Math.max(stats.speedBoostUntil, now + SPEED_DURATION_MS);
+}
+
+export function collectKey(stats: PlayerStats): void {
+  stats.hasKey = true;
+}
+
+export type ChestResult = "opened" | "locked";
+
+/** The single decision point for "player touched a Chest": spends the Key
+ * and awards a score bonus if one's held, otherwise leaves everything
+ * unchanged (the chest stays shut, touchable again later once a Key is
+ * found) — mirrors registerHit's shape (a result the caller branches on,
+ * mutation only in the success case) for the same reason: PlayScene needs
+ * to know whether to destroy the chest sprite without duplicating the
+ * "do I actually have a key" check itself. */
+export function openChest(stats: PlayerStats): ChestResult {
+  if (!stats.hasKey) return "locked";
+  stats.hasKey = false;
+  stats.score += CHEST_SCORE_BONUS;
+  return "opened";
 }

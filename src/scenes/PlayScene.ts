@@ -16,10 +16,12 @@ import {
   collectCoin,
   collectFeather,
   collectHeart,
+  collectKey,
   collectShield,
   collectSpeed,
   createPlayerStats,
   isInvincible,
+  openChest,
   PlayerStats,
   registerHit,
   resetDoubleJump,
@@ -28,7 +30,7 @@ import {
 } from "../gameplay/PlayerStats";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
-import { buildRenderGrid, GROUND_FRAME_BOUNCE } from "../level/groundAutotile";
+import { buildRenderGrid, GROUND_FRAME_BOUNCE, GROUND_FRAME_WATER } from "../level/groundAutotile";
 import { EntityType, LevelData } from "../level/LevelSchema";
 import { groundTilesetKey, THEMES } from "../level/themes";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
@@ -40,16 +42,33 @@ const BOUNCE_VELOCITY_Y = -650;
  * spawning just needs the type list — no separate texture lookup like
  * ENEMY_DEFS needs. Items are collected via a static overlap zone, same
  * pattern as the goal portal below. */
-const ITEM_TYPES: EntityType[] = ["item-coin", "item-heart", "item-speed", "item-feather", "item-shield"];
+const ITEM_TYPES: EntityType[] = ["item-coin", "item-heart", "item-speed", "item-feather", "item-shield", "item-key"];
+
+/** Purely cosmetic — spawned as plain static images with no collision or
+ * overlap logic (unlike every other entity list here), so a level looks
+ * the same in Play as it does in the editor with zero gameplay effect. */
+const DECOR_TYPES: EntityType[] = [
+  "decor-bush",
+  "decor-tree",
+  "decor-cactus",
+  "decor-lamp",
+  "decor-cloud",
+  "decor-snowman",
+  "decor-sprout",
+  "decor-mushroom",
+  "decor-rocks",
+  "decor-bat",
+];
 
 /** One entry per placeable enemy type — see the enemyDefs loop in create().
- * All three share the exact same patrol/bob movement (EnemyBehaviors.ts);
+ * All four share the exact same patrol/bob movement (EnemyBehaviors.ts);
  * only the texture and whether a from-above hit stomps it (vs. costing the
  * player no matter how it's touched) differ. */
 const ENEMY_DEFS: { type: EntityType; textureKey: string; stompable: boolean }[] = [
   { type: "enemy-ghost", textureKey: "enemy-ghost-pillow", stompable: true },
   { type: "enemy-bat", textureKey: "enemy-bat", stompable: true },
   { type: "enemy-spike", textureKey: "enemy-spike-crawler", stompable: false },
+  { type: "enemy-golem", textureKey: "enemy-golem", stompable: true },
 ];
 
 interface ActiveEnemy {
@@ -96,6 +115,7 @@ export class PlayScene extends Phaser.Scene {
   private jumpWasDown = false;
   private parallax!: ParallaxBackground;
   private hud!: Phaser.GameObjects.Text;
+  private trophy!: Phaser.GameObjects.Image;
 
   constructor() {
     super("Play");
@@ -124,7 +144,9 @@ export class PlayScene extends Phaser.Scene {
     });
     const tileset = map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0)!;
     this.groundLayer = map.createLayer(0, tileset, 0, 0)!;
-    this.groundLayer.setCollisionByExclusion([-1]);
+    // Water isn't solid — standing in it is a hazard (see the per-frame
+    // check in update()), not a floor to stand on.
+    this.groundLayer.setCollisionByExclusion([-1, GROUND_FRAME_WATER]);
 
     const spawn = this.level.entities.find((e) => e.type === "player-spawn");
     const spawnX = spawn ? spawn.x * TILE_SIZE + TILE_SIZE / 2 : TILE_SIZE;
@@ -178,6 +200,27 @@ export class PlayScene extends Phaser.Scene {
       this.physics.add.overlap(this.player, zone, () => this.collectItem(type, icon, zone));
     }
 
+    const chestEntity = this.level.entities.find((e) => e.type === "chest");
+    if (chestEntity) {
+      const x = chestEntity.x * TILE_SIZE + TILE_SIZE / 2;
+      const y = chestEntity.y * TILE_SIZE + TILE_SIZE / 2;
+      const chestSprite = this.add.image(x, y, "chest").setDepth(5);
+      const chestZone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+      this.physics.add.existing(chestZone, true);
+      this.physics.add.overlap(this.player, chestZone, () => this.tryOpenChest(chestSprite, chestZone));
+    }
+
+    // Decoration entities (see DECOR_TYPES) — plain static images, no
+    // physics body, no overlap: purely visual, same as they look in the
+    // editor.
+    for (const type of DECOR_TYPES) {
+      const entity = this.level.entities.find((e) => e.type === type);
+      if (!entity) continue;
+      const x = entity.x * TILE_SIZE + TILE_SIZE / 2;
+      const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
+      this.add.image(x, y, type).setDepth(3);
+    }
+
     this.input$ = createPlayerInput(this);
     this.touch = new TouchControls(this);
 
@@ -192,6 +235,12 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(30)
       .setScrollFactor(0);
     this.updateHud();
+
+    this.trophy = this.add
+      .image(this.scale.width / 2, this.scale.height / 2 - 62, "trophy")
+      .setDepth(30)
+      .setScrollFactor(0)
+      .setVisible(false);
 
     this.banner = this.add
       .text(this.scale.width / 2, this.scale.height / 2 - 20, "", {
@@ -299,6 +348,15 @@ export class PlayScene extends Phaser.Scene {
       updateGhostPatrol(enemy.sprite, enemy.state, time);
     }
 
+    // Water is a hazard, not solid ground (see the collision exclusion in
+    // create()) — standing in it costs a hit exactly like a bad enemy
+    // touch, debounced the same way via registerHit's grace period so it
+    // doesn't drain multiple hearts per frame of continued contact.
+    const footTile = this.groundLayer.getTileAtWorldXY(this.player.x, this.player.y - 2);
+    if (footTile && footTile.index === GROUND_FRAME_WATER) {
+      this.takeHit();
+    }
+
     // Falling off the level is unconditional instant-loss, unlike a bad
     // enemy/hazard touch — Hearts and Shield don't apply here, since
     // "bounce back and keep playing" doesn't fit falling the way it fits
@@ -354,6 +412,9 @@ export class PlayScene extends Phaser.Scene {
       case "item-shield":
         collectShield(this.stats, now);
         break;
+      case "item-key":
+        collectKey(this.stats);
+        break;
       default:
         return;
     }
@@ -362,9 +423,22 @@ export class PlayScene extends Phaser.Scene {
     this.updateHud();
   }
 
+  /** Chest is a separate one-off entity, not part of ITEM_TYPES/collectItem
+   * — unlike a plain item it doesn't always consume itself on touch, only
+   * when a Key is actually held (see openChest's docstring), so it needs
+   * its own guard against the sprite being destroyed already. */
+  private tryOpenChest(sprite: Phaser.GameObjects.Image, zone: Phaser.GameObjects.Zone): void {
+    if (!sprite.active) return;
+    if (openChest(this.stats) !== "opened") return;
+    sprite.destroy();
+    zone.destroy();
+    this.updateHud();
+  }
+
   private updateHud(): void {
     const hearts = "♥".repeat(this.stats.extraHits);
-    this.hud.setText(`Score: ${this.stats.score}${hearts ? "  " + hearts : ""}`);
+    const key = this.stats.hasKey ? "  [Key]" : "";
+    this.hud.setText(`Score: ${this.stats.score}${hearts ? "  " + hearts : ""}${key}`);
   }
 
   /** Cyan while a Shield (or the post-hit grace period) makes any bad
@@ -400,6 +474,7 @@ export class PlayScene extends Phaser.Scene {
     this.player.setVelocity(0, 0);
     applyWizardTexture(this.player, "wizard-cast");
     this.physics.pause();
+    this.trophy.setVisible(true);
 
     const hasNextLevel = this.world && this.world.index + 1 < this.world.levelIds.length;
     if (hasNextLevel) {

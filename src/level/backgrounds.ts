@@ -4,6 +4,8 @@ export type BackgroundSceneId =
   | "grass-sky"
   | "desert-sky"
   | "starfield"
+  | "icy-sky"
+  | "jungle-sky"
   | "pirate-cove"
   | "overgrown-ruins"
   | "snowy-peaks";
@@ -27,13 +29,14 @@ interface BackgroundScene {
  * `theme` (grass/desert/castle, which only recolors the ground tileset and
  * the flat fallback background color — see themes.ts) — any scene can show
  * behind any theme, picked via EditorUI's "Background: ▶" cycle button and
- * stored on `LevelData.background`. `grass-sky`/`desert-sky`/`starfield`
- * reuse the pre-existing theme-matched art (Kenney sky tiles, the
- * procedural castle starfield — see BootScene.preload / generateTextures.ts)
- * as three entries in the same pool; the rest are original painted scenes
- * from `scripts/generate-painted-backgrounds.py`, each ~4x the canvas
- * width so the tile boundary is never actually seen at today's level-size
- * cap (see that script's docstring for the exact math) — replacing the old
+ * stored on `LevelData.background`. `grass-sky`/`desert-sky`/`starfield`/
+ * `icy-sky`/`jungle-sky` are all real Kenney sky tiles (except starfield,
+ * the procedural castle night sky — see BootScene.preload /
+ * generateTextures.ts); the rest (`pirate-cove`/`overgrown-ruins`/
+ * `snowy-peaks`) are original painted scenes from
+ * `scripts/generate-painted-backgrounds.py`, each ~4x the canvas width so
+ * the tile boundary is never actually seen at today's level-size cap (see
+ * that script's docstring for the exact math) — replacing the old
  * complaint that the small 24px Kenney sky tile's repeat was obvious.
  */
 export const BACKGROUND_SCENES: BackgroundScene[] = [
@@ -59,6 +62,22 @@ export const BACKGROUND_SCENES: BackgroundScene[] = [
     layers: [
       { textureKey: "bg-castle-far", factor: 0.04, tileScale: 1 },
       { textureKey: "bg-castle-near", factor: 0.12, tileScale: 1 },
+    ],
+  },
+  {
+    id: "icy-sky",
+    label: "Icy Sky",
+    layers: [
+      { textureKey: "bg-icy-sky-far", factor: 0.05, tileScale: 4 },
+      { textureKey: "bg-icy-sky-near", factor: 0.15, tileScale: 4 },
+    ],
+  },
+  {
+    id: "jungle-sky",
+    label: "Jungle Sky",
+    layers: [
+      { textureKey: "bg-jungle-sky-far", factor: 0.05, tileScale: 4 },
+      { textureKey: "bg-jungle-sky-near", factor: 0.15, tileScale: 4 },
     ],
   },
   {
@@ -91,6 +110,7 @@ const DEFAULT_BY_THEME: Record<LevelTheme, BackgroundSceneId> = {
   grass: "grass-sky",
   desert: "desert-sky",
   castle: "starfield",
+  snow: "icy-sky",
 };
 
 /** What a level shows before anyone's touched the background picker — the

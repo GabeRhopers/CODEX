@@ -1,12 +1,13 @@
 import { TILE_SIZE } from "../config/gameConfig";
-import { BOUNCE_TILE, BRICK_TILE, EMPTY_TILE, GROUND_TILE, LevelData, LevelEntity, SCHEMA_VERSION } from "./LevelSchema";
+import { BOUNCE_TILE, BRICK_TILE, EMPTY_TILE, GROUND_TILE, LevelData, LevelEntity, SCHEMA_VERSION, WATER_TILE } from "./LevelSchema";
 import { LevelTheme } from "./themes";
 
 /**
- * Five hand-authored, ready-to-play levels — one per theme, plus two extra
- * showcasing the real Kenney art content (Brick/Bounce/Bat/Spike Crawler,
- * see README's "Real art" section) — always available from the **Templates**
- * screen (TemplateBrowserScene), never stored in `localStorage`: unlike an
+ * Six hand-authored, ready-to-play levels — one per theme (grass/desert/
+ * castle/snow), plus two extra showcasing specific real Kenney art content
+ * (Brick/Bounce/Bat/Spike Crawler, see README's "Real art" section) — always
+ * available from the **Templates** screen (TemplateBrowserScene), never
+ * stored in `localStorage`: unlike an
  * earlier version of this file, these are no longer copied into My Levels
  * on first visit. "Play" clones one into PlayScene directly; "Use This
  * Template" clones it into the editor with a blank id, so saving creates an
@@ -29,6 +30,7 @@ const CHAR_TO_TILE: Record<string, number> = {
   "#": GROUND_TILE,
   B: BRICK_TILE,
   O: BOUNCE_TILE,
+  W: WATER_TILE,
   ".": EMPTY_TILE,
 };
 
@@ -197,4 +199,55 @@ const CRATE_CANYON = levelFromRows({
   ],
 });
 
-export const TEMPLATE_LEVELS: LevelData[] = [SUNNY_HILLS, DESERT_CANYON, CASTLE_ASCENT, SPRING_MEADOW, CRATE_CANYON];
+/**
+ * Showcases the M2 content added in the 2026-08-12 pass: the Snow theme,
+ * the Water hazard tile (a 3-tile-wide shallow gap in the floor at
+ * cols 11-13 — non-solid, so walking into it drops the player one tile
+ * onto the solid backing row and costs a hit, same as any other hazard;
+ * jumping it clean at a run needs nowhere near this game's ~6-tile reach),
+ * the Golem enemy, the Key→Chest mechanic (the key sits on the path before
+ * the gap, the chest just after it), and a representative handful of the
+ * new purely-cosmetic Decor entities (the full set is always available in
+ * the editor's Decor tab regardless of what any one template shows).
+ */
+const FROZEN_CAVERN = levelFromRows({
+  id: "template-frozen-cavern",
+  name: "Frozen Cavern",
+  theme: "snow",
+  rows: [
+    "....................",
+    "....................",
+    "....................",
+    "....................",
+    "....................",
+    "....................",
+    "....................",
+    "....................",
+    "....................",
+    "....................",
+    "####..#####WWW######",
+    "####################",
+  ],
+  entities: [
+    { type: "player-spawn", x: 1, y: 9 },
+    { type: "decor-bush", x: 3, y: 9 },
+    { type: "enemy-golem", x: 6, y: 9 },
+    { type: "decor-snowman", x: 8, y: 9 },
+    { type: "item-key", x: 9, y: 9 },
+    { type: "decor-rocks", x: 10, y: 9 },
+    { type: "decor-cloud", x: 12, y: 3 },
+    { type: "decor-bat", x: 17, y: 5 },
+    { type: "chest", x: 15, y: 9 },
+    { type: "decor-lamp", x: 17, y: 9 },
+    { type: "goal", x: 18, y: 9 },
+  ],
+});
+
+export const TEMPLATE_LEVELS: LevelData[] = [
+  SUNNY_HILLS,
+  DESERT_CANYON,
+  CASTLE_ASCENT,
+  SPRING_MEADOW,
+  CRATE_CANYON,
+  FROZEN_CAVERN,
+];

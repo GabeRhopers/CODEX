@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   canDoubleJump,
+  CHEST_SCORE_BONUS,
   collectCoin,
   collectFeather,
   collectHeart,
+  collectKey,
   collectShield,
   collectSpeed,
   createPlayerStats,
   HIT_GRACE_MS,
   isInvincible,
+  openChest,
   registerHit,
   resetDoubleJump,
   SHIELD_DURATION_MS,
@@ -159,5 +162,36 @@ describe("collect* mutations", () => {
     stats.speedBoostUntil = 100;
     collectSpeed(stats, 1000);
     expect(stats.speedBoostUntil).toBe(1000 + SPEED_DURATION_MS);
+  });
+
+  it("collectKey sets hasKey", () => {
+    const stats = createPlayerStats();
+    collectKey(stats);
+    expect(stats.hasKey).toBe(true);
+  });
+});
+
+describe("openChest", () => {
+  it("is locked (no mutation) without a key", () => {
+    const stats = createPlayerStats();
+    expect(openChest(stats)).toBe("locked");
+    expect(stats.score).toBe(0);
+    expect(stats.hasKey).toBe(false);
+  });
+
+  it("opens and spends the key, awarding the score bonus", () => {
+    const stats = createPlayerStats();
+    collectKey(stats);
+    expect(openChest(stats)).toBe("opened");
+    expect(stats.hasKey).toBe(false);
+    expect(stats.score).toBe(CHEST_SCORE_BONUS);
+  });
+
+  it("is locked again on a second attempt after the key is spent", () => {
+    const stats = createPlayerStats();
+    collectKey(stats);
+    openChest(stats);
+    expect(openChest(stats)).toBe("locked");
+    expect(stats.score).toBe(CHEST_SCORE_BONUS); // unchanged by the second attempt
   });
 });

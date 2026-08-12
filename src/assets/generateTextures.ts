@@ -10,19 +10,22 @@ import { groundIconKey, groundTilesetKey, ThemeColors, THEMES } from "../level/t
  * github.com are reachable, so real Kenney assets couldn't be *fetched*
  * from here) — that changed once the user supplied Kenney's CC0 "Pixel
  * Platformer" pack directly as an upload. See BootScene.preload for what's
- * now real art loaded from public/assets/: the grass/desert ground tiles,
- * brick, bounce, the bat, and the spike crawler (all pre-composited to
- * this project's tile/entity sizes by a one-off `PIL` prep script, since
- * the pack's native tiles are 18px/24px, not this project's 32px/40px).
+ * now real art loaded from public/assets/: the grass/desert/snow ground
+ * tiles, brick, bounce, water, the bat, the spike crawler, the golem, and
+ * a growing set of collectibles/decorations (all pre-composited to this
+ * project's tile/entity sizes by a one-off `PIL` prep script, since the
+ * pack's native tiles are 18px/24px, not this project's 32px/40px).
  *
  * What's still generated here:
- *   - The **castle** theme's ground tileset — the pack has grass/sand/snow
- *     ground caps but no stone/castle one, so castle keeps its original
- *     procedural grey look (including its own brick/bounce frames, so a
- *     castle-themed level never mixes real art with procedural art within
- *     itself — only *between* different levels' themes) — and, for the
- *     same reason, its own procedural starfield parallax background
- *     (ParallaxBackground.ts) rather than Kenney's daytime sky art.
+ *   - The **castle** theme's ground tileset — the pack has no stone/
+ *     castle-style ground cap, so castle keeps its original procedural
+ *     grey look (including its own brick/bounce/lava frames — lava
+ *     stands in for the real Water tile grass/desert/snow share, fitting
+ *     the castle aesthetic better anyway — so a castle-themed level never
+ *     mixes real art with procedural art within itself, only *between*
+ *     different levels' themes) — and, for the same reason, its own
+ *     procedural starfield parallax background (ParallaxBackground.ts)
+ *     rather than Kenney's daytime sky art.
  *   - The **Feather** item's icon — the pack has no double-jump-shaped
  *     asset (or anything close), so it's a simple drawn badge instead.
  *   - Pure UI chrome with no asset-pack equivalent: the eraser icon, the
@@ -95,6 +98,27 @@ function drawBounce(g: Phaser.GameObjects.Graphics, offsetX: number): void {
   g.lineBetween(offsetX + 16, 27, offsetX + 22, 34);
 }
 
+const LAVA_BASE = 0xd94e1f;
+const LAVA_DEEP = 0x8a2a10;
+const LAVA_GLOW = 0xffb347;
+
+/** Castle's own hazard block — grass/desert/snow share a real Kenney water
+ * tile (see prepare-kenney-assets.py), but castle's tileset is entirely
+ * procedural (no stone tile in the pack), so it gets its own hazard frame
+ * too rather than mixing real and procedural art within one theme. Lava
+ * fits the castle aesthetic better than water anyway. */
+function drawLava(g: Phaser.GameObjects.Graphics, offsetX: number): void {
+  g.fillStyle(LAVA_BASE, 1);
+  g.fillRect(offsetX, 0, TILE_SIZE, TILE_SIZE);
+  g.fillStyle(LAVA_DEEP, 1);
+  g.fillRect(offsetX, TILE_SIZE - 10, TILE_SIZE, 10);
+  g.fillStyle(LAVA_GLOW, 1);
+  g.fillRect(offsetX + 4, 5, 6, 6);
+  g.fillRect(offsetX + 19, 11, 5, 5);
+  g.fillRect(offsetX + 11, 19, 6, 6);
+  g.fillRect(offsetX + 23, 23, 4, 4);
+}
+
 const FEATHER_BADGE = 0x7ee8fa;
 const FEATHER_OUTLINE = 0x0e5a66;
 const FEATHER_MARK = 0xffffff;
@@ -160,7 +184,8 @@ export function generateTextures(scene: Phaser.Scene): void {
   drawGroundFill(g, TILE_SIZE, castleColors);
   drawBrick(g, TILE_SIZE * 2);
   drawBounce(g, TILE_SIZE * 3);
-  g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 4, TILE_SIZE);
+  drawLava(g, TILE_SIZE * 4);
+  g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 5, TILE_SIZE);
 
   // Castle's parallax background (see ParallaxBackground.ts) — grass/desert
   // use real Kenney sky art loaded in BootScene.preload instead.
