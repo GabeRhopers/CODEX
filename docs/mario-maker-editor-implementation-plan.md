@@ -525,6 +525,23 @@ tileset (`EditorScene.createGroundLayer`, extracted out of `create()` so
 untouched, only the rendered skin changes, so a level's layout survives
 a theme switch. `TOOLBAR_MIN_WIDTH` went from 1180 to 1340 to fit the
 new button alongside the background picker without clipping.
+*Note (2026-08-13):* a follow-up ask — "all blocks should be available
+in all themes," reviewed end-to-end rather than taken at face value —
+surfaced a real gap the Theme picker alone didn't cover: Brick/Bounce/
+Water's Palette icons were one fixed texture regardless of theme.
+Invisible for grass/desert/snow (they share pixel-identical real-art
+Brick/Bounce/Water), but Castle draws its own procedural Brick/Bounce/
+Lava, so the palette kept showing the shared real-art icons even in
+Castle — worst for Water, whose blue icon didn't even hint that placing
+it actually paints orange lava. Generalized the fix Ground already had
+(EditorUI's icon row special-cased `brush.id === "ground"`) into a
+data-driven `Brush.themedTextureKey`/`themedLabel` field in Palette.ts,
+per that file's own "data, not branching code" rule, and added
+dedicated Castle icon textures (`blockIconKey` in themes.ts) generated
+alongside its 5-frame tileset in generateTextures.ts. Water also
+relabels to "Lava" when Castle is active. Decor/Items/Enemies were
+audited too and are correctly theme-independent already (never had
+per-theme variants to begin with), so nothing there needed a fix.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

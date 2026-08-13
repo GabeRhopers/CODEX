@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
-import { groundIconKey, groundTilesetKey, ThemeColors, THEMES } from "../level/themes";
+import { blockIconKey, groundIconKey, groundTilesetKey, ThemeColors, THEMES } from "../level/themes";
 
 /**
  * Procedurally generated pixel art for the pieces that still don't have a
@@ -190,6 +190,23 @@ export function generateTextures(scene: Phaser.Scene): void {
   drawBounce(g, TILE_SIZE * 3);
   drawLava(g, TILE_SIZE * 4);
   g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 5, TILE_SIZE);
+
+  // Single-frame Palette icons matching castle's own procedural brick/
+  // bounce/lava above — without these the palette would keep showing the
+  // shared real-art Brick/Bounce/Water icons even while castle is active,
+  // which for Water in particular is actively misleading (a blue water
+  // icon that actually paints orange lava when placed).
+  g.clear();
+  drawBrick(g, 0);
+  g.generateTexture(blockIconKey("castle", "brick"), TILE_SIZE, TILE_SIZE);
+
+  g.clear();
+  drawBounce(g, 0);
+  g.generateTexture(blockIconKey("castle", "bounce"), TILE_SIZE, TILE_SIZE);
+
+  g.clear();
+  drawLava(g, 0);
+  g.generateTexture(blockIconKey("castle", "water"), TILE_SIZE, TILE_SIZE);
 
   // Castle's parallax background (see ParallaxBackground.ts) — grass/desert
   // use real Kenney sky art loaded in BootScene.preload instead.

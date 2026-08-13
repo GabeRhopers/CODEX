@@ -37,6 +37,17 @@ export function groundIconKey(theme: LevelTheme): string {
   return `tile-ground-icon-${theme}`;
 }
 
+/** Brick/Bounce/Water are visually identical across grass/desert/snow —
+ * they share one real Kenney tile each (see prepare-kenney-assets.py) —
+ * but castle's tileset is entirely procedural (its own grey brick, orange
+ * bounce pad, and lava standing in for water — see generateTextures.ts),
+ * so its icon has to be a separate texture, not the shared real-art one.
+ * Mirrors groundIconKey's per-theme pattern for the three blocks that
+ * *mostly* don't need it. */
+export function blockIconKey(theme: LevelTheme, block: "brick" | "bounce" | "water"): string {
+  return theme === "castle" ? `tile-${block}-icon-castle` : `tile-${block}-icon`;
+}
+
 const THEME_ORDER: LevelTheme[] = ["grass", "desert", "castle", "snow"];
 
 /** Cycles to the next theme in THEME_ORDER, wrapping around — mirrors

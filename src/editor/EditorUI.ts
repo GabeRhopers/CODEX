@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GRID_ROWS, TILE_SIZE, TOOLBAR_HEIGHT } from "../config/gameConfig";
-import { groundIconKey, LevelTheme } from "../level/themes";
+import { LevelTheme } from "../level/themes";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -149,15 +149,17 @@ export class EditorUI {
     const brushes = PALETTE.filter((brush) => brush.category === this.activeCategory);
     brushes.forEach((brush, i) => {
       const cx = PALETTE_START_X + i * PALETTE_ICON_SPACING + TILE_SIZE / 2;
-      // The Ground brush's icon reflects the level's own theme rather than
-      // a fixed texture, so the palette always matches what painting
-      // Ground actually looks like in this level.
-      const textureKey = brush.id === "ground" ? groundIconKey(this.theme) : brush.textureKey;
+      // Ground/Brick/Bounce/Water all re-skin with the level's current
+      // theme (see Brush's themedTextureKey/themedLabel docstrings in
+      // Palette.ts) — falling back to the plain fields keeps every other
+      // brush exactly as simple as before.
+      const textureKey = brush.themedTextureKey ? brush.themedTextureKey(this.theme) : brush.textureKey;
+      const labelText = brush.themedLabel ? brush.themedLabel(this.theme) : brush.label;
       const icon = this.scene.add.image(cx, ICON_ROW_Y, textureKey).setDepth(21).setInteractive({ useHandCursor: true });
       fitWithinTile(icon);
       icon.on("pointerdown", () => this.selectBrush(brush));
       const label = this.scene.add
-        .text(cx, ICON_ROW_Y + 20, brush.label, { fontSize: "10px", color: "#eeeeee" })
+        .text(cx, ICON_ROW_Y + 20, labelText, { fontSize: "10px", color: "#eeeeee" })
         .setOrigin(0.5, 0)
         .setDepth(21);
       this.iconRow.add([icon, label]);

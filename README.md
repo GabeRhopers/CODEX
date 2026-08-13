@@ -127,7 +127,12 @@ Open the dev server URL in a browser. Controls:
   full layout survives a theme switch intact. Every ground skin is
   reachable from any level this way (see "Second content pass" under Art
   for why this exists — Snow's ground tile used to only be reachable via
-  the Frozen Cavern template). Persists on Save.
+  the Frozen Cavern template). Persists on Save. Every block in the
+  palette (Ground/Brick/Bounce/Water) re-skins its icon to match — most
+  visibly Water, which relabels to **Lava** with a matching icon once
+  Castle is selected, since that's what placing it actually paints (see
+  "Real art: Kenney's 'Pixel Platformer' (CC0)" under Art for why
+  castle's tileset is entirely procedural, lava included).
 - **Background: ▶**: cycles the level's parallax background scene through
   the pool of 5 (independent of the level's theme — see "Parallax
   background & background scenes" under Art), previewing live; persists on
@@ -563,7 +568,17 @@ source tile indices and how to regenerate with different ones.
 pure UI chrome with no asset-pack equivalent — the eraser icon, the spawn
 marker, the hover highlight, and the palette selection outline — are
 still generated at runtime in `src/assets/generateTextures.ts`, same
-technique as before.
+technique as before. Castle's own procedural Brick/Bounce/Lava also get
+dedicated single-frame Palette icons (`blockIconKey(theme, block)` in
+themes.ts) generated right alongside its 5-frame tileset strip — without
+those, the palette would keep showing grass/desert/snow's shared
+real-art Brick/Bounce/Water icons even while Castle is the active theme,
+which for Water in particular is actively misleading (its lava frame
+looks nothing like the icon). `Brush.themedTextureKey`/`themedLabel` in
+Palette.ts (read by `EditorUI.renderIconRow`) is the general mechanism —
+the same one Ground's icon already used — so a brush's palette
+appearance can track the level's current theme without EditorUI needing
+brush-id-specific branching.
 
 *Palette/marker scaling:* entity art varies in native resolution (32px
 icons vs. the larger ghost/portal illustrations), so both the editor
