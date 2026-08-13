@@ -512,6 +512,19 @@ last, since it's the only non-painted one) — pool order is now
 `starfield`. `green-valley` is also the new default for the grass theme
 (`DEFAULT_BY_THEME.grass`), which — since `"grass"` is `DEFAULT_THEME` in
 themes.ts — makes it what a brand-new level shows by default.
+*Note (2026-08-12, one more time the same day):* the project owner
+pointed out that Snow's ground tile — despite being real, wired-up
+content — was only ever reachable via the Frozen Cavern template, since
+nothing let you change an *existing* level's theme; "all blocks and
+items should be available no matter the theme" was the ask. Added an
+in-editor **"Theme: ▶"** cycle button (`EditorUI`/`EditorScene`,
+mirroring the background picker's pattern) that swaps
+`LevelData.theme` and rebuilds the tilemap layer against the new theme's
+tileset (`EditorScene.createGroundLayer`, extracted out of `create()` so
+`cycleTheme()` can reuse it) — the ground layer's tile *data* is
+untouched, only the rendered skin changes, so a level's layout survives
+a theme switch. `TOOLBAR_MIN_WIDTH` went from 1180 to 1340 to fit the
+new button alongside the background picker without clipping.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

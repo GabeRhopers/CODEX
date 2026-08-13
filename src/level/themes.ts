@@ -36,3 +36,14 @@ export function groundTilesetKey(theme: LevelTheme): string {
 export function groundIconKey(theme: LevelTheme): string {
   return `tile-ground-icon-${theme}`;
 }
+
+const THEME_ORDER: LevelTheme[] = ["grass", "desert", "castle", "snow"];
+
+/** Cycles to the next theme in THEME_ORDER, wrapping around — mirrors
+ * backgrounds.ts's nextBackgroundId, driving EditorUI's "Theme: ▶" cycle
+ * button so every ground skin (including Snow's) is reachable from any
+ * level, not just levels that started out on that theme. */
+export function nextTheme(theme: LevelTheme): LevelTheme {
+  const index = THEME_ORDER.indexOf(theme);
+  return THEME_ORDER[(index + 1) % THEME_ORDER.length];
+}

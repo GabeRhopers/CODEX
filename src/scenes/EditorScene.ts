@@ -14,7 +14,7 @@ import { backgroundScene, BackgroundSceneId, nextBackgroundId, resolveBackground
 import { groundFrameAt } from "../level/groundAutotile";
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
-import { groundTilesetKey, THEMES } from "../level/themes";
+import { groundTilesetKey, nextTheme, THEMES } from "../level/themes";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -63,16 +63,7 @@ export class EditorScene extends Phaser.Scene {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }
 
-    const tilesetKey = groundTilesetKey(this.level.theme);
-    const map = this.make.tilemap({
-      tileWidth: TILE_SIZE,
-      tileHeight: TILE_SIZE,
-      width: this.level.width,
-      height: this.level.height,
-    });
-    const tileset = map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0)!;
-    this.groundLayer = map.createBlankLayer("ground", tileset, 0, 0)!;
-
+    this.createGroundLayer();
     this.painter = new TilePainter(this.level, this.groundLayer);
     this.entityPlacer = new EntityPlacer(this, this.level, TILE_SIZE);
 
@@ -87,6 +78,7 @@ export class EditorScene extends Phaser.Scene {
       onUndo: () => this.undo(),
       onRedo: () => this.redo(),
       onCycleBackground: () => this.cycleBackground(),
+      onCycleTheme: () => this.cycleTheme(),
     });
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
@@ -195,6 +187,24 @@ export class EditorScene extends Phaser.Scene {
     this.history.push(command);
   }
 
+  /** Builds the tilemap layer bound to the current `this.level.theme`'s
+   * tileset image — factored out of create() so cycleTheme() can rebuild
+   * it against a different tileset without duplicating this setup.
+   * Assigns `this.groundLayer`; callers still need to point a fresh
+   * TilePainter at it and repaint the level's tile data (see
+   * rebuildVisualsFromLevel). */
+  private createGroundLayer(): void {
+    const tilesetKey = groundTilesetKey(this.level.theme);
+    const map = this.make.tilemap({
+      tileWidth: TILE_SIZE,
+      tileHeight: TILE_SIZE,
+      width: this.level.width,
+      height: this.level.height,
+    });
+    const tileset = map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0)!;
+    this.groundLayer = map.createBlankLayer("ground", tileset, 0, 0)!;
+  }
+
   /** Independent of `theme` — see level/backgrounds.ts. Swaps the live
    * preview immediately (destroy + recreate, since scenes can have
    * different layer counts) and stores the choice on the level so it
@@ -205,6 +215,24 @@ export class EditorScene extends Phaser.Scene {
     this.parallax.destroy();
     this.parallax = new ParallaxBackground(this, this.backgroundId, this.level.width * TILE_SIZE);
     this.ui.setBackgroundLabel(backgroundScene(this.backgroundId).label);
+  }
+
+  /** Every ground skin (grass/desert/castle/snow) is reachable from any
+   * level this way — previously the only way to get Snow's ground tile,
+   * for instance, was to start from the Frozen Cavern template, since
+   * there was no way to change an existing level's theme. The tilemap
+   * layer is bound to one theme's tileset texture at creation, so
+   * switching means tearing it down and rebuilding against the new
+   * theme's tileset (see createGroundLayer) rather than swapping a
+   * property on the existing layer — gameplay data (tile indices, entity
+   * positions) is untouched, only the ground layer's visuals are rebuilt. */
+  private cycleTheme(): void {
+    this.groundLayer.destroy();
+    this.level.theme = nextTheme(this.level.theme);
+    this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
+    this.createGroundLayer();
+    this.rebuildVisualsFromLevel();
+    this.ui.setTheme(this.level.theme);
   }
 
   private undo(): void {

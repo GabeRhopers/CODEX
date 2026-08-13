@@ -120,6 +120,14 @@ Open the dev server URL in a browser. Controls:
   recent one.
 - **Menu**: back to the home page.
 - **Clear**: wipes the current grid and entities.
+- **Theme: ▶**: cycles the level's ground skin through all 4
+  `LevelTheme`s (Grass/Desert/Castle/Snow), previewing live — the ground
+  layer's tile *data* (top/fill/brick/bounce/water at each cell) is
+  untouched, only which tileset image renders it changes, so a level's
+  full layout survives a theme switch intact. Every ground skin is
+  reachable from any level this way (see "Second content pass" under Art
+  for why this exists — Snow's ground tile used to only be reachable via
+  the Frozen Cavern template). Persists on Save.
 - **Background: ▶**: cycles the level's parallax background scene through
   the pool of 5 (independent of the level's theme — see "Parallax
   background & background scenes" under Art), previewing live; persists on
@@ -136,7 +144,7 @@ adapts. Three things make that true, all in `main.ts`/`index.html` unless
 noted:
 
 - **Scaling**: the game's internal resolution stays a fixed
-  `GAME_WIDTH`×`GAME_HEIGHT` (1180×476 — see `config/gameConfig.ts`; every
+  `GAME_WIDTH`×`GAME_HEIGHT` (1340×476 — see `config/gameConfig.ts`; every
   scene's layout math is untouched), but Phaser's Scale Manager runs in
   `FIT` + `CENTER_BOTH` mode, so it's letterboxed down (or up) to whatever
   viewport it's opened in, phone included, instead of getting clipped or
@@ -429,11 +437,9 @@ place with a real mechanic, enemy, theme, or decoration, landing at 35
 assets (~15.2%):
 - **Snow theme** (`"snow"`, a 4th `LevelTheme`) — a real Kenney snow-cap
   ground tile, paired with `snowy-peaks` (see above) as its default
-  background. Reachable the same way Templates always have been
-  (**Frozen Cavern**, see below); there's still no in-editor theme
-  *picker* (unlike the background picker) — that's a larger, separate
-  change (recreating the tilemap's tileset at runtime) out of scope for
-  this pass.
+  background. Originally reachable only via the **Frozen Cavern** template
+  (see below) — an in-editor theme *picker* came later (see the
+  **"Theme: ▶"** entry below), so it's now selectable on any level.
 - **Water** (`WATER_TILE`, a 5th ground-layer value alongside Ground/
   Brick/Bounce) — a hazard, not solid ground: excluded from
   `setCollisionByExclusion` so the player falls through it onto whatever

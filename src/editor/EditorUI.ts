@@ -13,6 +13,7 @@ export interface EditorUICallbacks {
   onUndo: () => void;
   onRedo: () => void;
   onCycleBackground: () => void;
+  onCycleTheme: () => void;
 }
 
 const TOOLBAR_Y = GRID_ROWS * TILE_SIZE;
@@ -35,10 +36,11 @@ export class EditorUI {
   private activeCategory: BrushCategory;
   private selectedBrushId: string;
   private backgroundButton!: Phaser.GameObjects.Text;
+  private themeButton!: Phaser.GameObjects.Text;
 
   constructor(
     private readonly scene: Phaser.Scene,
-    private readonly theme: LevelTheme,
+    private theme: LevelTheme,
     initialBackgroundLabel: string,
     private readonly callbacks: EditorUICallbacks,
   ) {
@@ -72,6 +74,15 @@ export class EditorUI {
     addActionButton("Clear", () => this.callbacks.onClear());
     addActionButton("Undo (Ctrl+Z)", () => this.callbacks.onUndo());
     addActionButton("Redo (Ctrl+Y)", () => this.callbacks.onRedo());
+
+    // Recolors the ground tileset (grass/desert/castle/snow) — every skin
+    // is reachable from any level this way, not just levels that started
+    // out on that theme (previously the only way to get Snow's ground
+    // tile was to start from the Frozen Cavern template).
+    this.themeButton = this.makeRowButton(buttonX, ROW1_Y, this.themeLabelText(theme), () => this.callbacks.onCycleTheme());
+    this.themeButton.on("pointerover", () => this.themeButton.setStyle({ backgroundColor: "#3a5a9c" }));
+    this.themeButton.on("pointerout", () => this.themeButton.setStyle({ backgroundColor: "#0f3460" }));
+    buttonX += this.themeButton.width + BUTTON_GAP;
 
     // Independent of theme (see level/backgrounds.ts) — clicking cycles to
     // the next parallax scene in the pool, wrapping around; the label
@@ -182,6 +193,20 @@ export class EditorUI {
    * the only place the current background scene is displayed. */
   setBackgroundLabel(label: string): void {
     this.backgroundButton.setText(this.backgroundLabelText(label));
+  }
+
+  private themeLabelText(theme: LevelTheme): string {
+    return `Theme: ${theme.charAt(0).toUpperCase()}${theme.slice(1)} ▶`;
+  }
+
+  /** Called by EditorScene right after cycling. Unlike setBackgroundLabel,
+   * this also re-renders the icon row: the Ground brush's own icon tracks
+   * `this.theme` (see renderIconRow), so a theme change needs to refresh
+   * it there too, not just in the button text. */
+  setTheme(theme: LevelTheme): void {
+    this.theme = theme;
+    this.themeButton.setText(this.themeLabelText(theme));
+    this.renderIconRow();
   }
 
   setStatus(message: string): void {
