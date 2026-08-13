@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
-import { blockIconKey, groundIconKey, groundTilesetKey, ThemeColors, THEMES } from "../level/themes";
+import { blockIconKey, groundIconKey, groundTilesetKey, SKIN_COLORS, SkinColors } from "../level/groundSkins";
 
 /**
  * Procedurally generated pixel art for the pieces that still don't have a
@@ -17,15 +17,14 @@ import { blockIconKey, groundIconKey, groundTilesetKey, ThemeColors, THEMES } fr
  * pack's native tiles are 18px/24px, not this project's 32px/40px).
  *
  * What's still generated here:
- *   - The **castle** theme's ground tileset — the pack has no stone/
- *     castle-style ground cap, so castle keeps its original procedural
- *     grey look (including its own brick/bounce/lava frames — lava
- *     stands in for the real Water tile grass/desert/snow share, fitting
- *     the castle aesthetic better anyway — so a castle-themed level never
- *     mixes real art with procedural art within itself, only *between*
- *     different levels' themes) — and, for the same reason, its own
- *     procedural starfield parallax background (ParallaxBackground.ts)
- *     rather than Kenney's daytime sky art.
+ *   - **Castle**'s ground skin — the pack has no stone/castle-style
+ *     ground cap, so castle keeps its original procedural grey look
+ *     (including its own brick/bounce/lava frames — lava stands in for
+ *     the real Water tile grass/desert/snow share, fitting the castle
+ *     aesthetic better anyway), plus dedicated Palette icons for all
+ *     three (see blockIconKey) — and, for the same "no matching real
+ *     art" reason, its own procedural starfield parallax background
+ *     (ParallaxBackground.ts) rather than Kenney's daytime sky art.
  *   - The **Feather** item's icon — the pack has no double-jump-shaped
  *     asset (or anything close), so it's a simple drawn badge instead.
  *   - Pure UI chrome with no asset-pack equivalent: the eraser icon, the
@@ -38,7 +37,7 @@ import { blockIconKey, groundIconKey, groundTilesetKey, ThemeColors, THEMES } fr
 /** Grass-capped dirt — used where a ground cell has open air above it. No
  * border: adjacent tiles need to read as one continuous strip of terrain,
  * not a grid of visibly separate squares. */
-function drawGroundTop(g: Phaser.GameObjects.Graphics, offsetX: number, colors: ThemeColors): void {
+function drawGroundTop(g: Phaser.GameObjects.Graphics, offsetX: number, colors: SkinColors): void {
   g.fillStyle(colors.dirt, 1);
   g.fillRect(offsetX, 0, TILE_SIZE, TILE_SIZE);
   g.fillStyle(colors.cap, 1);
@@ -52,7 +51,7 @@ function drawGroundTop(g: Phaser.GameObjects.Graphics, offsetX: number, colors: 
 /** Plain dirt, no grass cap — used where a ground cell is buried under
  * another ground cell (see groundAutotile.ts). Same dirt tone as the top
  * variant so a vertical stack reads as one uninterrupted mass. */
-function drawGroundFill(g: Phaser.GameObjects.Graphics, offsetX: number, colors: ThemeColors): void {
+function drawGroundFill(g: Phaser.GameObjects.Graphics, offsetX: number, colors: SkinColors): void {
   g.fillStyle(colors.dirt, 1);
   g.fillRect(offsetX, 0, TILE_SIZE, TILE_SIZE);
   g.fillStyle(colors.dot, 1);
@@ -178,7 +177,7 @@ export function generateTextures(scene: Phaser.Scene): void {
 
   // Castle only — grass/desert ground tilesets are real art, loaded in
   // BootScene.preload (see groundTilesetKey/groundIconKey there).
-  const castleColors = THEMES.castle;
+  const castleColors = SKIN_COLORS.castle;
   g.clear();
   drawGroundTop(g, 0, castleColors);
   g.generateTexture(groundIconKey("castle"), TILE_SIZE, TILE_SIZE);

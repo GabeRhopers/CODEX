@@ -3,7 +3,6 @@ import { GAME_WIDTH } from "../config/gameConfig";
 import { cloneLevel } from "../level/LevelSerializer";
 import { LevelData } from "../level/LevelSchema";
 import { TEMPLATE_LEVELS } from "../level/templateLevels";
-import { THEMES } from "../level/themes";
 
 const ROW_START_Y = 90;
 const ROW_HEIGHT = 44;
@@ -46,15 +45,8 @@ export class TemplateBrowserScene extends Phaser.Scene {
 
   private addRow(level: LevelData, y: number): void {
     const rowBg = this.add.rectangle(40, y, GAME_WIDTH - 80, ROW_HEIGHT - 8, 0x16213e).setOrigin(0, 0);
-    const swatch = this.add
-      .rectangle(56, y + (ROW_HEIGHT - 8) / 2, 14, 14, THEMES[level.theme].background)
-      .setStrokeStyle(1, 0xffffff, 0.4)
-      .setOrigin(0.5);
     const name = this.add
-      .text(76, y + (ROW_HEIGHT - 8) / 2, level.name, { fontSize: "15px", color: "#ffffff" })
-      .setOrigin(0, 0.5);
-    const theme = this.add
-      .text(76, y + (ROW_HEIGHT - 8) / 2 + 16, level.theme, { fontSize: "10px", color: "#8888aa" })
+      .text(56, y + (ROW_HEIGHT - 8) / 2, level.name, { fontSize: "15px", color: "#ffffff" })
       .setOrigin(0, 0.5);
 
     const playBtn = this.makeSmallButton(GAME_WIDTH - 280, y + (ROW_HEIGHT - 8) / 2, "Play", () => this.play(level));
@@ -62,7 +54,7 @@ export class TemplateBrowserScene extends Phaser.Scene {
       this.useTemplate(level),
     );
 
-    this.listContainer.add([rowBg, swatch, name, theme, playBtn, useBtn]);
+    this.listContainer.add([rowBg, name, playBtn, useBtn]);
   }
 
   private makeSmallButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {

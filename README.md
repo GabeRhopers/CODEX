@@ -12,9 +12,9 @@ Potion/Feather/Shield, all with real gameplay effects, resolving the M2
 hit-points open question — see "Items & hit-points" under Art) + a
 tabbed, categorized palette (Blocks/Markers/Enemies/Items/Decor — replacing
 the single ever-widening icon row) + a parallax scrolling background with
-a 6-scene picker independent of level theme, including 3 original painted
+a 6-scene picker unrelated to ground-block skin, including 3 original painted
 scenes (see "Parallax background & background scenes" under Art) + a
-second content pass (Snow theme, Water hazard, Golem enemy, the Key→Chest
+second content pass (Snow ground skin, Water hazard, Golem enemy, the Key→Chest
 mechanic, 10 purely-cosmetic Decor entities, and a win-screen Trophy — see
 "Second content pass" under Art) + M4 (home page / level browser) + 6
 template levels + M8 (World Maker v1) done.** The game opens on a **Menu** (home
@@ -26,7 +26,7 @@ lists every saved level (not just a single most-recent slot) with Edit
 and Delete per row; unlike an earlier version of this project, Templates
 are no longer copied into it automatically — they live in their own
 always-available, read-only **Templates** screen instead (see "Templates
-& themes" under Art), so deleting one of your own levels never touches
+& ground skins" under Art), so deleting one of your own levels never touches
 them and vice versa. **Worlds** chains any of your saved levels into a
 played-in-order course — see "World Maker" under Controls, and plan doc
 §9.3 M8 for the v1 scope and what's deliberately deferred from it. Paint
@@ -70,9 +70,9 @@ Open the dev server URL in a browser. Controls:
   Levels** opens your saved-levels browser; **Worlds** opens the world
   browser. Each card's subtitle is a live status line (how many you've
   saved, or a nudge toward New Level/Templates when empty).
-- **Templates**: 6 pre-built levels, one per theme plus two showcasing
+- **Templates**: 6 pre-built levels, one per ground skin plus two showcasing
   Brick/Bounce/Bat/Spike Crawler together and one showcasing the second
-  content pass (see "Templates & themes" and "Second content pass" under
+  content pass (see "Templates & ground skins" and "Second content pass" under
   Art). **Play** runs it directly; **Use This Template** opens it in the
   editor as an independent copy (a blank id, so Save creates a new level
   in My Levels — the template itself is never modified). **← Back**
@@ -120,21 +120,19 @@ Open the dev server URL in a browser. Controls:
   recent one.
 - **Menu**: back to the home page.
 - **Clear**: wipes the current grid and entities.
-- **Theme: ▶**: cycles the level's ground skin through all 4
-  `LevelTheme`s (Grass/Desert/Castle/Snow), previewing live — the ground
-  layer's tile *data* (top/fill/brick/bounce/water at each cell) is
-  untouched, only which tileset image renders it changes, so a level's
-  full layout survives a theme switch intact. Every ground skin is
-  reachable from any level this way (see "Second content pass" under Art
-  for why this exists — Snow's ground tile used to only be reachable via
-  the Frozen Cavern template). Persists on Save. Every block in the
-  palette (Ground/Brick/Bounce/Water) re-skins its icon to match — most
-  visibly Water, which relabels to **Lava** with a matching icon once
-  Castle is selected, since that's what placing it actually paints (see
-  "Real art: Kenney's 'Pixel Platformer' (CC0)" under Art for why
-  castle's tileset is entirely procedural, lava included).
+- **Blocks palette**: every ground/brick/bounce/hazard skin — Grass/Desert/
+  Castle/Snow Ground, Brick/Castle Brick, Bounce/Castle Bounce, Water/Lava,
+  plus Erase — sits in the palette simultaneously, grouped with a small gap
+  between clusters. There is no level-wide "theme" to switch: which skin
+  a block renders as is a property of that block, chosen when you paint it,
+  so one level can freely mix Grass Ground next to Snow Ground next to a
+  Castle Brick (see "Templates & ground skins" under Art). This replaced an
+  earlier in-editor Theme picker that cycled one active skin at a time —
+  Snow's ground tile, for instance, used to only be reachable via the
+  Frozen Cavern template or that cycle button, one skin at a time; now
+  every skin is just an icon away, on every level, always.
 - **Background: ▶**: cycles the level's parallax background scene through
-  the pool of 5 (independent of the level's theme — see "Parallax
+  the pool of 5 (unrelated to ground-block skin — see "Parallax
   background & background scenes" under Art), previewing live; persists on
   Save.
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
@@ -149,7 +147,7 @@ adapts. Three things make that true, all in `main.ts`/`index.html` unless
 noted:
 
 - **Scaling**: the game's internal resolution stays a fixed
-  `GAME_WIDTH`×`GAME_HEIGHT` (1340×476 — see `config/gameConfig.ts`; every
+  `GAME_WIDTH`×`GAME_HEIGHT` (1180×476 — see `config/gameConfig.ts`; every
   scene's layout math is untouched), but Phaser's Scale Manager runs in
   `FIT` + `CENTER_BOTH` mode, so it's letterboxed down (or up) to whatever
   viewport it's opened in, phone included, instead of getting clipped or
@@ -230,16 +228,17 @@ the prep script crops that border away before upscaling, for ground tiles
 only; Brick keeps its border on purpose (see below) since it's meant to
 read as a distinct block, not merging terrain.
 
-**Templates & themes.** A level carries a `theme` (`grass`, `desert`, or
-`castle`) — purely a recolor of the ground tileset and the scene's
-background, never gameplay data, so TilePainter/groundAutotile stay
-theme-agnostic and any level can be reskinned by changing one field. New
-levels default to `grass` (unchanged from before themes existed); old
-saved levels with no `theme` field are treated as `grass` on load (see
-`LevelSerializer.deserializeLevel`). `src/level/themes.ts` holds the
-color palette per theme and the themed texture-key naming; the palette's
-Ground brush icon and the editor/play tileset both follow the current
-level's theme automatically.
+**Templates & ground skins.** Ground/Brick/Bounce/hazard blocks each come
+in a "skin" — grass, desert, castle, or snow — but a skin is a property
+of the individual *block*, not the level: `LevelData` has no `theme`
+field at all, and every skin's blocks are always available in the
+editor's Blocks palette side by side (see "Blocks palette" under
+Controls), so one level can freely mix Grass Ground next to Snow
+Ground next to a Castle Brick if you want. `src/level/groundSkins.ts`
+holds the color palette per skin (for the ones — currently just castle —
+drawn procedurally, see "Real art" below) and the skin-keyed texture
+naming; `src/level/groundAutotile.ts` is where a stored tile value
+becomes a render frame in the combined multi-skin tileset (see below).
 
 `src/level/templateLevels.ts` hand-authors 6 beatable levels, exported as
 `TEMPLATE_LEVELS` and served by `TemplateBrowserScene` — always
@@ -250,7 +249,11 @@ visit): Sunny Hills (grass), Desert Canyon (desert), and Castle Ascent
 within the player's normal jump; **Spring Meadow** (grass) and **Crate
 Canyon** (desert) additionally showcase Brick, Bounce, Bat, and Spike
 Crawler together; **Frozen Cavern** (snow) showcases the second content
-pass — see "Second content pass" under Art. Spring Meadow/Crate Canyon
+pass — see "Second content pass" under Art. Each template bakes one skin
+into its own ground tile values at construction time (`levelFromRows`'s
+`skin` option in templateLevels.ts) purely as an authoring choice — like
+any level, nothing stops you from repainting one with other skins once
+it's loaded in the editor. Spring Meadow/Crate Canyon
 both put the goal on a platform reachable only by
 bouncing — `BOUNCE_TILE`'s ~7.3-tile launch (`h = v²/2g` with
 `BOUNCE_VELOCITY_Y=-650`, `GRAVITY_Y=900`) is far past normal-jump range,
@@ -375,16 +378,16 @@ anything on the right half of the screen." Bounding the background to the
 real grid width fixes it structurally: that margin now reads as what it
 is, flat background color, not misleading scenery.
 
-*Which* scene renders is a level-level choice, deliberately independent
-of the level's `theme` (grass/desert/castle only recolor the ground
-tileset and the flat fallback color — see themes.ts) — a grass-themed
-level can show the snowy-mountain scene, a castle level can show the
-pirate cove, etc. `src/level/backgrounds.ts` is the pool (`BACKGROUND_SCENES`)
+*Which* scene renders is a level-level choice, entirely unrelated to
+which ground-block skins (grass/desert/castle/snow) are painted into that
+level — a level built entirely from Snow Ground blocks can show the
+pirate cove, a level full of Castle blocks can show the sunny valley,
+etc. `src/level/backgrounds.ts` is the pool (`BACKGROUND_SCENES`)
 and `LevelData.background` is the optional field a level stores its
-choice in (falling back to a best-fit-by-theme scene via
-`resolveBackground` when unset or when it names a scene no longer in the
-pool — see below — so levels saved before this feature existed, or
-before the pool shrank, still render something sensible). The editor's
+choice in (falling back to `DEFAULT_BACKGROUND` via `resolveBackground`
+when unset or when it names a scene no longer in the pool — see below —
+so levels saved before this feature existed, or before the pool shrank,
+still render something sensible). The editor's
 toolbar has a **"Background: ▶"** button (far right of the action-buttons
 row) that cycles through the pool, live-updating the preview (destroying
 and recreating the `ParallaxBackground` instance, since different scenes
@@ -416,9 +419,8 @@ instead of a character sprite.
 
 The four painted scenes lead the pool (in front of `starfield`, which
 used to be first) and `green-valley` is the overall default —
-`DEFAULT_BY_THEME.grass` in backgrounds.ts points to it, and `"grass"` is
-also `DEFAULT_THEME` (themes.ts), so it's what a brand-new level shows
-before anyone touches the background picker.
+`DEFAULT_BACKGROUND` in backgrounds.ts points to it, so it's what a
+brand-new level shows before anyone touches the background picker.
 
 The pool used to also have `grass-sky`/`desert-sky`/`icy-sky`/
 `jungle-sky` — small (24x24) Kenney sky tiles, first shown via the old
@@ -438,24 +440,26 @@ involved), which is why those five are what remain.
 share of the Kenney pack (it has 231 tiles across its three sheets; the
 first few passes above used 15 of them, ~6.5%) with a curated, coherent
 set rather than padding for its own sake — every pick below earns its
-place with a real mechanic, enemy, theme, or decoration, landing at 35
-assets (~15.2%):
-- **Snow theme** (`"snow"`, a 4th `LevelTheme`) — a real Kenney snow-cap
-  ground tile, paired with `snowy-peaks` (see above) as its default
-  background. Originally reachable only via the **Frozen Cavern** template
-  (see below) — an in-editor theme *picker* came later (see the
-  **"Theme: ▶"** entry below), so it's now selectable on any level.
-- **Water** (`WATER_TILE`, a 5th ground-layer value alongside Ground/
-  Brick/Bounce) — a hazard, not solid ground: excluded from
-  `setCollisionByExclusion` so the player falls through it onto whatever
-  *is* solid beneath, and `PlayScene.update` checks the tile under the
-  player's feet every frame, calling the same `takeHit()` an enemy touch
-  does (Hearts/Shield apply exactly the same way) — reuses the hit-points
-  system entirely rather than inventing a second one. Real Kenney water
-  art for grass/desert/snow; castle draws its own procedural **lava**
-  frame instead (`drawLava` in `generateTextures.ts`) for the same
-  never-mix-real-and-procedural-within-one-theme reason Brick/Bounce
-  already follow there.
+place with a real mechanic, enemy, ground skin, or decoration, landing at
+35 assets (~15.2%):
+- **Snow ground skin** (`GROUND_SNOW_TILE`) — a real Kenney snow-cap
+  ground tile, paired with `snowy-peaks` (see above) as the Frozen
+  Cavern template's chosen background (though, like every skin, its
+  background choice is independent — see above). Originally reachable
+  only via the **Frozen Cavern** template; now, like every ground skin,
+  it's just an icon in the Blocks palette, selectable on any level (see
+  "Blocks palette" under Controls).
+- **Water** (`WATER_TILE`, a hazard alongside Ground/Brick/Bounce) —
+  not solid ground: excluded from `setCollisionByExclusion` so the
+  player falls through it onto whatever *is* solid beneath, and
+  `PlayScene.update` checks the tile under the player's feet every
+  frame, calling the same `takeHit()` an enemy touch does (Hearts/Shield
+  apply exactly the same way) — reuses the hit-points system entirely
+  rather than inventing a second one. Real Kenney water art for grass/
+  desert/snow; Castle's blocks instead paint a procedural **lava**
+  frame (`LAVA_TILE`, drawn by `drawLava` in `generateTextures.ts`) for
+  the same never-mix-real-and-procedural-within-one-skin reason Castle's
+  Brick/Bounce blocks already follow.
 - **Golem** (`enemy-golem`) — a 4th enemy `EntityType`, added to
   `ENEMY_DEFS` exactly like Bat/Spike Crawler were (100% shared patrol/
   stomp code, just a texture and a `stompable` flag) — stompable, like
@@ -486,7 +490,7 @@ assets (~15.2%):
   single `Image` created hidden in `create()` and shown in `onWin()`; no
   new state, no new rule.
 
-**Frozen Cavern** (snow theme, `template-frozen-cavern`) is the template
+**Frozen Cavern** (snow ground skin, `template-frozen-cavern`) is the template
 that showcases this pass: a Bush/Golem/Snowman/Key/Rocks run leading into
 a 3-tile Water gap (comfortably jumpable at this game's normal ~6-tile
 reach; walking through it instead costs a hit, same as any hazard) with a
@@ -513,11 +517,13 @@ restriction entirely. It now provides:
   below for why the raw source art needed one extra processing step to
   actually achieve that.
 - **Brick, Bounce, and Water** — a real wooden crate, a real compressed
-  spring pad, and a real water-surface tile, used in every theme *except*
-  castle (which keeps procedural versions of all three — Water's is lava,
-  see "Second content pass" above — so a castle-themed level never mixes
-  real and procedural art within itself — only *between* different
-  levels' themes).
+  spring pad, and a real water-surface tile, used by every skin *except*
+  Castle's own Brick/Bounce/Lava blocks (`BRICK_CASTLE_TILE`/
+  `BOUNCE_CASTLE_TILE`/`LAVA_TILE`), which keep procedural versions of all
+  three — Water's is lava, see "Second content pass" above — so a Castle
+  block never mixes real and procedural art within itself, even though a
+  single level can now freely place Castle blocks right next to real-art
+  Grass/Desert/Snow blocks.
 - **Bat, Spike Crawler, and Golem** — real character art from the pack (a
   winged creature, a red pointy-topped ground crawler, and a grey
   rock-monster face) in place of the Graphics-drawn placeholders an
@@ -527,8 +533,8 @@ restriction entirely. It now provides:
   the pack. **Feather** has no matching tile in the pack, so it's drawn
   procedurally (a simple two-chevron badge icon) alongside the rest of
   `generateTextures.ts`'s procedural art — the same "real art where it
-  fits, procedural where it doesn't" split already established for the
-  castle theme.
+  fits, procedural where it doesn't" split already established for
+  Castle's blocks.
 - **Chest and Trophy** — a real locked-chest tile (the Chest entity — see
   "Second content pass" above) and a real trophy character-sheet icon
   (shown on the win screen).
@@ -564,21 +570,22 @@ painted art from `scripts/generate-painted-backgrounds.py`, not derived
 from this pack. See prepare-kenney-assets.py's docstring for the exact
 source tile indices and how to regenerate with different ones.
 
-**Tiles/markers/UI still procedural:** the castle theme (see above) and
-pure UI chrome with no asset-pack equivalent — the eraser icon, the spawn
-marker, the hover highlight, and the palette selection outline — are
-still generated at runtime in `src/assets/generateTextures.ts`, same
-technique as before. Castle's own procedural Brick/Bounce/Lava also get
-dedicated single-frame Palette icons (`blockIconKey(theme, block)` in
-themes.ts) generated right alongside its 5-frame tileset strip — without
-those, the palette would keep showing grass/desert/snow's shared
-real-art Brick/Bounce/Water icons even while Castle is the active theme,
-which for Water in particular is actively misleading (its lava frame
-looks nothing like the icon). `Brush.themedTextureKey`/`themedLabel` in
-Palette.ts (read by `EditorUI.renderIconRow`) is the general mechanism —
-the same one Ground's icon already used — so a brush's palette
-appearance can track the level's current theme without EditorUI needing
-brush-id-specific branching.
+**Tiles/markers/UI still procedural:** Castle's ground/brick/bounce/lava
+(see above) and pure UI chrome with no asset-pack equivalent — the eraser
+icon, the spawn marker, the hover highlight, and the palette selection
+outline — are still generated at runtime in
+`src/assets/generateTextures.ts`, same technique as before. Castle's own
+procedural Brick/Bounce/Lava also get dedicated single-frame Palette icons
+(`blockIconKey("castle", block)` in `groundSkins.ts`) generated right
+alongside its 5-frame tileset strip, distinct from the shared real-art
+Brick/Bounce/Water icons the other three skins' Brick/Bounce/Water
+brushes use — necessary because, since every skin's blocks are always
+in the palette together (see "Blocks palette" under Controls), Castle
+Brick/Bounce/**Lava** need their own icons and labels sitting right next
+to the shared ones at all times, not a shared icon that relabels itself.
+Each skin/block combination is simply its own static `Brush` entry in
+`Palette.ts` with its own `textureKey` and `label` — no runtime "current
+skin" indirection.
 
 *Palette/marker scaling:* entity art varies in native resolution (32px
 icons vs. the larger ghost/portal illustrations), so both the editor
@@ -618,9 +625,9 @@ src/
 ├── level/
 │   ├── LevelSchema.ts        LevelData / LevelEntity types
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
-│   ├── groundAutotile.ts     derives the grass-top/buried tile frame from neighbors (+ unit tests)
-│   ├── themes.ts              theme color palettes + themed texture-key naming
-│   ├── backgrounds.ts         the theme-independent background-scene pool + resolveBackground/nextBackgroundId
+│   ├── groundAutotile.ts     stored tile value → render frame in the combined multi-skin tileset (+ unit tests)
+│   ├── groundSkins.ts         per-skin color palettes + skin-keyed texture-key naming
+│   ├── backgrounds.ts         the background-scene pool (unrelated to ground skin) + resolveBackground/nextBackgroundId
 │   └── templateLevels.ts      6 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling (speed-multiplier aware; exports isJumpPressed for double-jump edge detection)
@@ -638,7 +645,7 @@ src/
 ├── config/
 │   └── gameConfig.ts         tile size, grid dimensions, physics constants
 └── assets/
-    └── generateTextures.ts   procedural art still in use: castle theme + UI chrome
+    └── generateTextures.ts   procedural art still in use: Castle's blocks + UI chrome
 
 public/assets/
 ├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png (hand-drawn)

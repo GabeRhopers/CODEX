@@ -1,5 +1,18 @@
-import { BOUNCE_TILE, BRICK_TILE, EMPTY_TILE, EntityType, GROUND_TILE, WATER_TILE } from "../level/LevelSchema";
-import { blockIconKey, groundIconKey, LevelTheme } from "../level/themes";
+import {
+  BOUNCE_CASTLE_TILE,
+  BOUNCE_TILE,
+  BRICK_CASTLE_TILE,
+  BRICK_TILE,
+  EMPTY_TILE,
+  EntityType,
+  GROUND_CASTLE_TILE,
+  GROUND_DESERT_TILE,
+  GROUND_GRASS_TILE,
+  GROUND_SNOW_TILE,
+  LAVA_TILE,
+  WATER_TILE,
+} from "../level/LevelSchema";
+import { blockIconKey, groundIconKey } from "../level/groundSkins";
 
 export type BrushKind = "tile" | "entity";
 export type BrushCategory = "blocks" | "markers" | "enemies" | "items" | "decor";
@@ -12,17 +25,11 @@ export interface Brush {
   textureKey: string;
   tileIndex?: number;
   entityType?: EntityType;
-  /** Overrides textureKey for a brush whose icon re-skins with the
-   * level's current theme (Ground/Brick/Bounce/Water all do — see
-   * themes.ts's groundIconKey/blockIconKey) — EditorUI's icon row calls
-   * this instead of reading textureKey directly when it's present, so the
-   * palette never shows a stale icon for whichever theme is active. */
-  themedTextureKey?: (theme: LevelTheme) => string;
-  /** Same idea as themedTextureKey but for the caption under the icon —
-   * only Water needs it (it reads "Lava" once Castle draws lava into that
-   * slot instead); Ground/Brick/Bounce keep one label across all 4 themes
-   * since re-skinned-but-same-concept doesn't need a renamed brush. */
-  themedLabel?: (theme: LevelTheme) => string;
+  /** Draws a little extra breathing room after this brush's icon in
+   * EditorUI's palette row — used sparingly, only to separate the
+   * Blocks category's ground-skin/block-kind/hazard/erase groups so an
+   * 11-icon row still reads as a few clusters, not one dense strip. */
+  groupEnd?: boolean;
 }
 
 export const CATEGORIES: { id: BrushCategory; label: string }[] = [
@@ -51,44 +58,58 @@ export const CATEGORIES: { id: BrushCategory; label: string }[] = [
  * Decor brushes (bottom of the list) are purely cosmetic — PlayScene
  * spawns them as plain static images with no collision or overlap logic,
  * unlike every other entity category here.
+ *
+ * Blocks (below) used to be 4 generic entries (Ground/Brick/Bounce/Water)
+ * whose *look* re-skinned with a level-wide "theme" you had to cycle
+ * through to reach — so only one skin's Ground was ever paintable at a
+ * time. Every skin is now its own permanent brush instead: a level can
+ * freely mix Grass/Desert/Castle/Snow ground, and Castle's own procedural
+ * Brick/Bounce/Lava sit alongside the real-art versions grass/desert/snow
+ * share, rather than only being reachable by switching a level-wide
+ * setting. See LevelSchema.ts for the tile constants and groundAutotile.ts
+ * for how each maps to a render frame in the combined tileset.
  */
 export const PALETTE: Brush[] = [
+  { id: "ground-grass", category: "blocks", kind: "tile", label: "Grass", textureKey: groundIconKey("grass"), tileIndex: GROUND_GRASS_TILE },
+  { id: "ground-desert", category: "blocks", kind: "tile", label: "Desert", textureKey: groundIconKey("desert"), tileIndex: GROUND_DESERT_TILE },
+  { id: "ground-castle", category: "blocks", kind: "tile", label: "Castle", textureKey: groundIconKey("castle"), tileIndex: GROUND_CASTLE_TILE },
   {
-    id: "ground",
+    id: "ground-snow",
     category: "blocks",
     kind: "tile",
-    label: "Ground",
-    textureKey: groundIconKey("grass"),
-    themedTextureKey: groundIconKey,
-    tileIndex: GROUND_TILE,
+    label: "Snow",
+    textureKey: groundIconKey("snow"),
+    tileIndex: GROUND_SNOW_TILE,
+    groupEnd: true,
   },
+  { id: "brick", category: "blocks", kind: "tile", label: "Brick", textureKey: blockIconKey("grass", "brick"), tileIndex: BRICK_TILE },
   {
-    id: "brick",
+    id: "brick-castle",
     category: "blocks",
     kind: "tile",
-    label: "Brick",
-    textureKey: "tile-brick-icon",
-    themedTextureKey: (theme) => blockIconKey(theme, "brick"),
-    tileIndex: BRICK_TILE,
+    label: "Castle Brick",
+    textureKey: blockIconKey("castle", "brick"),
+    tileIndex: BRICK_CASTLE_TILE,
   },
+  { id: "bounce", category: "blocks", kind: "tile", label: "Bounce", textureKey: blockIconKey("grass", "bounce"), tileIndex: BOUNCE_TILE },
   {
-    id: "bounce",
+    id: "bounce-castle",
     category: "blocks",
     kind: "tile",
-    label: "Bounce",
-    textureKey: "tile-bounce-icon",
-    themedTextureKey: (theme) => blockIconKey(theme, "bounce"),
-    tileIndex: BOUNCE_TILE,
+    label: "Castle Bounce",
+    textureKey: blockIconKey("castle", "bounce"),
+    tileIndex: BOUNCE_CASTLE_TILE,
+    groupEnd: true,
   },
+  { id: "water", category: "blocks", kind: "tile", label: "Water", textureKey: blockIconKey("grass", "water"), tileIndex: WATER_TILE },
   {
-    id: "water",
+    id: "lava",
     category: "blocks",
     kind: "tile",
-    label: "Water",
-    textureKey: "tile-water-icon",
-    themedTextureKey: (theme) => blockIconKey(theme, "water"),
-    themedLabel: (theme) => (theme === "castle" ? "Lava" : "Water"),
-    tileIndex: WATER_TILE,
+    label: "Lava",
+    textureKey: blockIconKey("castle", "water"),
+    tileIndex: LAVA_TILE,
+    groupEnd: true,
   },
   { id: "eraser", category: "blocks", kind: "tile", label: "Erase", textureKey: "tile-eraser", tileIndex: EMPTY_TILE },
   { id: "spawn", category: "markers", kind: "entity", label: "Spawn", textureKey: "marker-spawn", entityType: "player-spawn" },

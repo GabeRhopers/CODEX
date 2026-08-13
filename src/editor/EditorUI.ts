@@ -1,6 +1,5 @@
 import Phaser from "phaser";
 import { GRID_ROWS, TILE_SIZE, TOOLBAR_HEIGHT } from "../config/gameConfig";
-import { LevelTheme } from "../level/themes";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -13,14 +12,14 @@ export interface EditorUICallbacks {
   onUndo: () => void;
   onRedo: () => void;
   onCycleBackground: () => void;
-  onCycleTheme: () => void;
 }
 
 const TOOLBAR_Y = GRID_ROWS * TILE_SIZE;
 const ROW1_Y = TOOLBAR_Y + 15; // category tabs + action buttons
 const ICON_ROW_Y = TOOLBAR_Y + 52; // the active category's brushes
 const PALETTE_START_X = 16;
-const PALETTE_ICON_SPACING = TILE_SIZE + 14;
+const PALETTE_ICON_SPACING = TILE_SIZE + 32; // wide enough for two-word labels like "Castle Bounce" not to crowd their neighbors
+const PALETTE_GROUP_GAP = 16; // extra room after a Brush.groupEnd icon
 const BUTTON_GAP = 8;
 
 /** The palette used to be one flat, ever-widening row of every brush at
@@ -36,11 +35,9 @@ export class EditorUI {
   private activeCategory: BrushCategory;
   private selectedBrushId: string;
   private backgroundButton!: Phaser.GameObjects.Text;
-  private themeButton!: Phaser.GameObjects.Text;
 
   constructor(
     private readonly scene: Phaser.Scene,
-    private theme: LevelTheme,
     initialBackgroundLabel: string,
     private readonly callbacks: EditorUICallbacks,
   ) {
@@ -75,18 +72,8 @@ export class EditorUI {
     addActionButton("Undo (Ctrl+Z)", () => this.callbacks.onUndo());
     addActionButton("Redo (Ctrl+Y)", () => this.callbacks.onRedo());
 
-    // Recolors the ground tileset (grass/desert/castle/snow) — every skin
-    // is reachable from any level this way, not just levels that started
-    // out on that theme (previously the only way to get Snow's ground
-    // tile was to start from the Frozen Cavern template).
-    this.themeButton = this.makeRowButton(buttonX, ROW1_Y, this.themeLabelText(theme), () => this.callbacks.onCycleTheme());
-    this.themeButton.on("pointerover", () => this.themeButton.setStyle({ backgroundColor: "#3a5a9c" }));
-    this.themeButton.on("pointerout", () => this.themeButton.setStyle({ backgroundColor: "#0f3460" }));
-    buttonX += this.themeButton.width + BUTTON_GAP;
-
-    // Independent of theme (see level/backgrounds.ts) — clicking cycles to
-    // the next parallax scene in the pool, wrapping around; the label
-    // always names whichever scene is currently showing.
+    // Clicking cycles to the next parallax scene in the pool, wrapping
+    // around; the label always names whichever scene is currently showing.
     this.backgroundButton = this.makeRowButton(buttonX, ROW1_Y, this.backgroundLabelText(initialBackgroundLabel), () =>
       this.callbacks.onCycleBackground(),
     );
@@ -144,22 +131,34 @@ export class EditorUI {
     }
   }
 
+  /** Icon center-x for each brush in the active category, left to right —
+   * a running total rather than `index * spacing` since a `groupEnd`
+   * brush (see Palette.ts) opens up extra room after itself, so groups
+   * within a category (e.g. Blocks' ground-skin/block-kind/hazard/erase
+   * clusters) read as visually separate instead of one dense strip.
+   * renderIconRow and updateSelectedOutlinePosition both need this same
+   * layout, so it's computed once here rather than twice. */
+  private iconCenters(brushes: Brush[]): number[] {
+    const centers: number[] = [];
+    let x = PALETTE_START_X;
+    for (const brush of brushes) {
+      centers.push(x + TILE_SIZE / 2);
+      x += PALETTE_ICON_SPACING + (brush.groupEnd ? PALETTE_GROUP_GAP : 0);
+    }
+    return centers;
+  }
+
   private renderIconRow(): void {
     this.iconRow.removeAll(true);
     const brushes = PALETTE.filter((brush) => brush.category === this.activeCategory);
+    const centers = this.iconCenters(brushes);
     brushes.forEach((brush, i) => {
-      const cx = PALETTE_START_X + i * PALETTE_ICON_SPACING + TILE_SIZE / 2;
-      // Ground/Brick/Bounce/Water all re-skin with the level's current
-      // theme (see Brush's themedTextureKey/themedLabel docstrings in
-      // Palette.ts) — falling back to the plain fields keeps every other
-      // brush exactly as simple as before.
-      const textureKey = brush.themedTextureKey ? brush.themedTextureKey(this.theme) : brush.textureKey;
-      const labelText = brush.themedLabel ? brush.themedLabel(this.theme) : brush.label;
-      const icon = this.scene.add.image(cx, ICON_ROW_Y, textureKey).setDepth(21).setInteractive({ useHandCursor: true });
+      const cx = centers[i];
+      const icon = this.scene.add.image(cx, ICON_ROW_Y, brush.textureKey).setDepth(21).setInteractive({ useHandCursor: true });
       fitWithinTile(icon);
       icon.on("pointerdown", () => this.selectBrush(brush));
       const label = this.scene.add
-        .text(cx, ICON_ROW_Y + 20, labelText, { fontSize: "10px", color: "#eeeeee" })
+        .text(cx, ICON_ROW_Y + 20, brush.label, { fontSize: "10px", color: "#eeeeee" })
         .setOrigin(0.5, 0)
         .setDepth(21);
       this.iconRow.add([icon, label]);
@@ -177,7 +176,7 @@ export class EditorUI {
       this.selectedOutline.setVisible(false);
       return;
     }
-    const cx = PALETTE_START_X + index * PALETTE_ICON_SPACING + TILE_SIZE / 2;
+    const cx = this.iconCenters(brushes)[index];
     this.selectedOutline.setPosition(cx, ICON_ROW_Y).setVisible(true);
   }
 
@@ -195,20 +194,6 @@ export class EditorUI {
    * the only place the current background scene is displayed. */
   setBackgroundLabel(label: string): void {
     this.backgroundButton.setText(this.backgroundLabelText(label));
-  }
-
-  private themeLabelText(theme: LevelTheme): string {
-    return `Theme: ${theme.charAt(0).toUpperCase()}${theme.slice(1)} ▶`;
-  }
-
-  /** Called by EditorScene right after cycling. Unlike setBackgroundLabel,
-   * this also re-renders the icon row: the Ground brush's own icon tracks
-   * `this.theme` (see renderIconRow), so a theme change needs to refresh
-   * it there too, not just in the button text. */
-  setTheme(theme: LevelTheme): void {
-    this.theme = theme;
-    this.themeButton.setText(this.themeLabelText(theme));
-    this.renderIconRow();
   }
 
   setStatus(message: string): void {

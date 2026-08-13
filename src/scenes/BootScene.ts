@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { generateTextures } from "../assets/generateTextures";
 import { WIZARD_FRAME_KEYS } from "../gameplay/wizardAnimation";
-import { groundIconKey, groundTilesetKey } from "../level/themes";
+import { groundIconKey, groundTilesetKey } from "../level/groundSkins";
 
 export class BootScene extends Phaser.Scene {
   constructor() {

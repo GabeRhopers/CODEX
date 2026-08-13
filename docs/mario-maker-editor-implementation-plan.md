@@ -542,6 +542,59 @@ alongside its 5-frame tileset in generateTextures.ts. Water also
 relabels to "Lava" when Castle is active. Decor/Items/Enemies were
 audited too and are correctly theme-independent already (never had
 per-theme variants to begin with), so nothing there needed a fix.
+*Note (2026-08-13, same day again):* the project owner sent a phone
+screenshot of the Blocks palette in a Grass-theme level — only 5 icons
+(Ground/Brick/Bounce/Water/Erase), no Snow ground block in sight — as
+proof that the Theme picker still didn't satisfy "all blocks should be
+available no matter what": at any given moment exactly one skin was
+still the *only* selectable one, cycling just changed which. The ask
+changed from "fix the picker" to "remove the theme concept entirely,
+don't delete any asset, make every block simultaneously available,
+and redesign the UI properly." Rather than patch around a level-wide
+"current theme," removed it as a concept: `LevelData` no longer has a
+`theme` field at all, and a tile's *value* now encodes both its kind
+and its skin (`GROUND_GRASS_TILE`/`GROUND_DESERT_TILE`/
+`GROUND_CASTLE_TILE`/`GROUND_SNOW_TILE`, `BRICK_TILE`/
+`BRICK_CASTLE_TILE`, `BOUNCE_TILE`/`BOUNCE_CASTLE_TILE`, `WATER_TILE`/
+`LAVA_TILE` — 10 distinct non-empty values, up from 4 generic ones).
+This is made renderable by a previously-unused Phaser capability:
+`Tilemap.addTilesetImage(..., gid)` lets several separate Tileset
+objects (each its own texture) share one tilemap layer, each claiming a
+sequential range of global tile indices — so `EditorScene` and
+`PlayScene` now build the ground layer once against *all four* skins'
+tilesets (`GROUND_SKINS.map(...)` in the new `groundSkins.ts`, gid
+`i * 5`), and never rebuild it, since there's no "active theme" to
+switch. `groundAutotile.ts` maps a stored tile value straight to its
+frame in that combined tileset (`groundFrameAt`), including a
+`BOUNCE_FRAMES`/`HAZARD_FRAMES` `Set` for the shared-vs-Castle pairs
+that now render as two different frames of the same *kind*. The
+Blocks palette (`Palette.ts`) is 11 static entries — one per skin/kind
+combination plus Erase — each its own `Brush` with its own
+`textureKey`/`label` (e.g. "Grass"/"Snow"/"Castle Brick"/"Lava"); no
+runtime "current skin" indirection survives, matching the file's own
+"data, not branching code" rule. `EditorUI` replaced the old Theme
+button and fixed per-index icon spacing with a wider (64px, was 46px)
+row plus a lightweight `groupEnd` flag on select brushes, producing
+visual gaps between the Ground-skins / Brick / Bounce / Hazard
+clusters — a `iconCenters()` helper shared by icon rendering and the
+selection-outline position so the two can never drift apart.
+`TOOLBAR_MIN_WIDTH` dropped back from 1340 to 1180 (the Theme button is
+gone). `templateLevels.ts`'s 6 templates now bake a `skin` choice into
+their ground tiles at authoring time instead of storing a level-wide
+`theme` — purely an authoring convenience, since any level can be
+repainted with other skins once loaded. Backward compatibility for
+real, already-saved `localStorage` levels mattered here (this is a live
+deployed app): `SCHEMA_VERSION` went from 1 to 2, and
+`LevelSerializer.deserializeLevel` runs a `migrateV1ToV2` step for any
+v1 save — mapping its old generic tile values plus its `theme` field
+into the new skin-specific constants — before the normal
+version-mismatch guard, so existing saves keep their exact prior
+appearance rather than failing to load. Verified with two new unit
+tests (Castle-theme and non-Castle migration paths) plus a hand-built,
+in-browser mixed-skin level (Grass and Snow ground, a Castle bounce
+pad, a Water hazard, all in one level) that was test-played to confirm
+rendering, collision, and hazard detection all handle multiple
+simultaneous skins correctly.
 
 **M4 — Level browser.** `LevelBrowserScene` (list/play/edit/delete/
 rename), proper "New Level" flow with name + width/height prompts

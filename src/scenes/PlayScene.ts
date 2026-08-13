@@ -30,9 +30,9 @@ import {
 } from "../gameplay/PlayerStats";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
-import { buildRenderGrid, GROUND_FRAME_BOUNCE, GROUND_FRAME_WATER } from "../level/groundAutotile";
+import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES } from "../level/groundAutotile";
+import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { EntityType, LevelData } from "../level/LevelSchema";
-import { groundTilesetKey, THEMES } from "../level/themes";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -133,22 +133,29 @@ export class PlayScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.cameras.main.setBackgroundColor(THEMES[this.level.theme].background);
+    this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
     // Bounded to the level's actual width, not the (often wider, to fit the
     // editor toolbar) canvas — see ParallaxBackground's docstring.
     this.parallax = new ParallaxBackground(this, resolveBackground(this.level), this.level.width * TILE_SIZE);
 
-    const tilesetKey = groundTilesetKey(this.level.theme);
+    // One Tileset per ground skin, each claiming its own 5-wide gid range
+    // (grass 0-4, desert 5-9, castle 10-14, snow 15-19 — see
+    // groundAutotile.ts) so a level can freely mix all four skins' ground/
+    // brick/bounce/hazard blocks on one layer instead of being locked to
+    // whichever one tileset a level-wide theme used to pick.
     const map = this.make.tilemap({
       data: buildRenderGrid(this.level.layers.ground),
       tileWidth: TILE_SIZE,
       tileHeight: TILE_SIZE,
     });
-    const tileset = map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0)!;
-    this.groundLayer = map.createLayer(0, tileset, 0, 0)!;
-    // Water isn't solid — standing in it is a hazard (see the per-frame
-    // check in update()), not a floor to stand on.
-    this.groundLayer.setCollisionByExclusion([-1, GROUND_FRAME_WATER]);
+    const tilesets = GROUND_SKINS.map((skin, i) => {
+      const key = groundTilesetKey(skin);
+      return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 5)!;
+    });
+    this.groundLayer = map.createLayer(0, tilesets, 0, 0)!;
+    // Water/Lava aren't solid — standing in either is a hazard (see the
+    // per-frame check in update()), not a floor to stand on.
+    this.groundLayer.setCollisionByExclusion([-1, ...HAZARD_FRAMES]);
 
     const spawn = this.level.entities.find((e) => e.type === "player-spawn");
     const spawnX = spawn ? spawn.x * TILE_SIZE + TILE_SIZE / 2 : TILE_SIZE;
@@ -350,12 +357,13 @@ export class PlayScene extends Phaser.Scene {
       updateGhostPatrol(enemy.sprite, enemy.state, time);
     }
 
-    // Water is a hazard, not solid ground (see the collision exclusion in
-    // create()) — standing in it costs a hit exactly like a bad enemy
-    // touch, debounced the same way via registerHit's grace period so it
-    // doesn't drain multiple hearts per frame of continued contact.
+    // Water/Lava are a hazard, not solid ground (see the collision
+    // exclusion in create()) — standing in either costs a hit exactly like
+    // a bad enemy touch, debounced the same way via registerHit's grace
+    // period so it doesn't drain multiple hearts per frame of continued
+    // contact.
     const footTile = this.groundLayer.getTileAtWorldXY(this.player.x, this.player.y - 2);
-    if (footTile && footTile.index === GROUND_FRAME_WATER) {
+    if (footTile && HAZARD_FRAMES.has(footTile.index)) {
       this.takeHit();
     }
 
@@ -369,12 +377,13 @@ export class PlayScene extends Phaser.Scene {
   }
 
   /** Bounce blocks are just another ground-layer tile (see groundAutotile's
-   * GROUND_FRAME_BOUNCE) — solid collision is already automatic via
-   * setCollisionByExclusion, this only adds the extra launch-upward effect
-   * on top of it. `body.blocked.down` restricts it to landing on the pad's
-   * top face, so bumping one from the side doesn't launch the player. */
+   * BOUNCE_FRAMES, which covers both the shared and castle looks) — solid
+   * collision is already automatic via setCollisionByExclusion, this only
+   * adds the extra launch-upward effect on top of it. `body.blocked.down`
+   * restricts it to landing on the pad's top face, so bumping one from the
+   * side doesn't launch the player. */
   private onGroundCollide(tile: Phaser.Tilemaps.Tile): void {
-    if (tile.index !== GROUND_FRAME_BOUNCE) return;
+    if (!BOUNCE_FRAMES.has(tile.index)) return;
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     if (!body.blocked.down) return;
     body.setVelocityY(BOUNCE_VELOCITY_Y);

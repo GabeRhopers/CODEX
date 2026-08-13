@@ -1,14 +1,33 @@
 import { GRID_COLS, GRID_ROWS, MAX_GRID_COLS, MAX_GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
 import { BackgroundSceneId } from "./backgrounds";
-import { DEFAULT_THEME, LevelTheme } from "./themes";
 
 export const EMPTY_TILE = -1;
-export const GROUND_TILE = 0;
-export const BRICK_TILE = 1;
-export const BOUNCE_TILE = 2;
-export const WATER_TILE = 3;
 
-export const SCHEMA_VERSION = 1 as const;
+// Ground blocks: one distinct value per skin (grass/desert/castle/snow —
+// see groundSkins.ts). Each auto-tiles between a "top"/"fill" look
+// depending on whether it's exposed to open air above it or buried under
+// another ground cell — see groundAutotile.ts. A level can freely mix
+// all four; nothing here ties a level to a single skin.
+export const GROUND_GRASS_TILE = 0;
+export const GROUND_DESERT_TILE = 1;
+export const GROUND_CASTLE_TILE = 2;
+export const GROUND_SNOW_TILE = 3;
+
+// Brick/Bounce: a fixed look, never auto-tiled. Grass/desert/snow share
+// one identical real-art frame each; castle draws its own procedural
+// version of both (see generateTextures.ts).
+export const BRICK_TILE = 4;
+export const BRICK_CASTLE_TILE = 5;
+export const BOUNCE_TILE = 6;
+export const BOUNCE_CASTLE_TILE = 7;
+
+// Hazard: Water (grass/desert/snow, real art, non-solid) vs. Lava
+// (castle's procedural stand-in for it) — same hazard behavior, see
+// PlayScene's HAZARD_FRAMES check.
+export const WATER_TILE = 8;
+export const LAVA_TILE = 9;
+
+export const SCHEMA_VERSION = 2 as const;
 
 export type EntityType =
   | "player-spawn"
@@ -45,11 +64,10 @@ export interface LevelData {
   schemaVersion: typeof SCHEMA_VERSION;
   id: string;
   name: string;
-  theme: LevelTheme;
-  /** Which parallax scene shows behind the level — independent of `theme`
-   * (see backgrounds.ts). Optional so old saved levels (and hand-authored
-   * template levels) with no field yet fall back to the theme's matching
-   * scene via `resolveBackground`, rather than needing a migration. */
+  /** Which parallax scene shows behind the level (see backgrounds.ts).
+   * Optional so old saved levels (and hand-authored template levels) with
+   * no field yet fall back to a default scene via `resolveBackground`,
+   * rather than needing a migration. */
   background?: BackgroundSceneId;
   createdAt: string;
   updatedAt: string;
@@ -80,7 +98,6 @@ export function createEmptyLevel(name = "Untitled Level", width = GRID_COLS, hei
     schemaVersion: SCHEMA_VERSION,
     id: "",
     name,
-    theme: DEFAULT_THEME,
     createdAt: now,
     updatedAt: now,
     width: clampedWidth,

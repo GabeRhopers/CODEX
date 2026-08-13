@@ -1,5 +1,3 @@
-import { LevelTheme } from "./themes";
-
 export type BackgroundSceneId = "green-valley" | "pirate-cove" | "overgrown-ruins" | "snowy-peaks" | "starfield";
 
 interface ParallaxLayerDef {
@@ -16,10 +14,9 @@ interface BackgroundScene {
 }
 
 /**
- * A background *scene* is a separate, explicit choice from a level's
- * `theme` (grass/desert/castle, which only recolors the ground tileset and
- * the flat fallback background color — see themes.ts) — any scene can show
- * behind any theme, picked via EditorUI's "Background: ▶" cycle button and
+ * A background *scene* is purely a visual choice, unrelated to a level's
+ * ground blocks (grass/desert/castle/snow skins — see groundSkins.ts and
+ * LevelSchema.ts) — picked via EditorUI's "Background: ▶" cycle button and
  * stored on `LevelData.background`.
  *
  * Every scene here is a large, fixed-size (2048x476) image per layer,
@@ -38,7 +35,7 @@ interface BackgroundScene {
  * authored at this size from the start with no tiling involved at all —
  * commissioned to match specific reference images the project owner
  * provided (see that script's docstring). They lead the pool, and
- * `green-valley` is the overall default (see DEFAULT_BY_THEME below).
+ * `green-valley` is the overall default (see DEFAULT_BACKGROUND below).
  * `starfield` (the procedural castle night sky, generated directly at
  * 2048x476 by `drawStarfield`) is the one non-painted scene, listed last —
  * its star scatter is randomized across the whole canvas, not one small
@@ -87,35 +84,24 @@ export const BACKGROUND_SCENES: BackgroundScene[] = [
   },
 ];
 
-const DEFAULT_BY_THEME: Record<LevelTheme, BackgroundSceneId> = {
-  grass: "green-valley",
-  desert: "pirate-cove",
-  castle: "starfield",
-  snow: "snowy-peaks",
-};
+/** What a level shows before anyone's touched the background picker —
+ * used to depend on the level's (now-removed) theme; every level just
+ * gets the pool's lead scene now, since ground skin and background scene
+ * were always independent choices anyway (see BACKGROUND_SCENES above). */
+export const DEFAULT_BACKGROUND: BackgroundSceneId = "green-valley";
 
-/** What a level shows before anyone's touched the background picker — a
- * scene that reads reasonably against its theme (exact per-theme sky
- * tiles no longer exist — see BACKGROUND_SCENES's docstring — so this is
- * a best-fit pick, not a guaranteed match), so existing levels (saved
- * before this feature existed, with no `background` field) still render
- * something sensible. */
-export function defaultBackgroundForTheme(theme: LevelTheme): BackgroundSceneId {
-  return DEFAULT_BY_THEME[theme];
-}
-
-/** Takes just the two fields it needs (not a full LevelData) so this module
+/** Takes just the field it needs (not a full LevelData) so this module
  * never has to import LevelSchema — LevelSchema imports BackgroundSceneId
  * from here instead, and a cycle would break that. Falls back to the
- * theme default not just when `background` is unset but also when it's
- * set to an id no longer in the pool (e.g. a level saved back when
+ * default not just when `background` is unset but also when it's set to
+ * an id no longer in the pool (e.g. a level saved back when
  * grass-sky/desert-sky/icy-sky/jungle-sky still existed), so an old save
  * degrades to a different scene instead of crashing the scene load. */
-export function resolveBackground(level: { background?: BackgroundSceneId; theme: LevelTheme }): BackgroundSceneId {
+export function resolveBackground(level: { background?: BackgroundSceneId }): BackgroundSceneId {
   if (level.background && BACKGROUND_SCENES.some((scene) => scene.id === level.background)) {
     return level.background;
   }
-  return defaultBackgroundForTheme(level.theme);
+  return DEFAULT_BACKGROUND;
 }
 
 export function backgroundScene(id: BackgroundSceneId): BackgroundScene {
