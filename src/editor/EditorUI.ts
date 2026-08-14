@@ -11,7 +11,6 @@ export interface EditorUICallbacks {
   onClear: () => void;
   onUndo: () => void;
   onRedo: () => void;
-  onCycleBackground: () => void;
 }
 
 const TOOLBAR_Y = GRID_ROWS * TILE_SIZE;
@@ -34,11 +33,9 @@ export class EditorUI {
   private tabButtons = new Map<BrushCategory, Phaser.GameObjects.Text>();
   private activeCategory: BrushCategory;
   private selectedBrushId: string;
-  private backgroundButton!: Phaser.GameObjects.Text;
 
   constructor(
     private readonly scene: Phaser.Scene,
-    initialBackgroundLabel: string,
     private readonly callbacks: EditorUICallbacks,
   ) {
     this.activeCategory = PALETTE[0].category;
@@ -71,14 +68,6 @@ export class EditorUI {
     addActionButton("Clear", () => this.callbacks.onClear());
     addActionButton("Undo (Ctrl+Z)", () => this.callbacks.onUndo());
     addActionButton("Redo (Ctrl+Y)", () => this.callbacks.onRedo());
-
-    // Clicking cycles to the next parallax scene in the pool, wrapping
-    // around; the label always names whichever scene is currently showing.
-    this.backgroundButton = this.makeRowButton(buttonX, ROW1_Y, this.backgroundLabelText(initialBackgroundLabel), () =>
-      this.callbacks.onCycleBackground(),
-    );
-    this.backgroundButton.on("pointerover", () => this.backgroundButton.setStyle({ backgroundColor: "#3a5a9c" }));
-    this.backgroundButton.on("pointerout", () => this.backgroundButton.setStyle({ backgroundColor: "#0f3460" }));
 
     // A Container is one entry in the scene's display list — its own depth
     // (not its children's) decides where it sits relative to siblings like
@@ -184,16 +173,6 @@ export class EditorUI {
     this.selectedBrushId = brush.id;
     this.updateSelectedOutlinePosition();
     this.callbacks.onSelectBrush(brush);
-  }
-
-  private backgroundLabelText(label: string): string {
-    return `Background: ${label} ▶`;
-  }
-
-  /** Called by EditorScene right after cycling — the button's own text is
-   * the only place the current background scene is displayed. */
-  setBackgroundLabel(label: string): void {
-    this.backgroundButton.setText(this.backgroundLabelText(label));
   }
 
   setStatus(message: string): void {

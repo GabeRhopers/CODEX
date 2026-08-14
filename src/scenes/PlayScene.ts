@@ -9,8 +9,7 @@ import {
   updateGhostPatrol,
 } from "../gameplay/EnemyBehaviors";
 import { createPlayerInput, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
-import { ParallaxBackground } from "../gameplay/ParallaxBackground";
-import { resolveBackground } from "../level/backgrounds";
+import { StaticBackground } from "../gameplay/StaticBackground";
 import {
   canDoubleJump,
   collectCoin,
@@ -113,7 +112,7 @@ export class PlayScene extends Phaser.Scene {
   private nextButton!: Phaser.GameObjects.Text;
   private stats: PlayerStats = createPlayerStats();
   private jumpWasDown = false;
-  private parallax!: ParallaxBackground;
+  private background!: StaticBackground;
   private hud!: Phaser.GameObjects.Text;
   private trophy!: Phaser.GameObjects.Image;
 
@@ -135,8 +134,8 @@ export class PlayScene extends Phaser.Scene {
   create(): void {
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
     // Bounded to the level's actual width, not the (often wider, to fit the
-    // editor toolbar) canvas — see ParallaxBackground's docstring.
-    this.parallax = new ParallaxBackground(this, resolveBackground(this.level), this.level.width * TILE_SIZE);
+    // editor toolbar) canvas — see StaticBackground's docstring.
+    this.background = new StaticBackground(this, this.level.width * TILE_SIZE);
 
     // One Tileset per ground skin, each claiming its own 5-wide gid range
     // (grass 0-4, desert 5-9, castle 10-14, snow 15-19 — see
@@ -351,7 +350,7 @@ export class PlayScene extends Phaser.Scene {
     updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time));
     updateWizardAnimation(this.player, this.wizardAnim, delta);
     this.updateBuffVisuals(time);
-    this.parallax.update(this.player.x);
+    this.background.update(this.player.x);
 
     for (const enemy of this.enemies) {
       updateGhostPatrol(enemy.sprite, enemy.state, time);

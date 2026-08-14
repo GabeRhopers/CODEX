@@ -131,10 +131,10 @@ Open the dev server URL in a browser. Controls:
   Snow's ground tile, for instance, used to only be reachable via the
   Frozen Cavern template or that cycle button, one skin at a time; now
   every skin is just an icon away, on every level, always.
-- **Background: ▶**: cycles the level's parallax background scene through
-  the pool of 5 (unrelated to ground-block skin — see "Parallax
-  background & background scenes" under Art), previewing live; persists on
-  Save.
+- **Background**: every level shows the same single static background
+  image right now — no picker, no parallax pan, unrelated to ground-block
+  skin (see "Parallax background & background scenes" under Art for why,
+  and for the multi-scene picker this temporarily replaces).
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
   paint drag or single entity placement/move undoes as one step. Clear
   resets the undo history (undoing past a full level swap doesn't make
@@ -346,7 +346,41 @@ hazard/enemy touch, but doesn't fit falling the way it fits an on-screen
 hit, so `PlayScene.update`'s fall check is unchanged from before Items
 existed.
 
-**Parallax background & background scenes.** Every level renders two
+**Static background (current).** As of 2026-08-14 every level shows one
+fixed, non-scrolling background image — no parallax, no picker, "nothing
+special," per the project owner's own framing, while more reference
+images get supplied. `src/gameplay/StaticBackground.ts` renders it: one
+`Image`, scaled to *cover* the level's placeable viewport (like CSS
+`background-size: cover` — `Math.max` of the width-ratio and
+height-ratio, so it never falls short on either axis) and centered,
+masked to the viewport exactly like `ParallaxBackground` was (see below
+for why that masking matters). `update()` is a deliberate no-op, kept
+only so the call site in `PlayScene` doesn't need to change if/when
+parallax comes back. The image itself
+(`public/assets/backgrounds/static/default.png`, texture key
+`bg-static-default`) is the project owner's own reference image, used at
+its full native content — unlike the parallax pool's assets, it isn't
+pre-cropped to any particular canvas, since a *cover* fit needs no pan
+slack and can therefore keep far more of the source (sheep, the winding
+path, foreground rocks) than the ultrawide 2048x476 parallax canvas ever
+could.
+
+The multi-scene parallax system below is **dormant, not deleted** — every
+asset and every file it depends on (`ParallaxBackground.ts`,
+`backgrounds.ts` and its `BACKGROUND_SCENES` pool, all 5 scenes' PNGs)
+stays exactly as it was, untouched, and `LevelData.background` remains
+declared (just unread) so old saves with a background choice still parse
+correctly. The one piece of *glue* code that was actually deleted rather
+than left dormant is the thin UI wiring that had no reason to keep
+existing while showing nothing special — `EditorUI`'s **"Background: ▶"**
+button and `EditorScene.cycleBackground()` — since a live-but-inert
+picker button would still show up in the toolbar. That's a small,
+mechanical amount of code and it's sitting in this branch's git history
+(see the commit that introduced `StaticBackground`) if/when it's worth
+restoring alongside re-enabling `BootScene`'s commented-out preload loop
+for the pool.
+
+**Parallax background & background scenes (dormant — see above).** Every level renders two
 background layers behind it — a slow far layer and a faster near layer —
 for a sense of depth as the player moves. This project's levels are still
 single-screen (no camera panning/scrolling — that's deferred to plan doc
@@ -387,12 +421,13 @@ and `LevelData.background` is the optional field a level stores its
 choice in (falling back to `DEFAULT_BACKGROUND` via `resolveBackground`
 when unset or when it names a scene no longer in the pool — see below —
 so levels saved before this feature existed, or before the pool shrank,
-still render something sensible). The editor's
-toolbar has a **"Background: ▶"** button (far right of the action-buttons
-row) that cycles through the pool, live-updating the preview (destroying
-and recreating the `ParallaxBackground` instance, since different scenes
-have different layer textures) and persisting the choice to the level on
-Save.
+still render something sensible). While active, the editor's toolbar had
+a **"Background: ▶"** button (far right of the action-buttons row) that
+cycled through the pool, live-updating the preview (destroying and
+recreating the `ParallaxBackground` instance, since different scenes have
+different layer textures) and persisting the choice to the level on
+Save — that button itself is one of the pieces actually deleted rather
+than left dormant (see above).
 
 The pool has five scenes, and every one of them is a large, fixed
 2048x476 image pair (matching `GAME_HEIGHT` exactly). Three are original
@@ -633,12 +668,13 @@ src/
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
 │   ├── groundAutotile.ts     stored tile value → render frame in the combined multi-skin tileset (+ unit tests)
 │   ├── groundSkins.ts         per-skin color palettes + skin-keyed texture-key naming
-│   ├── backgrounds.ts         the background-scene pool (unrelated to ground skin) + resolveBackground/nextBackgroundId
+│   ├── backgrounds.ts         dormant: the parallax background-scene pool (unrelated to ground skin) + resolveBackground/nextBackgroundId
 │   └── templateLevels.ts      6 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling (speed-multiplier aware; exports isJumpPressed for double-jump edge detection)
 │   ├── PlayerStats.ts        pure score/hearts/buffs rules — collect*/registerHit/speedMultiplierAt/canDoubleJump (+ unit tests)
-│   ├── ParallaxBackground.ts two-layer fake-parallax background (zoomed Image, clamped pan by player X, masked to level width), keyed by BackgroundSceneId
+│   ├── StaticBackground.ts   current single-image, no-pan background (cover-fit, masked to level width)
+│   ├── ParallaxBackground.ts dormant two-layer fake-parallax background (zoomed Image, clamped pan by player X, masked to level width), keyed by BackgroundSceneId — see "Static background (current)" under Art
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 │   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
 ├── persistence/
@@ -660,7 +696,9 @@ public/assets/
 ├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
 ├── decor/                    bush/tree/cactus/lamp/cloud/snowman/sprout/mushroom/rocks.png — purely cosmetic (Kenney, derived)
 └── backgrounds/
-    └── scenes/               every background-scene layer, all a fixed 2048x476: green-valley/pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art, not Kenney-derived) — castle's "starfield" scene is procedural, generated at the same size
+    ├── static/
+    │   └── default.png       the current single static background (the project owner's own reference image, used at native content/aspect — see "Static background (current)" under Art)
+    └── scenes/               dormant: every parallax background-scene layer, all a fixed 2048x476: green-valley/pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art, not Kenney-derived) — castle's "starfield" scene is procedural, generated at the same size
 
 scripts/
 ├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,decor}' Kenney-sourced PNGs (one-off, not part of the build)

@@ -9,8 +9,7 @@ import { EditorUI } from "../editor/EditorUI";
 import { EntityPlacer } from "../editor/EntityPlacer";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
-import { ParallaxBackground } from "../gameplay/ParallaxBackground";
-import { backgroundScene, BackgroundSceneId, nextBackgroundId, resolveBackground } from "../level/backgrounds";
+import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
@@ -39,8 +38,6 @@ export class EditorScene extends Phaser.Scene {
   private dragLastX = -1;
   private dragLastY = -1;
   private lastActionFrame = new Map<string, number>();
-  private backgroundId!: BackgroundSceneId;
-  private parallax!: ParallaxBackground;
 
   constructor() {
     super("Editor");
@@ -53,12 +50,12 @@ export class EditorScene extends Phaser.Scene {
   create(): void {
     this.level = this.initialLevel ?? createEmptyLevel();
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
-    this.backgroundId = resolveBackground(this.level);
-    // Static (no per-frame update — there's no player position to track
-    // while editing) so it just shows the level's parallax layers at rest.
     // Bounded to the level's actual placeable width, not the (often wider,
-    // to fit the toolbar) canvas — see ParallaxBackground's docstring.
-    this.parallax = new ParallaxBackground(this, this.backgroundId, this.level.width * TILE_SIZE);
+    // to fit the toolbar) canvas — see StaticBackground's docstring. The
+    // editor never updates or destroys it directly (no player position to
+    // pan by, and a level-width change starts a fresh EditorScene instance
+    // rather than mutating this one), so it's create-and-forget here.
+    new StaticBackground(this, this.level.width * TILE_SIZE);
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }
@@ -69,7 +66,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
 
-    this.ui = new EditorUI(this, backgroundScene(this.backgroundId).label, {
+    this.ui = new EditorUI(this, {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),
@@ -77,7 +74,6 @@ export class EditorScene extends Phaser.Scene {
       onClear: () => this.clearLevel(),
       onUndo: () => this.undo(),
       onRedo: () => this.redo(),
-      onCycleBackground: () => this.cycleBackground(),
     });
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
@@ -206,17 +202,6 @@ export class EditorScene extends Phaser.Scene {
       return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 5)!;
     });
     this.groundLayer = map.createBlankLayer("ground", tilesets, 0, 0)!;
-  }
-
-  /** Swaps the live preview immediately (destroy + recreate, since scenes
-   * can have different layer counts) and stores the choice on the level
-   * so it round-trips through Save/Edit and Test Play. */
-  private cycleBackground(): void {
-    this.backgroundId = nextBackgroundId(this.backgroundId);
-    this.level.background = this.backgroundId;
-    this.parallax.destroy();
-    this.parallax = new ParallaxBackground(this, this.backgroundId, this.level.width * TILE_SIZE);
-    this.ui.setBackgroundLabel(backgroundScene(this.backgroundId).label);
   }
 
   private undo(): void {
