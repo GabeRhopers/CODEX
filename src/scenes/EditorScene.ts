@@ -14,6 +14,7 @@ import { groundFrameAt } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
+import { nextStaticBackgroundId, resolveStaticBackground, staticBackgroundDef, StaticBackgroundId } from "../level/staticBackgrounds";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -49,6 +50,8 @@ export class EditorScene extends Phaser.Scene {
   private lastActionFrame = new Map<string, number>();
   private dirty = false;
   private autosaveTimer?: Phaser.Time.TimerEvent;
+  private backgroundId!: StaticBackgroundId;
+  private background!: StaticBackground;
   // A stable bound reference so it can be removed on shutdown — an inline
   // arrow passed straight to addEventListener can never be un-registered.
   private readonly handlePageHide = (): void => {
@@ -66,12 +69,10 @@ export class EditorScene extends Phaser.Scene {
   create(): void {
     this.level = this.initialLevel ?? createEmptyLevel();
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
+    this.backgroundId = resolveStaticBackground(this.level);
     // Bounded to the level's actual placeable width, not the (often wider,
-    // to fit the toolbar) canvas — see StaticBackground's docstring. The
-    // editor never updates or destroys it directly (no player position to
-    // pan by, and a level-width change starts a fresh EditorScene instance
-    // rather than mutating this one), so it's create-and-forget here.
-    new StaticBackground(this, this.level.width * TILE_SIZE);
+    // to fit the toolbar) canvas — see StaticBackground's docstring.
+    this.background = new StaticBackground(this, this.level.width * TILE_SIZE, staticBackgroundDef(this.backgroundId).textureKey);
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }
@@ -82,7 +83,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
 
-    this.ui = new EditorUI(this, {
+    this.ui = new EditorUI(this, staticBackgroundDef(this.backgroundId).label, {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),
@@ -90,6 +91,7 @@ export class EditorScene extends Phaser.Scene {
       onClear: () => this.clearLevel(),
       onUndo: () => this.undo(),
       onRedo: () => this.redo(),
+      onCycleBackground: () => this.cycleBackground(),
     });
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
@@ -242,6 +244,20 @@ export class EditorScene extends Phaser.Scene {
   private redo(): void {
     if (this.history.redo()) this.markDirty();
     else this.ui.setStatus("Nothing to redo");
+  }
+
+  /** Swaps the live preview immediately (destroy + recreate — the two
+   * images are different textures/aspect ratios, not just a re-scale) and
+   * stores the choice on the level so it round-trips through Save/Edit and
+   * Test Play. Counts as an edit like any other, so it autosaves same as
+   * a paint stroke. */
+  private cycleBackground(): void {
+    this.backgroundId = nextStaticBackgroundId(this.backgroundId);
+    this.level.background = this.backgroundId;
+    this.background.destroy();
+    this.background = new StaticBackground(this, this.level.width * TILE_SIZE, staticBackgroundDef(this.backgroundId).textureKey);
+    this.ui.setBackgroundLabel(staticBackgroundDef(this.backgroundId).label);
+    this.markDirty();
   }
 
   private testPlay(): void {

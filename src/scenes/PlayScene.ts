@@ -32,6 +32,7 @@ import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, Wizar
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { EntityType, LevelData } from "../level/LevelSchema";
+import { resolveStaticBackground, staticBackgroundDef } from "../level/staticBackgrounds";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -135,7 +136,8 @@ export class PlayScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
     // Bounded to the level's actual width, not the (often wider, to fit the
     // editor toolbar) canvas — see StaticBackground's docstring.
-    this.background = new StaticBackground(this, this.level.width * TILE_SIZE);
+    const backgroundTextureKey = staticBackgroundDef(resolveStaticBackground(this.level)).textureKey;
+    this.background = new StaticBackground(this, this.level.width * TILE_SIZE, backgroundTextureKey);
 
     // One Tileset per ground skin, each claiming its own 5-wide gid range
     // (grass 0-4, desert 5-9, castle 10-14, snow 15-19 — see

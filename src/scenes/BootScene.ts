@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 import { generateTextures } from "../assets/generateTextures";
-import { STATIC_BACKGROUND_KEY } from "../gameplay/StaticBackground";
 import { WIZARD_FRAME_KEYS } from "../gameplay/wizardAnimation";
 import { groundIconKey, groundTilesetKey } from "../level/groundSkins";
+import { STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -58,10 +58,12 @@ export class BootScene extends Phaser.Scene {
     // EnemyBehaviors.ts; no per-enemy texture-swap animation exists yet).
     this.load.image("decor-bat", "assets/entities/bat-perched.png");
 
-    // Single static background image (see gameplay/StaticBackground.ts) -
-    // the current, deliberately simple stand-in for the multi-scene
-    // parallax picker below, while more reference images get supplied.
-    this.load.image(STATIC_BACKGROUND_KEY, "assets/backgrounds/static/default.png");
+    // Static background pool (see gameplay/StaticBackground.ts and
+    // level/staticBackgrounds.ts) - plain cover-fit images, no parallax,
+    // the current stand-in for the multi-scene parallax picker below.
+    for (const bg of STATIC_BACKGROUNDS) {
+      this.load.image(bg.textureKey, `assets/backgrounds/static/${bg.id}.png`);
+    }
 
     // --- Dormant: the multi-scene parallax background pool ---
     // Not preloaded right now (no reason to spend load time on textures

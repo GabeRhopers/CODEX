@@ -1,5 +1,5 @@
 import { GRID_COLS, GRID_ROWS, MAX_GRID_COLS, MAX_GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
-import { BackgroundSceneId } from "./backgrounds";
+import { StaticBackgroundId } from "./staticBackgrounds";
 
 export const EMPTY_TILE = -1;
 
@@ -64,11 +64,12 @@ export interface LevelData {
   schemaVersion: typeof SCHEMA_VERSION;
   id: string;
   name: string;
-  /** Which parallax scene shows behind the level (see backgrounds.ts).
-   * Optional so old saved levels (and hand-authored template levels) with
-   * no field yet fall back to a default scene via `resolveBackground`,
-   * rather than needing a migration. */
-  background?: BackgroundSceneId;
+  /** Which static background image shows behind the level (see
+   * staticBackgrounds.ts). Optional so old saved levels (and
+   * hand-authored template levels) with no field yet fall back to the
+   * default via `resolveStaticBackground`, rather than needing a
+   * migration. */
+  background?: StaticBackgroundId;
   createdAt: string;
   updatedAt: string;
   width: number;

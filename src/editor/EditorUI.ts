@@ -12,6 +12,7 @@ export interface EditorUICallbacks {
   onClear: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  onCycleBackground: () => void;
 }
 
 const TOOLBAR_Y = GRID_ROWS * TILE_SIZE;
@@ -35,6 +36,7 @@ export class EditorUI {
   // the level in memory currently matches what's in storage. See
   // EditorScene's `dirty` flag/autosave for what drives it.
   private saveStatusText: Phaser.GameObjects.Text;
+  private backgroundButton!: Phaser.GameObjects.Text;
   private iconRow: Phaser.GameObjects.Container;
   private tabButtons = new Map<BrushCategory, Phaser.GameObjects.Text>();
   private activeCategory: BrushCategory;
@@ -42,6 +44,7 @@ export class EditorUI {
 
   constructor(
     private readonly scene: Phaser.Scene,
+    initialBackgroundLabel: string,
     private readonly callbacks: EditorUICallbacks,
   ) {
     this.activeCategory = PALETTE[0].category;
@@ -75,17 +78,31 @@ export class EditorUI {
     addActionButton("Undo (Ctrl+Z)", () => this.callbacks.onUndo());
     addActionButton("Redo (Ctrl+Y)", () => this.callbacks.onRedo());
 
+    // Clicking cycles to the next background in the small static pool,
+    // wrapping around; the label always names whichever one is currently
+    // showing. Built via makeRowButton directly (not addActionButton) so
+    // the reference survives for setBackgroundLabel to update later.
+    this.backgroundButton = this.makeRowButton(buttonX, ROW1_Y, this.backgroundLabelText(initialBackgroundLabel), () =>
+      this.callbacks.onCycleBackground(),
+    );
+    this.backgroundButton.on("pointerover", () => this.backgroundButton.setStyle({ backgroundColor: "#3a5a9c" }));
+    this.backgroundButton.on("pointerout", () => this.backgroundButton.setStyle({ backgroundColor: "#0f3460" }));
+
     // Plain text, not a button (no interactivity, no hover/click) — this is
     // a status readout, not an action. Starts "saved" since a level with no
     // edits yet has nothing at risk, regardless of whether it's a freshly
-    // loaded save or a brand-new blank one; the first edit flips it.
+    // loaded save or a brand-new blank one; the first edit flips it. Its x
+    // is derived from backgroundButton's own width (see
+    // repositionSaveStatusText) rather than computed once here, since
+    // cycling to a longer/shorter background label resizes that button.
     this.saveStatusText = scene.add
-      .text(buttonX + 12, ROW1_Y, SAVE_STATE_DISPLAY.saved.text, {
+      .text(0, ROW1_Y, SAVE_STATE_DISPLAY.saved.text, {
         fontSize: "13px",
         color: SAVE_STATE_DISPLAY.saved.color,
       })
       .setOrigin(0, 0.5)
       .setDepth(21);
+    this.repositionSaveStatusText();
 
     // A Container is one entry in the scene's display list — its own depth
     // (not its children's) decides where it sits relative to siblings like
@@ -203,5 +220,24 @@ export class EditorUI {
   setSaveState(state: SaveState): void {
     const { text, color } = SAVE_STATE_DISPLAY[state];
     this.saveStatusText.setText(text).setColor(color);
+  }
+
+  private backgroundLabelText(label: string): string {
+    return `Background: ${label} ▶`;
+  }
+
+  /** Called by EditorScene right after cycling — the button's own text is
+   * the only place the current background is displayed. */
+  setBackgroundLabel(label: string): void {
+    this.backgroundButton.setText(this.backgroundLabelText(label));
+    this.repositionSaveStatusText();
+  }
+
+  /** backgroundButton's width changes with its label ("Meadow" vs "Sunny
+   * Valley" are different lengths), so anything placed after it has to be
+   * repositioned whenever that label changes, not just laid out once at
+   * construction — otherwise a longer label overlaps the next element. */
+  private repositionSaveStatusText(): void {
+    this.saveStatusText.setX(this.backgroundButton.x + this.backgroundButton.width + 12);
   }
 }
