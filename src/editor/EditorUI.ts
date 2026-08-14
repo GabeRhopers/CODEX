@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GRID_ROWS, TILE_SIZE, TOOLBAR_HEIGHT } from "../config/gameConfig";
+import { GAME_HEIGHT, GAME_WIDTH, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
@@ -15,30 +15,63 @@ export interface EditorUICallbacks {
   onCycleBackground: () => void;
 }
 
-const TOOLBAR_Y = GRID_ROWS * TILE_SIZE;
-const ROW1_Y = TOOLBAR_Y + 15; // category tabs + action buttons
-const ICON_ROW_Y = TOOLBAR_Y + 52; // the active category's brushes
-const PALETTE_START_X = 16;
-const PALETTE_ICON_SPACING = TILE_SIZE + 32; // wide enough for two-word labels like "Castle Bounce" not to crowd their neighbors
-const PALETTE_GROUP_GAP = 16; // extra room after a Brush.groupEnd icon
-const BUTTON_GAP = 8;
+const PANEL_DEPTH = 20;
+const CONTENT_DEPTH = 21;
+const OUTLINE_DEPTH = 22;
+const STATUS_DEPTH = 25;
 
-/** The palette used to be one flat, ever-widening row of every brush at
- * once. Now it's tabbed by BrushCategory (Blocks/Markers/Enemies/Items):
- * one row of small category buttons, and below it only the brushes for
- * whichever category is active — the icon row stays a manageable width no
- * matter how many items get added to any one category later. */
+const PANEL_PADDING = 12;
+
+// --- Left "Tools" panel: category tabs stacked above a 2-column palette grid.
+const TAB_HEIGHT = 30;
+const TAB_GAP = 4;
+const TABS_START_Y = 16;
+
+const ICON_COLS = 2;
+const ICON_COL_X = [PANEL_PADDING + 42, PANEL_PADDING + 42 + 80]; // two column centers, 80px apart
+const ICON_ROW_HEIGHT = 54; // icon + label + breathing room
+const ICON_GRID_START_Y = TABS_START_Y + CATEGORIES.length * (TAB_HEIGHT + TAB_GAP) + 24;
+
+// --- Right "Actions" panel: fixed-width buttons stacked top to bottom.
+const RIGHT_BUTTON_WIDTH = RIGHT_PANEL_WIDTH - PANEL_PADDING * 2;
+const RIGHT_BUTTON_HEIGHT = 32;
+const RIGHT_BUTTON_GAP = 8;
+const RIGHT_PANEL_START_Y = 16;
+const RIGHT_PANEL_X = GAME_WIDTH - RIGHT_PANEL_WIDTH;
+
+/**
+ * Two docked vertical panels flanking the grid, both opaque and rendered
+ * above the background (see PANEL_DEPTH vs StaticBackground's depth -100):
+ * a left "Tools" panel (category tabs, then that category's palette as a
+ * 2-column icon grid) and a right "Actions" panel (fixed-width stacked
+ * buttons, so a longer label never pushes into the next row the way the old
+ * single-row toolbar's variable-width buttons could — see the save-status/
+ * background-button overlap bug this replaced).
+ */
+/** A fixed-size button = an interactive background rect (the hit area and
+ * hover/active color) plus a centered label on top — two separate display
+ * objects rather than Phaser Text's own fixedWidth/fixedHeight, since Text
+ * doesn't vertically center its content within a fixed box on its own. */
+interface PanelButton {
+  bg: Phaser.GameObjects.Rectangle;
+  label: Phaser.GameObjects.Text;
+}
+
+const BUTTON_COLOR = 0x0f3460;
+const BUTTON_HOVER_COLOR = 0x3a5a9c;
+
 export class EditorUI {
   private selectedOutline: Phaser.GameObjects.Image;
   private statusText: Phaser.GameObjects.Text;
   // Persistent, unlike statusText above (which auto-clears after 2.5s and
   // is reused for one-off messages like "Cleared") — always shows whether
   // the level in memory currently matches what's in storage. See
-  // EditorScene's `dirty` flag/autosave for what drives it.
+  // EditorScene's `dirty` flag/autosave for what drives it. Occupies its own
+  // fixed row in the Actions panel, right after the button stack.
   private saveStatusText: Phaser.GameObjects.Text;
-  private backgroundButton!: Phaser.GameObjects.Text;
-  private iconRow: Phaser.GameObjects.Container;
-  private tabButtons = new Map<BrushCategory, Phaser.GameObjects.Text>();
+  private backgroundButton!: PanelButton;
+  private iconGrid: Phaser.GameObjects.Container;
+  private tabButtons = new Map<BrushCategory, PanelButton>();
   private activeCategory: BrushCategory;
   private selectedBrushId: string;
 
@@ -50,26 +83,38 @@ export class EditorUI {
     this.activeCategory = PALETTE[0].category;
     this.selectedBrushId = PALETTE[0].id;
 
-    const bg = scene.add.rectangle(0, TOOLBAR_Y, scene.scale.width, TOOLBAR_HEIGHT, 0x16213e);
-    bg.setOrigin(0, 0);
-    bg.setDepth(20);
+    scene.add.rectangle(0, 0, LEFT_PANEL_WIDTH, GAME_HEIGHT, 0x16213e).setOrigin(0, 0).setDepth(PANEL_DEPTH);
+    scene.add.rectangle(RIGHT_PANEL_X, 0, RIGHT_PANEL_WIDTH, GAME_HEIGHT, 0x16213e).setOrigin(0, 0).setDepth(PANEL_DEPTH);
 
-    let tabX = PALETTE_START_X;
-    for (const category of CATEGORIES) {
-      const button = this.makeRowButton(tabX, ROW1_Y, category.label, () => this.setActiveCategory(category.id));
-      button.on("pointerover", () => button.setStyle({ backgroundColor: "#3a5a9c" }));
-      button.on("pointerout", () => this.refreshTabStyles());
+    // Category tabs, stacked top to bottom, each spanning the panel's full
+    // content width so they read as one clear vertical list.
+    CATEGORIES.forEach((category, i) => {
+      const y = TABS_START_Y + i * (TAB_HEIGHT + TAB_GAP);
+      const button = this.makeFixedWidthButton(
+        PANEL_PADDING,
+        y,
+        LEFT_PANEL_WIDTH - PANEL_PADDING * 2,
+        TAB_HEIGHT,
+        category.label,
+        () => this.setActiveCategory(category.id),
+      );
+      button.bg.on("pointerover", () => button.bg.setFillStyle(BUTTON_HOVER_COLOR));
+      button.bg.on("pointerout", () => this.refreshTabStyles());
       this.tabButtons.set(category.id, button);
-      tabX += button.width + BUTTON_GAP;
-    }
+    });
     this.refreshTabStyles();
 
-    let buttonX = tabX + 20;
+    this.iconGrid = scene.add.container(0, 0).setDepth(CONTENT_DEPTH);
+    this.selectedOutline = scene.add.image(-100, -100, "selected-outline").setDepth(OUTLINE_DEPTH);
+    this.renderIconGrid();
+
+    // Right panel: one fixed-width button per row.
+    let rowY = RIGHT_PANEL_START_Y;
     const addActionButton = (label: string, onClick: () => void) => {
-      const button = this.makeRowButton(buttonX, ROW1_Y, label, onClick);
-      button.on("pointerover", () => button.setStyle({ backgroundColor: "#3a5a9c" }));
-      button.on("pointerout", () => button.setStyle({ backgroundColor: "#0f3460" }));
-      buttonX += button.width + BUTTON_GAP;
+      const button = this.makeFixedWidthButton(RIGHT_PANEL_X + PANEL_PADDING, rowY, RIGHT_BUTTON_WIDTH, RIGHT_BUTTON_HEIGHT, label, onClick);
+      button.bg.on("pointerover", () => button.bg.setFillStyle(BUTTON_HOVER_COLOR));
+      button.bg.on("pointerout", () => button.bg.setFillStyle(BUTTON_COLOR));
+      rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
     };
     addActionButton("Test Play (Space)", () => this.callbacks.onTestPlay());
     addActionButton("Save", () => this.callbacks.onSave());
@@ -80,68 +125,73 @@ export class EditorUI {
 
     // Clicking cycles to the next background in the small static pool,
     // wrapping around; the label always names whichever one is currently
-    // showing. Built via makeRowButton directly (not addActionButton) so
-    // the reference survives for setBackgroundLabel to update later.
-    this.backgroundButton = this.makeRowButton(buttonX, ROW1_Y, this.backgroundLabelText(initialBackgroundLabel), () =>
-      this.callbacks.onCycleBackground(),
+    // showing. Same fixed width as every other Actions button — no more
+    // reflow-on-cycle, since the button doesn't grow with the label.
+    this.backgroundButton = this.makeFixedWidthButton(
+      RIGHT_PANEL_X + PANEL_PADDING,
+      rowY,
+      RIGHT_BUTTON_WIDTH,
+      RIGHT_BUTTON_HEIGHT,
+      this.backgroundLabelText(initialBackgroundLabel),
+      () => this.callbacks.onCycleBackground(),
     );
-    this.backgroundButton.on("pointerover", () => this.backgroundButton.setStyle({ backgroundColor: "#3a5a9c" }));
-    this.backgroundButton.on("pointerout", () => this.backgroundButton.setStyle({ backgroundColor: "#0f3460" }));
+    this.backgroundButton.bg.on("pointerover", () => this.backgroundButton.bg.setFillStyle(BUTTON_HOVER_COLOR));
+    this.backgroundButton.bg.on("pointerout", () => this.backgroundButton.bg.setFillStyle(BUTTON_COLOR));
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
     // Plain text, not a button (no interactivity, no hover/click) — this is
     // a status readout, not an action. Starts "saved" since a level with no
     // edits yet has nothing at risk, regardless of whether it's a freshly
-    // loaded save or a brand-new blank one; the first edit flips it. Its x
-    // is derived from backgroundButton's own width (see
-    // repositionSaveStatusText) rather than computed once here, since
-    // cycling to a longer/shorter background label resizes that button.
+    // loaded save or a brand-new blank one; the first edit flips it. Its own
+    // fixed row below the button stack, so it never overlaps a button label.
     this.saveStatusText = scene.add
-      .text(0, ROW1_Y, SAVE_STATE_DISPLAY.saved.text, {
+      .text(RIGHT_PANEL_X + PANEL_PADDING, rowY, SAVE_STATE_DISPLAY.saved.text, {
         fontSize: "13px",
         color: SAVE_STATE_DISPLAY.saved.color,
       })
-      .setOrigin(0, 0.5)
-      .setDepth(21);
-    this.repositionSaveStatusText();
-
-    // A Container is one entry in the scene's display list — its own depth
-    // (not its children's) decides where it sits relative to siblings like
-    // the toolbar background rectangle below, so it must be set explicitly
-    // or the whole row renders behind that opaque bg and never appears.
-    this.iconRow = scene.add.container(0, 0).setDepth(21);
-    this.selectedOutline = scene.add.image(-100, -100, "selected-outline").setDepth(22);
-    this.renderIconRow();
+      .setOrigin(0, 0)
+      .setDepth(CONTENT_DEPTH);
 
     this.statusText = scene.add
-      .text(scene.scale.width / 2, 8, "", {
+      .text(GAME_WIDTH / 2, 8, "", {
         fontSize: "13px",
         color: "#ffeb3b",
         backgroundColor: "#000000aa",
         padding: { x: 8, y: 4 },
       })
       .setOrigin(0.5, 0)
-      .setDepth(25);
+      .setDepth(STATUS_DEPTH);
   }
 
-  private makeRowButton(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
-    const text = this.scene.add
-      .text(x, y, label, {
-        fontSize: "13px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 8, y: 6 },
-      })
-      .setOrigin(0, 0.5)
-      .setDepth(21)
+  /** Unlike the old toolbar's makeRowButton (a single auto-sized Text),
+   * every panel button here gets an explicit width/height rectangle so a
+   * row's position never depends on what any other row's label happens to
+   * say — see the class docstring for the bug class this eliminates. The
+   * label is a second, non-interactive Text centered on top; the rect
+   * (not the label) owns the click/hover handlers and hit area. */
+  private makeFixedWidthButton(x: number, y: number, width: number, height: number, label: string, onClick: () => void): PanelButton {
+    const bg = this.scene.add
+      .rectangle(x, y, width, height, BUTTON_COLOR)
+      .setOrigin(0, 0)
+      .setDepth(CONTENT_DEPTH)
       .setInteractive({ useHandCursor: true });
-    text.on("pointerdown", onClick);
-    return text;
+    bg.on("pointerdown", onClick);
+    const text = this.scene.add
+      .text(x + width / 2, y + height / 2, label, {
+        fontSize: "12px",
+        color: "#ffffff",
+        align: "center",
+        wordWrap: { width: width - 8 },
+      })
+      .setOrigin(0.5, 0.5)
+      .setDepth(CONTENT_DEPTH);
+    return { bg, label: text };
   }
 
   private setActiveCategory(category: BrushCategory): void {
     if (category === this.activeCategory) return;
     this.activeCategory = category;
-    this.renderIconRow();
+    this.renderIconGrid();
     this.refreshTabStyles();
   }
 
@@ -151,47 +201,58 @@ export class EditorUI {
    * momentary hover. */
   private refreshTabStyles(): void {
     for (const [id, button] of this.tabButtons) {
-      button.setStyle({ backgroundColor: id === this.activeCategory ? "#3a5a9c" : "#0f3460" });
+      button.bg.setFillStyle(id === this.activeCategory ? BUTTON_HOVER_COLOR : BUTTON_COLOR);
     }
   }
 
-  /** Icon center-x for each brush in the active category, left to right —
-   * a running total rather than `index * spacing` since a `groupEnd`
-   * brush (see Palette.ts) opens up extra room after itself, so groups
-   * within a category (e.g. Blocks' ground-skin/block-kind/hazard/erase
-   * clusters) read as visually separate instead of one dense strip.
-   * renderIconRow and updateSelectedOutlinePosition both need this same
-   * layout, so it's computed once here rather than twice. */
-  private iconCenters(brushes: Brush[]): number[] {
-    const centers: number[] = [];
-    let x = PALETTE_START_X;
+  /** Icon center (x, y) for each brush in the active category, laid out
+   * into a 2-column grid. A `groupEnd` brush (see Palette.ts) still ends
+   * its cluster like it did in the old single-row layout, but here that
+   * means "force the next brush to start a new row" rather than "add a
+   * horizontal gap" — so the Blocks category's ground-skin/block-kind/
+   * hazard/erase clusters still read as visually separate groups, just
+   * stacked instead of spread sideways. renderIconGrid and
+   * updateSelectedOutlinePosition both need this same layout, so it's
+   * computed once here rather than twice. */
+  private iconPositions(brushes: Brush[]): { x: number; y: number }[] {
+    const positions: { x: number; y: number }[] = [];
+    let col = 0;
+    let row = 0;
     for (const brush of brushes) {
-      centers.push(x + TILE_SIZE / 2);
-      x += PALETTE_ICON_SPACING + (brush.groupEnd ? PALETTE_GROUP_GAP : 0);
+      positions.push({ x: ICON_COL_X[col], y: ICON_GRID_START_Y + row * ICON_ROW_HEIGHT });
+      if (brush.groupEnd) {
+        col = 0;
+        row += 1;
+      } else if (col === ICON_COLS - 1) {
+        col = 0;
+        row += 1;
+      } else {
+        col += 1;
+      }
     }
-    return centers;
+    return positions;
   }
 
-  private renderIconRow(): void {
-    this.iconRow.removeAll(true);
+  private renderIconGrid(): void {
+    this.iconGrid.removeAll(true);
     const brushes = PALETTE.filter((brush) => brush.category === this.activeCategory);
-    const centers = this.iconCenters(brushes);
+    const positions = this.iconPositions(brushes);
     brushes.forEach((brush, i) => {
-      const cx = centers[i];
-      const icon = this.scene.add.image(cx, ICON_ROW_Y, brush.textureKey).setDepth(21).setInteractive({ useHandCursor: true });
+      const { x, y } = positions[i];
+      const icon = this.scene.add.image(x, y, brush.textureKey).setDepth(CONTENT_DEPTH).setInteractive({ useHandCursor: true });
       fitWithinTile(icon);
       icon.on("pointerdown", () => this.selectBrush(brush));
       const label = this.scene.add
-        .text(cx, ICON_ROW_Y + 20, brush.label, { fontSize: "10px", color: "#eeeeee" })
+        .text(x, y + TILE_SIZE / 2 + 2, brush.label, { fontSize: "9px", color: "#eeeeee" })
         .setOrigin(0.5, 0)
-        .setDepth(21);
-      this.iconRow.add([icon, label]);
+        .setDepth(CONTENT_DEPTH);
+      this.iconGrid.add([icon, label]);
     });
     this.updateSelectedOutlinePosition();
   }
 
   /** Hidden when the selected brush belongs to a category that isn't
-   * currently showing — there's nothing in the visible row to outline,
+   * currently showing — there's nothing in the visible grid to outline,
    * but the selection itself is untouched (switching back shows it again). */
   private updateSelectedOutlinePosition(): void {
     const brushes = PALETTE.filter((brush) => brush.category === this.activeCategory);
@@ -200,8 +261,8 @@ export class EditorUI {
       this.selectedOutline.setVisible(false);
       return;
     }
-    const cx = this.iconCenters(brushes)[index];
-    this.selectedOutline.setPosition(cx, ICON_ROW_Y).setVisible(true);
+    const { x, y } = this.iconPositions(brushes)[index];
+    this.selectedOutline.setPosition(x, y).setVisible(true);
   }
 
   selectBrush(brush: Brush): void {
@@ -223,21 +284,14 @@ export class EditorUI {
   }
 
   private backgroundLabelText(label: string): string {
-    return `Background: ${label} ▶`;
+    return `BG: ${label} ▶`;
   }
 
   /** Called by EditorScene right after cycling — the button's own text is
-   * the only place the current background is displayed. */
+   * the only place the current background is displayed. Fixed-width, so
+   * unlike the old toolbar's version this never needs to reposition
+   * anything else on the panel. */
   setBackgroundLabel(label: string): void {
-    this.backgroundButton.setText(this.backgroundLabelText(label));
-    this.repositionSaveStatusText();
-  }
-
-  /** backgroundButton's width changes with its label ("Meadow" vs "Sunny
-   * Valley" are different lengths), so anything placed after it has to be
-   * repositioned whenever that label changes, not just laid out once at
-   * construction — otherwise a longer label overlaps the next element. */
-  private repositionSaveStatusText(): void {
-    this.saveStatusText.setX(this.backgroundButton.x + this.backgroundButton.width + 12);
+    this.backgroundButton.label.setText(this.backgroundLabelText(label));
   }
 }

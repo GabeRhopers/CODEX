@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
+import { GAME_WIDTH, GRID_ORIGIN_X, GRID_ROWS, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
 import { Command } from "../editor/commands/Command";
 import { CompositeCommand } from "../editor/commands/CompositeCommand";
 import { HistoryStack } from "../editor/commands/HistoryStack";
@@ -71,7 +71,7 @@ export class EditorScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
     this.backgroundId = resolveStaticBackground(this.level);
     // Bounded to the level's actual placeable width, not the (often wider,
-    // to fit the toolbar) canvas — see StaticBackground's docstring.
+    // to fit the side panels) canvas — see StaticBackground's docstring.
     this.background = new StaticBackground(this, this.level.width * TILE_SIZE, staticBackgroundDef(this.backgroundId).textureKey);
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
@@ -97,8 +97,8 @@ export class EditorScene extends Phaser.Scene {
     if (this.initialLevel) this.rebuildVisualsFromLevel();
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (pointer.y >= GRID_ROWS * TILE_SIZE) return; // toolbar area, not the grid
-      const tileX = Math.floor(pointer.x / TILE_SIZE);
+      if (!this.isOverGrid(pointer)) return; // Tools/Actions panel, or the dead space below the grid
+      const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
       const tileY = Math.floor(pointer.y / TILE_SIZE);
       if (this.currentBrush.kind === "tile") {
         this.isPointerDown = true;
@@ -155,17 +155,34 @@ export class EditorScene extends Phaser.Scene {
     fn();
   }
 
+  /** True when the pointer is over the grid's own screen area — not the
+   * Tools panel on the left, the Actions panel on the right, or the dead
+   * space below the grid (within its x-range) that exists now that the
+   * canvas is taller than GRID_ROWS tiles to fit those panels' content.
+   * Used to gate both painting and the hover highlight; doesn't check
+   * against `level.width`/`level.height` (narrower than the panel-to-panel
+   * gap for most levels) — `applyTileBrushAt`/`applyEntityBrushAt` already
+   * no-op on an out-of-bounds tile, same as before this layout existed. */
+  private isOverGrid(pointer: Phaser.Input.Pointer): boolean {
+    return (
+      pointer.x >= GRID_ORIGIN_X &&
+      pointer.x < GAME_WIDTH - RIGHT_PANEL_WIDTH &&
+      pointer.y >= 0 &&
+      pointer.y < GRID_ROWS * TILE_SIZE
+    );
+  }
+
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
-    if (pointer.y >= GRID_ROWS * TILE_SIZE) {
+    if (!this.isOverGrid(pointer)) {
       this.highlight.setPosition(-100, -100);
       return;
     }
-    const tileX = Math.floor(pointer.x / TILE_SIZE);
+    const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
     const tileY = Math.floor(pointer.y / TILE_SIZE);
     if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) {
       this.highlight.setPosition(-100, -100);
     } else {
-      this.highlight.setPosition(tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2);
+      this.highlight.setPosition(GRID_ORIGIN_X + tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2);
     }
     if (this.isPointerDown && this.currentBrush.kind === "tile") {
       this.applyTileBrushAt(tileX, tileY);
@@ -233,7 +250,7 @@ export class EditorScene extends Phaser.Scene {
       const key = groundTilesetKey(skin);
       return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 5)!;
     });
-    this.groundLayer = map.createBlankLayer("ground", tilesets, 0, 0)!;
+    this.groundLayer = map.createBlankLayer("ground", tilesets, GRID_ORIGIN_X, 0)!;
   }
 
   private undo(): void {

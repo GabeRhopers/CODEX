@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { TILE_SIZE } from "../config/gameConfig";
+import { GRID_ORIGIN_X, TILE_SIZE } from "../config/gameConfig";
 import {
   applyStompBounce,
   createGhostState,
@@ -153,13 +153,13 @@ export class PlayScene extends Phaser.Scene {
       const key = groundTilesetKey(skin);
       return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 5)!;
     });
-    this.groundLayer = map.createLayer(0, tilesets, 0, 0)!;
+    this.groundLayer = map.createLayer(0, tilesets, GRID_ORIGIN_X, 0)!;
     // Water/Lava aren't solid — standing in either is a hazard (see the
     // per-frame check in update()), not a floor to stand on.
     this.groundLayer.setCollisionByExclusion([-1, ...HAZARD_FRAMES]);
 
     const spawn = this.level.entities.find((e) => e.type === "player-spawn");
-    const spawnX = spawn ? spawn.x * TILE_SIZE + TILE_SIZE / 2 : TILE_SIZE;
+    const spawnX = spawn ? GRID_ORIGIN_X + spawn.x * TILE_SIZE + TILE_SIZE / 2 : GRID_ORIGIN_X + TILE_SIZE;
     // Bottom-anchored (see below), so Y is where the feet should land — the
     // top of the ground tile one row below the spawn marker's tile.
     const spawnY = spawn ? (spawn.y + 1) * TILE_SIZE : TILE_SIZE;
@@ -172,7 +172,7 @@ export class PlayScene extends Phaser.Scene {
 
     const goal = this.level.entities.find((e) => e.type === "goal");
     if (goal) {
-      const goalX = goal.x * TILE_SIZE + TILE_SIZE / 2;
+      const goalX = GRID_ORIGIN_X + goal.x * TILE_SIZE + TILE_SIZE / 2;
       const goalY = goal.y * TILE_SIZE + TILE_SIZE / 2;
       const goalSprite = this.add.image(goalX, goalY, "goal-portal").setDepth(5);
       this.tweens.add({
@@ -200,7 +200,7 @@ export class PlayScene extends Phaser.Scene {
     for (const type of ITEM_TYPES) {
       const entity = this.level.entities.find((e) => e.type === type);
       if (!entity) continue;
-      const x = entity.x * TILE_SIZE + TILE_SIZE / 2;
+      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
       const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
       // textureKey === entityType for every item brush (see Palette.ts).
       const icon = this.add.image(x, y, type).setDepth(5);
@@ -212,7 +212,7 @@ export class PlayScene extends Phaser.Scene {
 
     const chestEntity = this.level.entities.find((e) => e.type === "chest");
     if (chestEntity) {
-      const x = chestEntity.x * TILE_SIZE + TILE_SIZE / 2;
+      const x = GRID_ORIGIN_X + chestEntity.x * TILE_SIZE + TILE_SIZE / 2;
       const y = chestEntity.y * TILE_SIZE + TILE_SIZE / 2;
       const chestSprite = this.add.image(x, y, "chest").setDepth(5);
       const chestZone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
@@ -226,7 +226,7 @@ export class PlayScene extends Phaser.Scene {
     for (const type of DECOR_TYPES) {
       const entity = this.level.entities.find((e) => e.type === type);
       if (!entity) continue;
-      const x = entity.x * TILE_SIZE + TILE_SIZE / 2;
+      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
       const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
       this.add.image(x, y, type).setDepth(3);
     }

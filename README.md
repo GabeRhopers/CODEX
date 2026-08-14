@@ -41,7 +41,12 @@ what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming levels/worlds from the browser).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
-plus matching toolbar buttons.
+plus matching Actions-panel buttons. As of 2026-08-14 the editor's menus are
+two docked vertical panels flanking the grid — a **Tools** panel (category
+tabs + a 2-column palette grid) on the left, an **Actions** panel
+(Test Play/Save/Menu/Clear/Undo/Redo/Background/save-state) on the right —
+replacing the earlier single bottom toolbar strip (see "Editor layout:
+side panels" under Art).
 
 *Engineering note:* undo/redo keyboard shortcuts are guarded against a
 real, reproducible quirk found while testing in this project's headless
@@ -97,10 +102,10 @@ Open the dev server URL in a browser. Controls:
   advance to the next level, or **R** to replay the current one; winning
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
-- **Palette** (bottom of the editor): a row of **category tabs** — Blocks,
-  Markers, Enemies, Items, Decor — switches which row of brushes shows
-  below it; click a brush, then click/drag on the grid above to paint or
-  place. See "Categorized palette" under Art for why it's tabbed and "New
+- **Palette** (left "Tools" panel): a vertical stack of **category tabs** —
+  Blocks, Markers, Enemies, Items, Decor — switches which 2-column grid of
+  brushes shows below them; click a brush, then click/drag on the grid to
+  paint or place. See "Categorized palette" under Art for why it's tabbed and "New
   blocks & enemies" / "Items & hit-points" / "Second content pass" for
   what each brush does. Every brush is ordinary — not limited to any
   specific template — so any level, new or existing, can place any of
@@ -127,7 +132,8 @@ Open the dev server URL in a browser. Controls:
   id — every level you save is kept (see My Levels), not just the most
   recent one. As of 2026-08-14 you rarely need to click it: a persistent
   **● Saved / ● Unsaved changes / ● Saving… / ● Save failed** indicator
-  next to Redo (see "Autosave & save-state tracking" under Art) tracks
+  below the Background button in the right "Actions" panel (see "Autosave &
+  save-state tracking" under Art) tracks
   whether the level in memory matches storage, and edits autosave a couple
   seconds after you stop — Save itself still exists for "save right now
   and show a confirmation toast," and still mints the level's id on first
@@ -165,7 +171,7 @@ adapts. Three things make that true, all in `main.ts`/`index.html` unless
 noted:
 
 - **Scaling**: the game's internal resolution stays a fixed
-  `GAME_WIDTH`×`GAME_HEIGHT` (1500×476 — see `config/gameConfig.ts`; every
+  `GAME_WIDTH`×`GAME_HEIGHT` (1050×560 — see `config/gameConfig.ts`; every
   scene's layout math is untouched), but Phaser's Scale Manager runs in
   `FIT` + `CENTER_BOTH` mode, so it's letterboxed down (or up) to whatever
   viewport it's opened in, phone included, instead of getting clipped or
@@ -339,18 +345,20 @@ category). `src/editor/Palette.ts` now tags every brush with a
 renders one row of small category-tab buttons plus, below it, only the
 brushes belonging to whichever tab is active — the icon row stays a fixed,
 manageable width no matter how many brushes a future pass adds to any one
-category. Switching tabs rebuilds just that icon row; the selection
+category. Switching tabs rebuilds just that icon grid; the selection
 outline hides itself (without losing the underlying selection) when the
 selected brush's category isn't the one currently showing, and reappears
-when you tab back. The row of active-brush icons lives in a
+when you tab back. The grid of active-brush icons lives in a
 `Phaser.GameObjects.Container` — as a single entry in the scene's display
 list, a Container's *own* depth (not its children's) decides whether it
-draws in front of or behind sibling objects like the toolbar's background
-rectangle, so `EditorUI` sets it explicitly above that background; leaving
-it at the default depth was a real bug hit and fixed during this pass —
-every icon silently rendered a layer behind the opaque toolbar and never
-appeared, even though every other property (position, texture, visibility)
-was correct.
+draws in front of or behind sibling objects like the Tools panel's
+background rectangle, so `EditorUI` sets it explicitly above that
+background; leaving it at the default depth was a real bug hit and fixed
+during this pass — every icon silently rendered a layer behind the opaque
+panel and never appeared, even though every other property (position,
+texture, visibility) was correct. (As of the side-panel layout pass, the
+icon grid is 2 columns instead of 1 row — see "Editor layout: side panels"
+below — but the Container-depth mechanics are unchanged.)
 
 **Autosave & save-state tracking.** As of 2026-08-14, Save is no longer
 the only thing standing between an edit and losing it. `EditorScene`
@@ -461,18 +469,79 @@ original single image from when this system launched with just one).
 parallax pool's `BackgroundSceneId` — the field was reused, not
 re-added) stores the choice, `resolveStaticBackground` falls back to the
 default when unset or when it names an id no longer in the pool, and
-`EditorUI`'s **"Background: ▶"** button cycles through it exactly like
+`EditorUI`'s **"BG: ▶"** button cycles through it exactly like
 the dormant parallax version's button did (destroy + recreate the
 `StaticBackground` instance, since a different image can be a different
 aspect ratio) — count as an edit like any paint stroke, so it marks the
 level dirty and autosaves (see "Autosave & save-state tracking" above).
-One layout wrinkle worth knowing: that button's width changes with its
-label ("Meadow" vs "Sunny Valley" aren't the same length), so the
-save-state indicator that sits after it repositions itself
-(`repositionSaveStatusText`) every time the label changes rather than
-being laid out once — omitting that was a real bug hit while wiring this
-back up, and overlapped the two the first time "Sunny Valley" was
-selected.
+That button used to auto-size to its own label text ("Meadow" vs "Sunny
+Valley" aren't the same length), which meant the save-state indicator
+sitting after it had to reposition itself every time the label changed —
+omitting that was a real bug hit while wiring this back up, and the two
+overlapped the first time "Sunny Valley" was selected. The side-panel
+layout pass (see "Editor layout: side panels" below) eliminated that whole
+bug class rather than patching it further: every Actions-panel button,
+background picker included, is now a fixed width, so a longer label never
+pushes into whatever comes next.
+
+**Editor layout: side panels.** As of 2026-08-14 the editor's menus are
+two opaque, docked vertical panels flanking the grid, both rendered above
+the background (`StaticBackground`'s images sit at depth `-100`; the
+panels and everything on them sit at depth 20+) instead of one crowded
+row below it. `LEFT_PANEL_WIDTH` (Tools) and `RIGHT_PANEL_WIDTH` (Actions)
+in `config/gameConfig.ts` set both panels' widths and, together, how much
+wider `GAME_WIDTH` is than the bare tile grid; `GAME_HEIGHT` (560) is
+taller than the grid itself (`GRID_ROWS * TILE_SIZE` = 384) so the Tools
+panel's 5 category tabs plus a 2-column icon grid (Blocks, the widest
+category at 11 brushes, needs 6 rows) have room to fit without crowding —
+the dead space below the grid, within its own x-range, stays unpaintable
+and unpainted-into (see the masking note below).
+
+The left **Tools** panel stacks its 5 category tabs vertically, then
+renders whichever category is active as a 2-column icon grid
+(`EditorUI.iconPositions`) instead of the old single ever-widening row. A
+`groupEnd` brush (see `Palette.ts`) still closes out a visual cluster —
+Blocks' ground-skin/brick/bounce/hazard/erase groups — but where it used
+to add a horizontal gap in the 1-row layout, here it forces the *next*
+brush to start a new row, so those clusters still read as separate
+groups, just stacked instead of spread sideways. The right **Actions**
+panel stacks Test Play/Save/Menu/Clear/Undo/Redo/Background as
+fixed-width buttons, one per row, with the save-state indicator as its
+own row below them — see the static-background note above for the bug
+class fixing "fixed-width" like this was meant to close.
+
+Repositioning the grid itself (not just the menus around it) was the
+harder part: tile (0,0)'s pixel origin moved from the canvas's left edge
+to `GRID_ORIGIN_X` (= `LEFT_PANEL_WIDTH`), which meant touching every
+tile↔pixel conversion in the codebase — the ground tilemap layer's own
+origin, entity marker/enemy sprite placement, the hover highlight, and
+pointer-click→tile math (both directions) in `EditorScene`,
+`EntityPlacer.ts`, `EnemyBehaviors.ts`, and `PlayScene.ts`. The
+straightforward alternative — wrapping the grid's contents in one
+`Phaser.GameObjects.Container` and offsetting *that* — was deliberately
+not used: Arcade Physics bodies (which `PlayScene`'s player, zones, and
+enemies all rely on) don't reliably work when their GameObject is nested
+inside a Container, a known Phaser engine limitation, so explicit
+per-call-site offset arithmetic was used instead everywhere a pixel
+position is computed from a tile coordinate. `PlayScene` — which has no
+side panels of its own — deliberately gets the *same* `GRID_ORIGIN_X`
+offset as `EditorScene` purely so Test Play doesn't visually shift the
+level sideways when transitioning from Edit to Play and back.
+`StaticBackground`'s mask (see above) now clips to both the grid's width
+*and* its height (`GRID_ROWS * TILE_SIZE`, not the taller `GAME_HEIGHT`)
+— previously only width mattered, since the canvas ran flush to the
+grid's height; now that the canvas is taller to fit the side panels'
+content, an unmasked height would bleed the background into the dead
+space below the grid the same way an unmasked width used to bleed it into
+the margin beside it (see "That clip matters beyond looks" below for the
+original bug this pattern guards against).
+
+The through-line with every other UI pass in this project holds here too:
+`LEFT_PANEL_WIDTH`/`RIGHT_PANEL_WIDTH`/`GAME_HEIGHT`'s exact values were
+tuned empirically against real rendered screenshots (Playwright,
+calibrated via the canvas's `boundingBox()` scale) rather than derived
+from a formula — comfortable for the default 20x12 grid and every
+category's icon count, not the extreme case.
 
 The multi-scene parallax system below is still **dormant, not deleted**
 — every asset and every file it depends on (`ParallaxBackground.ts`,
@@ -757,7 +826,7 @@ src/
 │   ├── Palette.ts            data-driven brush definitions
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
 │   ├── EntityPlacer.ts       raw mutator for the entity layer
-│   ├── EditorUI.ts           toolbar + palette rendering
+│   ├── EditorUI.ts           left Tools panel (tabs + 2-col palette grid) + right Actions panel rendering
 │   ├── spriteFit.ts          scales any texture down to fit one tile
 │   └── commands/
 │       ├── Command.ts         execute()/undo() interface
@@ -776,7 +845,7 @@ src/
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling (speed-multiplier aware; exports isJumpPressed for double-jump edge detection)
 │   ├── PlayerStats.ts        pure score/hearts/buffs rules — collect*/registerHit/speedMultiplierAt/canDoubleJump (+ unit tests)
-│   ├── StaticBackground.ts   current no-pan background (cover-fit, masked to level width), textureKey passed in by the caller
+│   ├── StaticBackground.ts   current no-pan background (cover-fit, masked to the grid's exact width and height), textureKey passed in by the caller
 │   ├── ParallaxBackground.ts dormant two-layer fake-parallax background (zoomed Image, clamped pan by player X, masked to level width), keyed by the dormant BackgroundSceneId — see "Static background (current)" under Art
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 │   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
