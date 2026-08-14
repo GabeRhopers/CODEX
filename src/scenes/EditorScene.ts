@@ -6,15 +6,17 @@ import { HistoryStack } from "../editor/commands/HistoryStack";
 import { PaintTileCommand } from "../editor/commands/PaintTileCommand";
 import { PlaceEntityCommand } from "../editor/commands/PlaceEntityCommand";
 import { EditorUI } from "../editor/EditorUI";
+import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
 import { EntityPlacer } from "../editor/EntityPlacer";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
+import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
-import { nextStaticBackgroundId, resolveStaticBackground, staticBackgroundDef, StaticBackgroundId } from "../level/staticBackgrounds";
+import { backgroundDisplayLabel, nextStaticBackgroundId, resolveStaticBackground, StaticBackgroundId } from "../level/staticBackgrounds";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -51,7 +53,11 @@ export class EditorScene extends Phaser.Scene {
   private dirty = false;
   private autosaveTimer?: Phaser.Time.TimerEvent;
   private backgroundId!: StaticBackgroundId;
-  private background!: StaticBackground;
+  // Optional (not `!`), unlike every other field constructed synchronously
+  // in create() — a "custom" background's texture is registered async (see
+  // backgroundLoader.ts), so nothing can rely on this existing until that
+  // promise resolves.
+  private background?: StaticBackground;
   // A stable bound reference so it can be removed on shutdown — an inline
   // arrow passed straight to addEventListener can never be un-registered.
   private readonly handlePageHide = (): void => {
@@ -72,7 +78,13 @@ export class EditorScene extends Phaser.Scene {
     this.backgroundId = resolveStaticBackground(this.level);
     // Bounded to the level's actual placeable width, not the (often wider,
     // to fit the side panels) canvas — see StaticBackground's docstring.
-    this.background = new StaticBackground(this, this.level.width * TILE_SIZE, staticBackgroundDef(this.backgroundId).textureKey);
+    // Async because a "custom" background's texture isn't preloaded by
+    // BootScene like every built-in one is — see backgroundLoader.ts. The
+    // rest of create() doesn't wait on it; the image just pops in a frame
+    // later (imperceptibly so for the already-instant built-in case).
+    void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
+      this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
+    });
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
     }
@@ -83,7 +95,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
 
-    this.ui = new EditorUI(this, staticBackgroundDef(this.backgroundId).label, {
+    this.ui = new EditorUI(this, backgroundDisplayLabel(this.backgroundId), {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),
@@ -92,6 +104,7 @@ export class EditorScene extends Phaser.Scene {
       onUndo: () => this.undo(),
       onRedo: () => this.redo(),
       onCycleBackground: () => this.cycleBackground(),
+      onUploadBackground: (file) => this.uploadBackground(file),
     });
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
@@ -263,17 +276,55 @@ export class EditorScene extends Phaser.Scene {
     else this.ui.setStatus("Nothing to redo");
   }
 
-  /** Swaps the live preview immediately (destroy + recreate — the two
-   * images are different textures/aspect ratios, not just a re-scale) and
-   * stores the choice on the level so it round-trips through Save/Edit and
-   * Test Play. Counts as an edit like any other, so it autosaves same as
-   * a paint stroke. */
+  /** Cycles through the built-in pool only — see nextStaticBackgroundId's
+   * docstring for why a currently-custom background isn't part of that
+   * cycle. */
   private cycleBackground(): void {
-    this.backgroundId = nextStaticBackgroundId(this.backgroundId);
-    this.level.background = this.backgroundId;
-    this.background.destroy();
-    this.background = new StaticBackground(this, this.level.width * TILE_SIZE, staticBackgroundDef(this.backgroundId).textureKey);
-    this.ui.setBackgroundLabel(staticBackgroundDef(this.backgroundId).label);
+    this.applyBackground(nextStaticBackgroundId(this.backgroundId));
+  }
+
+  /** Called by EditorUI once its Upload BG file input has a file (see
+   * BackgroundFileInput) — downscales/re-encodes it, stores the result on
+   * the level, and swaps to it as a "custom" background. */
+  private uploadBackground(file: File): void {
+    readAndDownscaleImage(file).then(
+      (dataUrl) => {
+        this.level.customBackgroundData = dataUrl;
+        this.applyBackground("custom");
+        this.ui.setStatus("Background updated");
+      },
+      (err: unknown) => {
+        console.error("Background upload failed:", err);
+        this.ui.setStatus("Couldn't load that image");
+      },
+    );
+  }
+
+  /** Shared by cycling and uploading — swaps the live preview (destroy +
+   * recreate; two backgrounds can be different textures/aspect ratios, not
+   * just a re-scale), stores the choice on the level so it round-trips
+   * through Save/Edit and Test Play, and updates the Actions panel label.
+   * Counts as an edit like any other, so it autosaves same as a paint
+   * stroke. Callers are responsible for setting `level.customBackgroundData`
+   * themselves first when `id` is "custom" — this only resolves and swaps
+   * the texture.
+   *
+   * Destroys the old background's Image *before* resolving the new
+   * texture, not after — when swapping between two different "custom"
+   * uploads, resolveBackgroundTextureKey's texture-add necessarily
+   * `remove()`s the previous custom texture first (same shared key, see
+   * backgroundLoader.ts), which would leave the still-alive old Image
+   * pointing at a just-destroyed GPU texture for however long the new
+   * image takes to decode if that destroy happened afterward instead. */
+  private applyBackground(id: StaticBackgroundId): void {
+    this.backgroundId = id;
+    this.level.background = id;
+    this.background?.destroy();
+    this.background = undefined;
+    void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
+      this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
+    });
+    this.ui.setBackgroundLabel(backgroundDisplayLabel(id));
     this.markDirty();
   }
 

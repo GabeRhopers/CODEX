@@ -70,6 +70,13 @@ export interface LevelData {
    * default via `resolveStaticBackground`, rather than needing a
    * migration. */
   background?: StaticBackgroundId;
+  /** The level's own uploaded background image (a downscaled JPEG data
+   * URL — see editor/customBackgroundUpload.ts), present only when
+   * `background === "custom"`. Lives inline in the level's own JSON
+   * (rather than, say, a separate asset store) since localStorage is the
+   * only persistence this project has — see backgroundLoader.ts for how
+   * it becomes a Phaser texture at runtime. */
+  customBackgroundData?: string;
   createdAt: string;
   updatedAt: string;
   width: number;

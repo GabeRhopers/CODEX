@@ -153,12 +153,18 @@ Open the dev server URL in a browser. Controls:
   Snow's ground tile, for instance, used to only be reachable via the
   Frozen Cavern template or that cycle button, one skin at a time; now
   every skin is just an icon away, on every level, always.
-- **Background: ▶**: cycles the level's background through a small pool of
-  plain, non-parallax images (**Meadow**, the default, and **Sunny
-  Valley**) — unrelated to ground-block skin, previewing live; persists on
-  Save/autosave same as any other edit (see "Static background (current)"
-  under Art for why there's no pan/zoom, and for the dormant multi-scene
-  parallax picker this temporarily replaces).
+- **BG: ▶**: cycles the level's background through a small pool of plain,
+  non-parallax images (**Meadow**, the default, **Sunny Valley**,
+  **Frozen Volcano**, **Pirate Cove**) — unrelated to ground-block skin,
+  previewing live; persists on Save/autosave same as any other edit (see
+  "Static background (current)" under Art for why there's no pan/zoom, and
+  for the dormant multi-scene parallax picker this temporarily replaces).
+- **Upload BG**: picks your own image as the level's background instead of
+  one from the built-in pool — a one-way action, not part of the BG cycle
+  (picking it again just re-opens the file picker; cycling BG afterward
+  goes back to the built-in pool, starting from Meadow). See "Custom
+  uploaded backgrounds" under Art for the size/format handling and why the
+  button is a real, invisible file input rather than a Phaser-driven click.
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
   paint drag or single entity placement/move undoes as one step. Clear
   resets the undo history (undoing past a full level swap doesn't make
@@ -458,18 +464,21 @@ only so the call site in `PlayScene` doesn't need to change if/when
 parallax comes back.
 
 *Which* image is a level-level choice again, as of 2026-08-14 —
-`src/level/staticBackgrounds.ts` holds a small pool (`STATIC_BACKGROUNDS`)
-of two, each the project owner's own supplied reference image used at
-its full native content (unlike the dormant parallax pool's assets,
-neither is pre-cropped to any particular canvas, since a *cover* fit
-needs no pan slack): **Meadow** (`meadow`, the default —
-`DEFAULT_STATIC_BACKGROUND`) and **Sunny Valley** (`sunny-valley`, the
-original single image from when this system launched with just one).
-`LevelData.background` (typed `StaticBackgroundId`, not the dormant
-parallax pool's `BackgroundSceneId` — the field was reused, not
-re-added) stores the choice, `resolveStaticBackground` falls back to the
-default when unset or when it names an id no longer in the pool, and
-`EditorUI`'s **"BG: ▶"** button cycles through it exactly like
+`src/level/staticBackgrounds.ts` holds a small pool (`STATIC_BACKGROUNDS`,
+typed `BuiltinStaticBackgroundId`) of four, each the project owner's own
+supplied reference image used at its full native content (unlike the
+dormant parallax pool's assets, none are pre-cropped to any particular
+canvas, since a *cover* fit needs no pan slack): **Meadow** (`meadow`, the
+default — `DEFAULT_STATIC_BACKGROUND`), **Sunny Valley** (`sunny-valley`,
+the original single image from when this system launched with just one),
+**Frozen Volcano** (`frozen-volcano`), and **Pirate Cove** (`pirate-cove`).
+`LevelData.background` (typed `StaticBackgroundId` = `BuiltinStaticBackgroundId
+| "custom"` — see "Custom uploaded backgrounds" below for that last one —
+not the dormant parallax pool's `BackgroundSceneId`; the field was reused,
+not re-added) stores the choice, `resolveStaticBackground` falls back to
+the default when unset or when it names a built-in id no longer in the
+pool, and `EditorUI`'s **"BG: ▶"** button cycles through the built-in pool
+exactly like
 the dormant parallax version's button did (destroy + recreate the
 `StaticBackground` instance, since a different image can be a different
 aspect ratio) — count as an edit like any paint stroke, so it marks the
@@ -483,6 +492,71 @@ layout pass (see "Editor layout: side panels" below) eliminated that whole
 bug class rather than patching it further: every Actions-panel button,
 background picker included, is now a fixed width, so a longer label never
 pushes into whatever comes next.
+
+**Custom uploaded backgrounds.** As of 2026-08-14, the built-in pool isn't
+the only option — **Upload BG** lets you use your own image, stored
+per-level rather than shipped as a build asset. Two pieces make that
+work:
+
+- `src/editor/customBackgroundUpload.ts`'s `readAndDownscaleImage` reads
+  the picked `File`, downscales it (capped at 1600px on the longer side)
+  and re-encodes it as a JPEG (quality 0.85) via an offscreen `<canvas>`,
+  then stores the result as a data URL on `LevelData.customBackgroundData`
+  — inline in the level's own saved JSON, since localStorage is this
+  project's only persistence. Background art doesn't need per-pixel
+  fidelity the way tile/entity sprites do, so trading some quality for a
+  meaningfully smaller footprint (an unmodified multi-megapixel photo
+  would eat a real chunk of the ~5-10MB localStorage quota per level) is
+  an easy call.
+- `src/gameplay/backgroundLoader.ts`'s `resolveBackgroundTextureKey`
+  resolves which texture `StaticBackground` should render — instant for
+  every built-in (already preloaded by `BootScene`), or a genuine async
+  `scene.textures.addBase64` registration for a `"custom"` one, which
+  doesn't exist as a texture until the moment a level that references it
+  is actually opened (`EditorScene.create` / `PlayScene.create` both
+  await it before constructing their `StaticBackground`). It tracks which
+  data URL is currently loaded under the shared `bg-static-custom` key and
+  skips re-registering when it's unchanged — necessary, not just an
+  optimization: `scene.textures` is the *game's* TextureManager, shared
+  across every scene, and Test Play launches PlayScene on top of a merely
+  *paused* (not stopped) EditorScene, so both are alive with live
+  GameObjects referencing that key at once. Unconditionally
+  removing-and-recreating it on every call (PlayScene resolving the exact
+  same level, i.e. the exact same image, moments after EditorScene already
+  did) destroyed the GPU texture out from under EditorScene's still-alive
+  background `Image` — a real crash hit and fixed during this pass
+  (`Cannot read properties of null (reading 'glTexture')`), not a
+  hypothetical one. `EditorScene.applyBackground` also destroys the old
+  background's `Image` *before* resolving a new texture rather than after,
+  for the same underlying reason: swapping to a genuinely different custom
+  upload while one is already showing still goes through the
+  remove-then-recreate path, and that ordering guarantees nothing
+  references the old texture by the time it's removed.
+
+Opening the actual file picker turned out to need its own real DOM
+element rather than a Phaser button: browsers only open a native
+file-dialog from a call that's a direct, synchronous consequence of a
+trusted user gesture event, and Phaser's own pointer events are
+dispatched from its internal game loop — by the time a Phaser button's
+`pointerdown` handler runs, calling `.click()` on a hidden file input from
+inside it is no longer a direct descendant of the native click, so
+Chromium/Firefox silently no-op the dialog instead of opening it (an
+input still gets created and `.click()`-ed with no error — confirmed
+empirically while building this, not assumed). `src/editor/BackgroundFileInput.ts`
+sidesteps the problem instead of working around it: a real, always-present
+`<input type="file">`, invisible (`opacity: 0`) but positioned via CSS
+exactly on top of the Upload BG button (converting from EditorUI's game
+coordinates to real CSS pixels using the canvas's actual
+`getBoundingClientRect()`, which already reflects Phaser.Scale.FIT's
+scaling and CENTER_BOTH's letterboxing for free), so the browser sees an
+ordinary, unmediated click on a file input — Phaser's own rendering of
+that button is purely cosmetic, with `BackgroundFileInput`'s `mouseenter`/
+`mouseleave` listeners mirroring hover state onto it. It also hides itself
+(`display: none`) while EditorScene is paused for Test Play and un-hides
+on resume — without that, an invisible-but-still-clickable input pinned
+to that same screen region would sit right on top of PlayScene's own
+on-screen touch controls (same canvas, same coordinate space) and
+silently swallow taps meant for them.
 
 **Editor layout: side panels.** As of 2026-08-14 the editor's menus are
 two opaque, docked vertical panels flanking the grid, both rendered above
@@ -827,6 +901,8 @@ src/
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
 │   ├── EntityPlacer.ts       raw mutator for the entity layer
 │   ├── EditorUI.ts           left Tools panel (tabs + 2-col palette grid) + right Actions panel rendering
+│   ├── BackgroundFileInput.ts a real, invisible <input type=file> positioned over the Upload BG button — see "Custom uploaded backgrounds" under Art for why a Phaser-driven click can't open a real file picker
+│   ├── customBackgroundUpload.ts downscales/re-encodes a picked image file into a background-ready JPEG data URL
 │   ├── spriteFit.ts          scales any texture down to fit one tile
 │   └── commands/
 │       ├── Command.ts         execute()/undo() interface
@@ -840,12 +916,13 @@ src/
 │   ├── groundAutotile.ts     stored tile value → render frame in the combined multi-skin tileset (+ unit tests)
 │   ├── groundSkins.ts         per-skin color palettes + skin-keyed texture-key naming
 │   ├── backgrounds.ts         dormant: the parallax background-scene pool (unrelated to ground skin) + resolveBackground/nextBackgroundId
-│   ├── staticBackgrounds.ts   current: the static background pool (Meadow/Sunny Valley) + resolveStaticBackground/nextStaticBackgroundId — LevelData.background's actual type
+│   ├── staticBackgrounds.ts   current: the built-in static background pool (Meadow/Sunny Valley/Frozen Volcano/Pirate Cove) + resolveStaticBackground/nextStaticBackgroundId/backgroundDisplayLabel — LevelData.background's actual type ("custom" included)
 │   └── templateLevels.ts      6 hand-authored levels (TEMPLATE_LEVELS), served by TemplateBrowserScene
 ├── gameplay/
 │   ├── PlayerController.ts   run/jump input handling (speed-multiplier aware; exports isJumpPressed for double-jump edge detection)
 │   ├── PlayerStats.ts        pure score/hearts/buffs rules — collect*/registerHit/speedMultiplierAt/canDoubleJump (+ unit tests)
 │   ├── StaticBackground.ts   current no-pan background (cover-fit, masked to the grid's exact width and height), textureKey passed in by the caller
+│   ├── backgroundLoader.ts   resolves a level's background to a texture key — instant for built-ins, async scene.textures.addBase64 registration for a "custom" upload (see "Custom uploaded backgrounds" under Art)
 │   ├── ParallaxBackground.ts dormant two-layer fake-parallax background (zoomed Image, clamped pan by player X, masked to level width), keyed by the dormant BackgroundSceneId — see "Static background (current)" under Art
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 │   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
@@ -871,7 +948,9 @@ public/assets/
 └── backgrounds/
     ├── static/
     │   ├── meadow.png         the current default static background (the project owner's own reference image, used at native content/aspect — see "Static background (current)" under Art)
-    │   └── sunny-valley.png   the other static background in the pool, selectable via "Background: ▶"
+    │   ├── sunny-valley.png   another built-in static background, selectable via "BG: ▶"
+    │   ├── frozen-volcano.png another built-in static background, selectable via "BG: ▶"
+    │   └── pirate-cove.png    another built-in static background, selectable via "BG: ▶"
     └── scenes/               dormant: every parallax background-scene layer, all a fixed 2048x476: green-valley/pirate-cove/overgrown-ruins/snowy-peaks-{far,near}.png (original painted art, not Kenney-derived) — castle's "starfield" scene is procedural, generated at the same size
 
 scripts/

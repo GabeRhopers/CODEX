@@ -9,6 +9,7 @@ import {
   updateGhostPatrol,
 } from "../gameplay/EnemyBehaviors";
 import { createPlayerInput, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
+import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import {
   canDoubleJump,
@@ -32,7 +33,6 @@ import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, Wizar
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { EntityType, LevelData } from "../level/LevelSchema";
-import { resolveStaticBackground, staticBackgroundDef } from "../level/staticBackgrounds";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
@@ -113,7 +113,10 @@ export class PlayScene extends Phaser.Scene {
   private nextButton!: Phaser.GameObjects.Text;
   private stats: PlayerStats = createPlayerStats();
   private jumpWasDown = false;
-  private background!: StaticBackground;
+  // Optional (not `!`) — a "custom" background's texture is registered
+  // async (see backgroundLoader.ts), so update() must not assume this
+  // exists on the very first frame or two.
+  private background?: StaticBackground;
   private hud!: Phaser.GameObjects.Text;
   private trophy!: Phaser.GameObjects.Image;
 
@@ -135,9 +138,12 @@ export class PlayScene extends Phaser.Scene {
   create(): void {
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
     // Bounded to the level's actual width, not the (often wider, to fit the
-    // editor toolbar) canvas — see StaticBackground's docstring.
-    const backgroundTextureKey = staticBackgroundDef(resolveStaticBackground(this.level)).textureKey;
-    this.background = new StaticBackground(this, this.level.width * TILE_SIZE, backgroundTextureKey);
+    // editor's side panels) canvas — see StaticBackground's docstring.
+    // Async since a "custom" background's texture isn't preloaded by
+    // BootScene like every built-in one is — see backgroundLoader.ts.
+    void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
+      this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
+    });
 
     // One Tileset per ground skin, each claiming its own 5-wide gid range
     // (grass 0-4, desert 5-9, castle 10-14, snow 15-19 — see
@@ -352,7 +358,7 @@ export class PlayScene extends Phaser.Scene {
     updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time));
     updateWizardAnimation(this.player, this.wizardAnim, delta);
     this.updateBuffVisuals(time);
-    this.background.update(this.player.x);
+    this.background?.update(this.player.x);
 
     for (const enemy of this.enemies) {
       updateGhostPatrol(enemy.sprite, enemy.state, time);

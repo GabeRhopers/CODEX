@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { BackgroundFileInput } from "./BackgroundFileInput";
 import { GAME_HEIGHT, GAME_WIDTH, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
@@ -13,6 +14,7 @@ export interface EditorUICallbacks {
   onUndo: () => void;
   onRedo: () => void;
   onCycleBackground: () => void;
+  onUploadBackground: (file: File) => void;
 }
 
 const PANEL_DEPTH = 20;
@@ -137,6 +139,30 @@ export class EditorUI {
     );
     this.backgroundButton.bg.on("pointerover", () => this.backgroundButton.bg.setFillStyle(BUTTON_HOVER_COLOR));
     this.backgroundButton.bg.on("pointerout", () => this.backgroundButton.bg.setFillStyle(BUTTON_COLOR));
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
+    // Upload BG: rendered like every other Actions button, but a real,
+    // invisible HTML file input sits on top of it (see BackgroundFileInput
+    // for why) rather than this button opening a picker itself — a
+    // one-way action, not part of the "BG: ▶" cycle (see
+    // staticBackgrounds.ts's nextStaticBackgroundId docstring). The
+    // button's own pointerdown never actually fires from a real click
+    // (the overlay catches it first); BackgroundFileInput's hover
+    // callback drives this button's highlight instead.
+    const uploadButton = this.makeFixedWidthButton(
+      RIGHT_PANEL_X + PANEL_PADDING,
+      rowY,
+      RIGHT_BUTTON_WIDTH,
+      RIGHT_BUTTON_HEIGHT,
+      "Upload BG",
+      () => {},
+    );
+    new BackgroundFileInput(
+      scene,
+      { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
+      (file) => this.callbacks.onUploadBackground(file),
+      (hovering) => uploadButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
+    );
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
     // Plain text, not a button (no interactivity, no hover/click) — this is
