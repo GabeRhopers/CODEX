@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { VolumeControl } from "../audio/VolumeControl";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { TEMPLATE_LEVELS } from "../level/templateLevels";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
@@ -22,6 +23,7 @@ const GRID_TOP = 112;
 export class MenuScene extends Phaser.Scene {
   private levelStorage: StorageAdapter = new LocalStorageAdapter();
   private worldStorage: WorldStorageAdapter = new LocalWorldStorageAdapter();
+  private theme?: Phaser.Sound.BaseSound;
 
   constructor() {
     super("Menu");
@@ -116,6 +118,20 @@ export class MenuScene extends Phaser.Scene {
         })
         .setOrigin(0.5);
     }
+
+    // Plays only while the home page is up — stopped on shutdown below, not
+    // left running behind the editor/gameplay. Starting it before any user
+    // gesture has occurred is fine: Phaser's SoundManager queues playback
+    // until the browser's autoplay-unlock happens on the first click/tap,
+    // same as it would for any other sound.
+    this.theme = this.sound.add("menu-theme", { loop: true });
+    this.theme.play();
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.theme?.stop();
+      this.theme?.destroy();
+    });
+
+    new VolumeControl(this, cx - 90, row2Y + CARD_HEIGHT + 48, 180);
   }
 
   /** Returns the subtitle Text object so callers can swap in a live status

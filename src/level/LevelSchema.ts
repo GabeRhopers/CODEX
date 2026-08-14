@@ -77,6 +77,17 @@ export interface LevelData {
    * only persistence this project has — see backgroundLoader.ts for how
    * it becomes a Phaser texture at runtime. */
   customBackgroundData?: string;
+  /** The level's own uploaded background music, as a data URL — present
+   * only when the level has one (there's no built-in music pool the way
+   * there is for backgrounds; a level with neither field just plays
+   * silently). Lives inline in the level's own JSON for the same
+   * localStorage-is-the-only-persistence reason as customBackgroundData —
+   * see gameplay/musicLoader.ts for how it becomes a playable Phaser sound
+   * at runtime. `customMusicName` is the original filename, shown on
+   * EditorUI's music button so the level author can tell what's uploaded
+   * without re-opening the file picker. */
+  customMusicData?: string;
+  customMusicName?: string;
   createdAt: string;
   updatedAt: string;
   width: number;

@@ -1,7 +1,7 @@
 import Phaser from "phaser";
-import { BackgroundFileInput } from "./BackgroundFileInput";
 import { GAME_HEIGHT, GAME_WIDTH, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
+import { FileInputOverlay } from "./FileInputOverlay";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -15,6 +15,8 @@ export interface EditorUICallbacks {
   onRedo: () => void;
   onCycleBackground: () => void;
   onUploadBackground: (file: File) => void;
+  onUploadMusic: (file: File) => void;
+  onClearMusic: () => void;
 }
 
 const PANEL_DEPTH = 20;
@@ -72,6 +74,7 @@ export class EditorUI {
   // fixed row in the Actions panel, right after the button stack.
   private saveStatusText: Phaser.GameObjects.Text;
   private backgroundButton!: PanelButton;
+  private musicButton!: PanelButton;
   private iconGrid: Phaser.GameObjects.Container;
   private tabButtons = new Map<BrushCategory, PanelButton>();
   private activeCategory: BrushCategory;
@@ -80,6 +83,7 @@ export class EditorUI {
   constructor(
     private readonly scene: Phaser.Scene,
     initialBackgroundLabel: string,
+    initialMusicLabel: string | null,
     private readonly callbacks: EditorUICallbacks,
   ) {
     this.activeCategory = PALETTE[0].category;
@@ -142,14 +146,14 @@ export class EditorUI {
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
     // Upload BG: rendered like every other Actions button, but a real,
-    // invisible HTML file input sits on top of it (see BackgroundFileInput
+    // invisible HTML file input sits on top of it (see FileInputOverlay
     // for why) rather than this button opening a picker itself — a
     // one-way action, not part of the "BG: ▶" cycle (see
     // staticBackgrounds.ts's nextStaticBackgroundId docstring). The
     // button's own pointerdown never actually fires from a real click
-    // (the overlay catches it first); BackgroundFileInput's hover
+    // (the overlay catches it first); FileInputOverlay's hover
     // callback drives this button's highlight instead.
-    const uploadButton = this.makeFixedWidthButton(
+    const uploadBgButton = this.makeFixedWidthButton(
       RIGHT_PANEL_X + PANEL_PADDING,
       rowY,
       RIGHT_BUTTON_WIDTH,
@@ -157,11 +161,46 @@ export class EditorUI {
       "Upload BG",
       () => {},
     );
-    new BackgroundFileInput(
+    new FileInputOverlay(
       scene,
       { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
+      "image/*",
       (file) => this.callbacks.onUploadBackground(file),
-      (hovering) => uploadButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
+      (hovering) => uploadBgButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
+    );
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
+    // Music: <name/None> — clicking it clears the level's music if one is
+    // set (a no-op, via EditorScene's own guard, if none is); there's no
+    // pool to cycle through the way there is for backgrounds, just "has
+    // one" or "doesn't".
+    this.musicButton = this.makeFixedWidthButton(
+      RIGHT_PANEL_X + PANEL_PADDING,
+      rowY,
+      RIGHT_BUTTON_WIDTH,
+      RIGHT_BUTTON_HEIGHT,
+      this.musicLabelText(initialMusicLabel),
+      () => this.callbacks.onClearMusic(),
+    );
+    this.musicButton.bg.on("pointerover", () => this.musicButton.bg.setFillStyle(BUTTON_HOVER_COLOR));
+    this.musicButton.bg.on("pointerout", () => this.musicButton.bg.setFillStyle(BUTTON_COLOR));
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
+    // Upload Music: same real-file-input-overlay trick as Upload BG.
+    const uploadMusicButton = this.makeFixedWidthButton(
+      RIGHT_PANEL_X + PANEL_PADDING,
+      rowY,
+      RIGHT_BUTTON_WIDTH,
+      RIGHT_BUTTON_HEIGHT,
+      "Upload Music",
+      () => {},
+    );
+    new FileInputOverlay(
+      scene,
+      { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
+      "audio/*",
+      (file) => this.callbacks.onUploadMusic(file),
+      (hovering) => uploadMusicButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
     );
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
@@ -319,5 +358,16 @@ export class EditorUI {
    * anything else on the panel. */
   setBackgroundLabel(label: string): void {
     this.backgroundButton.label.setText(this.backgroundLabelText(label));
+  }
+
+  private musicLabelText(name: string | null): string {
+    return `Music: ${name ?? "None"}`;
+  }
+
+  /** Called by EditorScene after an upload or a clear — `name` is the
+   * uploaded file's own name (LevelData.customMusicName), or `null` when
+   * the level has no music. */
+  setMusicLabel(name: string | null): void {
+    this.musicButton.label.setText(this.musicLabelText(name));
   }
 }

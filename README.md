@@ -165,6 +165,13 @@ Open the dev server URL in a browser. Controls:
   goes back to the built-in pool, starting from Meadow). See "Custom
   uploaded backgrounds" under Art for the size/format handling and why the
   button is a real, invisible file input rather than a Phaser-driven click.
+- **Music: \<name/None\>** / **Upload Music**: a level can have its own
+  uploaded soundtrack, played during Test Play and actual Play (not while
+  painting) — **Upload Music** picks the file, **Music: \<name\>** removes
+  it (clicking it does nothing when none is set). See "Music" under Art
+  for the size cap, why audio can't be downscaled the way a background
+  image is, and the shared mute/volume control (also on the home page)
+  that affects whichever one is currently playing.
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
   paint drag or single entity placement/move undoes as one step. Clear
   resets the undo history (undoing past a full level swap doesn't make
@@ -542,7 +549,7 @@ dispatched from its internal game loop — by the time a Phaser button's
 inside it is no longer a direct descendant of the native click, so
 Chromium/Firefox silently no-op the dialog instead of opening it (an
 input still gets created and `.click()`-ed with no error — confirmed
-empirically while building this, not assumed). `src/editor/BackgroundFileInput.ts`
+empirically while building this, not assumed). `src/editor/FileInputOverlay.ts`
 sidesteps the problem instead of working around it: a real, always-present
 `<input type="file">`, invisible (`opacity: 0`) but positioned via CSS
 exactly on top of the Upload BG button (converting from EditorUI's game
@@ -550,13 +557,67 @@ coordinates to real CSS pixels using the canvas's actual
 `getBoundingClientRect()`, which already reflects Phaser.Scale.FIT's
 scaling and CENTER_BOTH's letterboxing for free), so the browser sees an
 ordinary, unmediated click on a file input — Phaser's own rendering of
-that button is purely cosmetic, with `BackgroundFileInput`'s `mouseenter`/
-`mouseleave` listeners mirroring hover state onto it. It also hides itself
+that button is purely cosmetic, with `FileInputOverlay`'s `mouseenter`/
+`mouseleave` listeners mirroring hover state onto it (reused as-is for
+Upload Music's own file input — see "Music" under Art — since the same
+click-can't-open-from-Phaser problem applies to any file picker, not just
+this one). It also hides itself
 (`display: none`) while EditorScene is paused for Test Play and un-hides
 on resume — without that, an invisible-but-still-clickable input pinned
 to that same screen region would sit right on top of PlayScene's own
 on-screen touch controls (same canvas, same coordinate space) and
 silently swallow taps meant for them.
+
+**Music.** As of 2026-08-14, the home page has background music, and any
+level can have its own uploaded soundtrack — both controlled by the same
+mute-toggle + draggable-volume-slider widget, `src/audio/VolumeControl.ts`.
+
+- **Home page**: `MenuScene` plays `menu-theme.mp3` (the project owner's
+  own supplied track, preloaded by `BootScene` like any other built-in
+  asset) on a loop the whole time the home page is up, stopping (not just
+  pausing) when you navigate away and starting fresh each time you come
+  back — it's the home page's ambiance, not a whole-app soundtrack that
+  keeps playing behind the editor or gameplay.
+- **Per-level music**: `EditorUI`'s **Music: \<name/None\>** button and
+  **Upload Music** button work exactly like their Background counterparts
+  (see above) — **Upload Music** is a `FileInputOverlay` (`accept="audio/*"`)
+  that stores the picked file inline on the level as
+  `LevelData.customMusicData` (a data URL) and `customMusicName` (for
+  display); clicking **Music: \<name\>** removes it (a no-op, not even a
+  status toast, when there's nothing set — see EditorScene's `clearMusic`
+  guard). Unlike a background image, audio can't be meaningfully
+  downscaled client-side without a real transcoder, so
+  `src/editor/musicUpload.ts` doesn't try — it just refuses anything over
+  4MB outright (`MusicTooLargeError`, surfaced as a clear status message)
+  rather than accepting a file that's likely doomed to blow the level's
+  localStorage budget once base64-encoded anyway. The editor itself never
+  plays a level's music while you're painting — only Test Play and actual
+  Play do, via `src/gameplay/musicLoader.ts`'s `resolveLevelMusicKey`,
+  which mirrors `backgroundLoader.ts`'s pattern (register into the
+  shared, game-wide `scene.cache.audio` at runtime, since a level's own
+  upload can't be preloaded by `BootScene` the way `menu-theme.mp3` is;
+  skip re-registering when the exact same data is already cached). A
+  level with no uploaded music just plays silently — there's no built-in
+  fallback track the way there is for backgrounds. `PlayScene` stops and
+  destroys its `Sound` object on scene shutdown (Esc, win, lose, restart),
+  since Sound objects aren't scene-scoped in Phaser any more than textures
+  are — without that explicit cleanup, a level's music would keep playing
+  after leaving it.
+- **Mute/volume**: a single global setting (`src/audio/audioPrefs.ts`,
+  persisted to localStorage as `mario-maker:audio-prefs`), applied once at
+  boot to `scene.sound.volume`/`scene.sound.mute` — the *game's* shared
+  SoundManager, not a per-scene one — so it affects whichever sound is
+  currently playing (the home theme or a level's music) without any
+  scene needing to know or care which one that is. `VolumeControl`
+  instances in `MenuScene` and `PlayScene` both read and write those same
+  two properties directly, so they always agree with each other and with
+  what's persisted, no separate state-syncing needed. The slider is a
+  plain Rectangle track + a draggable Arc thumb (pointerdown starts a
+  drag, tracked via the scene's own `pointermove`/`pointerup` so a fast
+  drag that briefly leaves the track's exact bounds doesn't drop it) —
+  dragging it up while muted also un-mutes, matching most OS/app volume
+  sliders, so a muted player can't drag to 100% and hear nothing with no
+  visual explanation why.
 
 **Editor layout: side panels.** As of 2026-08-14 the editor's menus are
 two opaque, docked vertical panels flanking the grid, both rendered above
@@ -901,8 +962,9 @@ src/
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
 │   ├── EntityPlacer.ts       raw mutator for the entity layer
 │   ├── EditorUI.ts           left Tools panel (tabs + 2-col palette grid) + right Actions panel rendering
-│   ├── BackgroundFileInput.ts a real, invisible <input type=file> positioned over the Upload BG button — see "Custom uploaded backgrounds" under Art for why a Phaser-driven click can't open a real file picker
+│   ├── FileInputOverlay.ts   a real, invisible <input type=file> positioned over an EditorUI upload button (Upload BG or Upload Music) — see "Custom uploaded backgrounds" under Art for why a Phaser-driven click can't open a real file picker
 │   ├── customBackgroundUpload.ts downscales/re-encodes a picked image file into a background-ready JPEG data URL
+│   ├── musicUpload.ts        reads a picked audio file as-is (no re-encoding possible), rejecting anything over 4MB — see "Music" under Art
 │   ├── spriteFit.ts          scales any texture down to fit one tile
 │   └── commands/
 │       ├── Command.ts         execute()/undo() interface
@@ -911,7 +973,7 @@ src/
 │       ├── CompositeCommand.ts batches a whole drag into one undo step
 │       └── HistoryStack.ts    undo/redo stacks (+ unit tests)
 ├── level/
-│   ├── LevelSchema.ts        LevelData / LevelEntity types
+│   ├── LevelSchema.ts        LevelData / LevelEntity types (customBackgroundData/customMusicData/customMusicName included)
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
 │   ├── groundAutotile.ts     stored tile value → render frame in the combined multi-skin tileset (+ unit tests)
 │   ├── groundSkins.ts         per-skin color palettes + skin-keyed texture-key naming
@@ -923,9 +985,13 @@ src/
 │   ├── PlayerStats.ts        pure score/hearts/buffs rules — collect*/registerHit/speedMultiplierAt/canDoubleJump (+ unit tests)
 │   ├── StaticBackground.ts   current no-pan background (cover-fit, masked to the grid's exact width and height), textureKey passed in by the caller
 │   ├── backgroundLoader.ts   resolves a level's background to a texture key — instant for built-ins, async scene.textures.addBase64 registration for a "custom" upload (see "Custom uploaded backgrounds" under Art)
+│   ├── musicLoader.ts        resolves a level's uploaded music to a Phaser audio cache key, or null for silence — async scene.load.audio registration, same pattern as backgroundLoader.ts (see "Music" under Art)
 │   ├── ParallaxBackground.ts dormant two-layer fake-parallax background (zoomed Image, clamped pan by player X, masked to level width), keyed by the dormant BackgroundSceneId — see "Static background (current)" under Art
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
 │   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
+├── audio/
+│   ├── audioPrefs.ts         {volume, muted} — load/save to localStorage, applied once to scene.sound (the game-wide SoundManager) at boot
+│   └── VolumeControl.ts      mute-toggle + draggable-volume-slider widget, used identically by MenuScene (home-page theme) and PlayScene (a level's music) — see "Music" under Art
 ├── persistence/
 │   ├── StorageAdapter.ts       interface (list/save/load/remove)
 │   ├── LocalStorageAdapter.ts
@@ -945,6 +1011,8 @@ public/assets/
 ├── tiles/                    tileset-{grass,desert,snow}.png, icon-*.png (Kenney, derived — see scripts/)
 ├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
 ├── decor/                    bush/tree/cactus/lamp/cloud/snowman/sprout/mushroom/rocks.png — purely cosmetic (Kenney, derived)
+├── audio/
+│   └── menu-theme.mp3        the home page's background music (the project owner's own supplied track) — see "Music" under Art. A level's own uploaded music isn't here — it lives inline in that level's saved JSON, not as a build asset.
 └── backgrounds/
     ├── static/
     │   ├── meadow.png         the current default static background (the project owner's own reference image, used at native content/aspect — see "Static background (current)" under Art)

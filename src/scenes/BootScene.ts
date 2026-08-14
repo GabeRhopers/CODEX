@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { generateTextures } from "../assets/generateTextures";
+import { applyAudioPrefs } from "../audio/audioPrefs";
 import { WIZARD_FRAME_KEYS } from "../gameplay/wizardAnimation";
 import { groundIconKey, groundTilesetKey } from "../level/groundSkins";
 import { STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
@@ -65,6 +66,12 @@ export class BootScene extends Phaser.Scene {
       this.load.image(bg.textureKey, `assets/backgrounds/static/${bg.id}.png`);
     }
 
+    // Home-page background music (see MenuScene) — the project owner's own
+    // supplied track. A level's own uploaded music (see EditorUI's Upload
+    // Music button) isn't preloaded here since it doesn't exist until a
+    // level that has one is actually opened — see gameplay/musicLoader.ts.
+    this.load.audio("menu-theme", "assets/audio/menu-theme.mp3");
+
     // --- Dormant: the multi-scene parallax background pool ---
     // Not preloaded right now (no reason to spend load time on textures
     // nothing displays), but deliberately left in place, unmodified, for
@@ -86,6 +93,11 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     generateTextures(this);
+    // scene.sound is the *game's* SoundManager, shared by every scene —
+    // applying persisted volume/mute here, once, before anything ever
+    // plays, means every later scene (Menu's theme, PlayScene's level
+    // music) just inherits it rather than re-reading localStorage itself.
+    applyAudioPrefs(this.sound);
     this.scene.start("Menu");
   }
 }

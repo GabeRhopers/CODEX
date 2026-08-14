@@ -8,6 +8,7 @@ import { PlaceEntityCommand } from "../editor/commands/PlaceEntityCommand";
 import { EditorUI } from "../editor/EditorUI";
 import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
 import { EntityPlacer } from "../editor/EntityPlacer";
+import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
@@ -95,7 +96,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
 
-    this.ui = new EditorUI(this, backgroundDisplayLabel(this.backgroundId), {
+    this.ui = new EditorUI(this, backgroundDisplayLabel(this.backgroundId), this.level.customMusicName ?? null, {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),
@@ -105,6 +106,8 @@ export class EditorScene extends Phaser.Scene {
       onRedo: () => this.redo(),
       onCycleBackground: () => this.cycleBackground(),
       onUploadBackground: (file) => this.uploadBackground(file),
+      onUploadMusic: (file) => this.uploadMusic(file),
+      onClearMusic: () => this.clearMusic(),
     });
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
@@ -284,7 +287,7 @@ export class EditorScene extends Phaser.Scene {
   }
 
   /** Called by EditorUI once its Upload BG file input has a file (see
-   * BackgroundFileInput) — downscales/re-encodes it, stores the result on
+   * FileInputOverlay) — downscales/re-encodes it, stores the result on
    * the level, and swaps to it as a "custom" background. */
   private uploadBackground(file: File): void {
     readAndDownscaleImage(file).then(
@@ -298,6 +301,41 @@ export class EditorScene extends Phaser.Scene {
         this.ui.setStatus("Couldn't load that image");
       },
     );
+  }
+
+  /** Called by EditorUI once its Upload Music file input has a file — no
+   * re-encoding is possible for audio the way there is for images, so
+   * this just validates size (see musicUpload.ts's MusicTooLargeError)
+   * and stores the file as-is. */
+  private uploadMusic(file: File): void {
+    readAudioAsDataUrl(file).then(
+      (dataUrl) => {
+        this.level.customMusicData = dataUrl;
+        this.level.customMusicName = file.name;
+        this.ui.setMusicLabel(file.name);
+        this.markDirty();
+        this.ui.setStatus("Music updated");
+      },
+      (err: unknown) => {
+        if (err instanceof MusicTooLargeError) {
+          this.ui.setStatus(err.message);
+        } else {
+          console.error("Music upload failed:", err);
+          this.ui.setStatus("Couldn't load that file");
+        }
+      },
+    );
+  }
+
+  /** Called by the Music button itself — a no-op (not even a status
+   * toast) when the level has no music, since there's nothing to remove. */
+  private clearMusic(): void {
+    if (!this.level.customMusicData) return;
+    this.level.customMusicData = undefined;
+    this.level.customMusicName = undefined;
+    this.ui.setMusicLabel(null);
+    this.markDirty();
+    this.ui.setStatus("Music removed");
   }
 
   /** Shared by cycling and uploading — swaps the live preview (destroy +

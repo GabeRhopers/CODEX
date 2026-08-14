@@ -9,9 +9,10 @@ export interface GameRect {
 
 /**
  * A real, always-present `<input type="file">`, positioned via CSS
- * (not Phaser) exactly on top of EditorUI's "Upload BG" button — invisible
+ * (not Phaser) exactly on top of an EditorUI button — invisible
  * (`opacity: 0`) but the actual click target, rather than something a
- * Phaser button handler opens by calling `.click()` on it.
+ * Phaser button handler opens by calling `.click()` on it. Used by both
+ * the Upload BG and Upload Music buttons (`accept` picks which).
  *
  * That distinction isn't cosmetic: browsers only open a real file-picker
  * dialog from a call that's a direct, synchronous consequence of a
@@ -34,19 +35,20 @@ export interface GameRect {
  * plain CSS on the canvas element, so `getBoundingClientRect()` reflects
  * them for free).
  */
-export class BackgroundFileInput {
+export class FileInputOverlay {
   private readonly input: HTMLInputElement;
   private readonly boundReposition = (): void => this.reposition();
 
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly rect: GameRect,
+    accept: string,
     onFile: (file: File) => void,
     onHoverChange: (hovering: boolean) => void,
   ) {
     this.input = document.createElement("input");
     this.input.type = "file";
-    this.input.accept = "image/*";
+    this.input.accept = accept;
     this.input.style.position = "fixed";
     this.input.style.opacity = "0";
     this.input.style.cursor = "pointer";

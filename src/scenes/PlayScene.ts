@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { VolumeControl } from "../audio/VolumeControl";
 import { GRID_ORIGIN_X, TILE_SIZE } from "../config/gameConfig";
 import {
   applyStompBounce,
@@ -10,6 +11,7 @@ import {
 } from "../gameplay/EnemyBehaviors";
 import { createPlayerInput, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
+import { resolveLevelMusicKey } from "../gameplay/musicLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import {
   canDoubleJump,
@@ -117,6 +119,9 @@ export class PlayScene extends Phaser.Scene {
   // async (see backgroundLoader.ts), so update() must not assume this
   // exists on the very first frame or two.
   private background?: StaticBackground;
+  // Optional — most levels have no uploaded music at all (see
+  // musicLoader.ts), and even when one does, loading it is async.
+  private music?: Phaser.Sound.BaseSound;
   private hud!: Phaser.GameObjects.Text;
   private trophy!: Phaser.GameObjects.Image;
 
@@ -143,6 +148,23 @@ export class PlayScene extends Phaser.Scene {
     // BootScene like every built-in one is — see backgroundLoader.ts.
     void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
       this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
+    });
+
+    // A level with no uploaded music (the common case — there's no
+    // built-in fallback track the way there is for backgrounds) resolves
+    // to null and this is simply a no-op.
+    void resolveLevelMusicKey(this, this.level).then((musicKey) => {
+      if (!musicKey) return;
+      this.music = this.sound.add(musicKey, { loop: true });
+      this.music.play();
+    });
+    // Sound objects aren't scene-scoped in Phaser (scene.sound is the
+    // game's shared SoundManager), so without this explicit stop+destroy
+    // a level's music would keep playing after Esc/win/lose returns to
+    // the editor or another level starts.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.music?.stop();
+      this.music?.destroy();
     });
 
     // One Tileset per ground skin, each claiming its own 5-wide gid range
@@ -305,6 +327,8 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-ESC", () => this.backToEditor());
     this.input.keyboard?.on("keydown-R", () => this.restart());
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
+
+    new VolumeControl(this, this.scale.width / 2 - 90, 20, 180, 30);
   }
 
   /** "Editor"/"Worlds"/"Templates" for the top-left back button; see
