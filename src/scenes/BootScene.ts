@@ -17,7 +17,7 @@ export class BootScene extends Phaser.Scene {
       this.load.image(key, `assets/wizard/${key.replace("wizard-", "")}.png`);
     }
     this.load.image("enemy-ghost-pillow", "assets/entities/ghost-pillow.png");
-    this.load.image("goal-portal", "assets/entities/dream-portal.png");
+    this.load.image("goal-portal", "assets/entities/caged-sheep.png");
 
     // Real Kenney "Pixel Platformer" (CC0) art for the grass/desert ground
     // themes, the brick/bounce blocks, and the bat/spike-crawler enemies —

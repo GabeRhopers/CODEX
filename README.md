@@ -34,8 +34,9 @@ a level → Test Play → win/lose → Save → Menu → My Levels → Edit
 round-trips identically, every paint/erase/entity edit is undoable — a
 whole paint drag reverts as one step, not tile by tile — and a level can
 include a patrolling ghost-pillow enemy (stomp it from above to kill it,
-touch it any other way and you lose) plus a dream-cloud portal as the
-goal. See the plan doc §9.1 for the exact MVP scope and §9.2/§9.3 for
+touch it any other way and you lose) plus a goal marker (currently a
+caged sheep — see "Goal art" under Art) to reach. See the plan doc §9.1
+for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming levels/worlds from the browser).
 
@@ -186,17 +187,36 @@ rather than needing mirrored art. The physics collision body is a fixed
 size, re-centered under whichever frame is showing, so hitbox behavior
 never changes with the animation.
 
-**Ghost-pillow enemy & dream-cloud portal:** original art drawn to match
-the wizard's style — rounded shapes, thick navy ink outlines, flat pastel
-fills with a little shading, no external references. Built with Pillow
-(the build sandbox can reach PyPI even though it can't reach asset sites):
-clean vector shapes at high resolution (rounded rects, overlapping
-ellipses, a two-pass "draw it twice, slightly bigger underneath" outline
-trick), then LANCZOS-downscaled to final size — the same finishing
-pipeline used on the wizard frames, so all three characters read as one
-consistent family. See `public/assets/entities/*.png` and
-`src/gameplay/EnemyBehaviors.ts` (patrol + bob + the stomp-from-above
+**Ghost-pillow enemy:** original art drawn to match the wizard's style —
+rounded shapes, thick navy ink outlines, flat pastel fills with a little
+shading, no external references. Built with Pillow (the build sandbox
+can reach PyPI even though it can't reach asset sites): clean vector
+shapes at high resolution (rounded rects, overlapping ellipses, a
+two-pass "draw it twice, slightly bigger underneath" outline trick),
+then LANCZOS-downscaled to final size — the same finishing pipeline used
+on the wizard frames, so the wizard and ghost-pillow read as one
+consistent hand-drawn family. See `public/assets/entities/ghost-pillow.png`
+and `src/gameplay/EnemyBehaviors.ts` (patrol + bob + the stomp-from-above
 rule, unit-tested in `EnemyBehaviors.test.ts`).
+
+**Goal art.** The goal marker was originally a hand-drawn "dream-cloud
+portal" in that same wizard-family style. As of 2026-08-14 it's a
+project-owner-supplied image instead — a caged sheep
+(`public/assets/entities/caged-sheep.png`, texture key `goal-portal`,
+unchanged despite no longer being a portal — nothing else references the
+filename, so nothing beyond `BootScene.preload`'s one `load.image` line
+needed to change). Processed the same way as the static background image
+(see "Static background (current)" above): flood-filled from the
+source's white background to transparent (`PIL.ImageDraw.floodfill`,
+seeded off a corner, so the sheep's own white wool — not border-connected
+to the background — stays intact), cropped to the content's bounding
+box, then resized to a 48px-tall PNG with alpha premultiplied before a
+LANCZOS downscale and unpremultiplied after (plain RGBA resize would
+otherwise fringe dark or light halos at the transparent edge). Sized to
+land in the same visual range as the enemy/goal illustrations it sits
+next to (ghost-pillow is 40x40; this is 43x48) — `PlayScene` renders it
+at that native pixel size with no additional scaling beyond its existing
+idle pulse tween, same as before.
 
 **Ground tiles merge with their neighbors.** Ground tiles have no border,
 and which of two dirt/grass frames a cell renders as (grass-capped
@@ -454,9 +474,9 @@ pines). The fifth, `starfield` (the procedural castle night sky,
 generated directly at 2048x476 by `drawStarfield` in
 `src/assets/generateTextures.ts`), is the only one not painted — Pillow
 was used for the four painted scenes the same way it was for the
-ghost-pillow and dream-cloud portal art (vector shapes: gradients,
-circles, seeded random placement), just applied to landscape scenes
-instead of a character sprite.
+ghost-pillow and the original hand-drawn goal art (vector shapes:
+gradients, circles, seeded random placement), just applied to landscape
+scenes instead of a character sprite.
 
 The four painted scenes lead the pool (in front of `starfield`, which
 used to be first) and `green-valley` is the overall default —
@@ -591,10 +611,13 @@ restriction entirely. It now provides:
   `snowy-peaks`) plus `starfield` (procedural, for the same
   no-matching-art reason as the castle ground tileset) — see "Parallax
   background & background scenes" above.
-- The **wizard, ghost-pillow, and dream-cloud portal stay hand-drawn** —
-  they're deliberate, already-validated custom art in a specific shared
-  style (see below), not placeholders, so swapping the asset pack doesn't
-  touch them.
+- The **wizard and ghost-pillow stay hand-drawn** — they're deliberate,
+  already-validated custom art in a specific shared style (see below),
+  not placeholders, so swapping the asset pack doesn't touch them. The
+  goal marker used to be part of that same hand-drawn family too (a
+  "dream-cloud portal") but is now a separately-sourced image — see
+  "Goal art" above — so it's independent of both the Kenney pack and the
+  wizard-style hand-drawn set.
 
 The pack's tiles are natively 18px (24px for characters), not this
 project's 32px (40px for entities), so `scripts/prepare-kenney-assets.py`
@@ -691,7 +714,7 @@ src/
 
 public/assets/
 ├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png (hand-drawn)
-├── entities/                 ghost-pillow.png, dream-portal.png (hand-drawn); bat.png, bat-perched.png, spike-crawler.png, golem.png, trophy.png, chest.png (Kenney)
+├── entities/                 ghost-pillow.png (hand-drawn); caged-sheep.png (goal art, project-owner-supplied — see "Goal art" under Art); bat.png, bat-perched.png, spike-crawler.png, golem.png, trophy.png, chest.png (Kenney)
 ├── tiles/                    tileset-{grass,desert,snow}.png, icon-*.png (Kenney, derived — see scripts/)
 ├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
 ├── decor/                    bush/tree/cactus/lamp/cloud/snowman/sprout/mushroom/rocks.png — purely cosmetic (Kenney, derived)

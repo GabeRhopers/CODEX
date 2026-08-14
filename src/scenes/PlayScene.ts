@@ -40,7 +40,7 @@ const BOUNCE_VELOCITY_Y = -650;
 /** Every item brush's textureKey equals its EntityType (see Palette.ts), so
  * spawning just needs the type list — no separate texture lookup like
  * ENEMY_DEFS needs. Items are collected via a static overlap zone, same
- * pattern as the goal portal below. */
+ * pattern as the goal below. */
 const ITEM_TYPES: EntityType[] = ["item-coin", "item-heart", "item-speed", "item-feather", "item-shield", "item-key"];
 
 /** Purely cosmetic — spawned as plain static images with no collision or
@@ -172,9 +172,9 @@ export class PlayScene extends Phaser.Scene {
     if (goal) {
       const goalX = goal.x * TILE_SIZE + TILE_SIZE / 2;
       const goalY = goal.y * TILE_SIZE + TILE_SIZE / 2;
-      const portal = this.add.image(goalX, goalY, "goal-portal").setDepth(5);
+      const goalSprite = this.add.image(goalX, goalY, "goal-portal").setDepth(5);
       this.tweens.add({
-        targets: portal,
+        targets: goalSprite,
         scale: { from: 1, to: 1.08 },
         yoyo: true,
         repeat: -1,
