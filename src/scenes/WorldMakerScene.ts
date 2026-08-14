@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
 import { LocalWorldStorageAdapter } from "../persistence/LocalWorldStorageAdapter";
+import { SAVE_STATE_DISPLAY } from "../persistence/saveState";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { createEmptyWorld, WorldData } from "../world/WorldSchema";
@@ -16,6 +17,10 @@ const LEFT_X = 40;
 const RIGHT_X = 480;
 const COLUMN_WIDTH = 400;
 
+// Same debounce as EditorScene's autosave — see that file's comment on why
+// this length and why tab-close/navigate-away are handled separately.
+const AUTOSAVE_DEBOUNCE_MS = 2000;
+
 /** Course maker v1: click a saved level on the left to append it to the
  * world's play order on the right, click an entry on the right to remove
  * it. No drag-reorder, no renaming — same "very simple first" cut the rest
@@ -28,6 +33,12 @@ export class WorldMakerScene extends Phaser.Scene {
   private availableContainer!: Phaser.GameObjects.Container;
   private worldContainer!: Phaser.GameObjects.Container;
   private statusText!: Phaser.GameObjects.Text;
+  private saveStatusText!: Phaser.GameObjects.Text;
+  private dirty = false;
+  private autosaveTimer?: Phaser.Time.TimerEvent;
+  private readonly handlePageHide = (): void => {
+    if (this.dirty) void this.persistWorld();
+  };
 
   constructor() {
     super("WorldMaker");
@@ -46,7 +57,7 @@ export class WorldMakerScene extends Phaser.Scene {
         padding: { x: 10, y: 6 },
       })
       .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("WorldBrowser"));
+      .on("pointerdown", () => void this.leaveToBrowser());
 
     this.add
       .text(GAME_WIDTH - 24, 20, "Save World", {
@@ -58,6 +69,15 @@ export class WorldMakerScene extends Phaser.Scene {
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => void this.save());
+
+    // Persistent, unlike statusText below — see EditorUI's saveStatusText
+    // for the same pattern and why it's a separate label.
+    this.saveStatusText = this.add
+      .text(GAME_WIDTH - 24, 50, SAVE_STATE_DISPLAY.saved.text, {
+        fontSize: "12px",
+        color: SAVE_STATE_DISPLAY.saved.color,
+      })
+      .setOrigin(1, 0);
 
     this.add.text(GAME_WIDTH / 2, 24, "World Maker", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
 
@@ -72,6 +92,14 @@ export class WorldMakerScene extends Phaser.Scene {
     this.worldContainer = this.add.container(0, 0);
 
     void this.refresh();
+
+    // Same tab-close/refresh safety net as EditorScene — see its comment
+    // on why "pagehide" and why the underlying write must stay synchronous.
+    window.addEventListener("pagehide", this.handlePageHide);
+    this.events.once("shutdown", () => {
+      window.removeEventListener("pagehide", this.handlePageHide);
+      this.autosaveTimer?.remove(false);
+    });
   }
 
   private async refresh(): Promise<void> {
@@ -84,6 +112,7 @@ export class WorldMakerScene extends Phaser.Scene {
       const y = LIST_START_Y + i * ROW_HEIGHT;
       const row = this.makeRow(LEFT_X, y, level.name || "Untitled Level", () => {
         this.world.levelIds.push(level.id);
+        this.markDirty();
         void this.refresh();
       });
       this.availableContainer.add(row);
@@ -100,6 +129,7 @@ export class WorldMakerScene extends Phaser.Scene {
       const label = `${i + 1}. ${levelNames.get(id) ?? "(deleted level)"}`;
       const row = this.makeRow(RIGHT_X, y, label, () => {
         this.world.levelIds.splice(i, 1);
+        this.markDirty();
         void this.refresh();
       });
       this.worldContainer.add(row);
@@ -132,14 +162,57 @@ export class WorldMakerScene extends Phaser.Scene {
     return text;
   }
 
+  /** The one place that actually writes to storage — shared by the manual
+   * Save World button, autosave, and the leave/pagehide flushes. Silently
+   * no-ops on an empty world (nothing meaningful to persist, and an empty
+   * `levelIds` would just mint a pointless storage entry) — the manual
+   * `save()` wrapper below is what surfaces that as a message, since only
+   * an explicit click deserves to be told "add a level first." */
+  private async persistWorld(): Promise<void> {
+    if (this.world.levelIds.length === 0) return;
+    if (!this.world.id) this.world.id = crypto.randomUUID();
+    this.world.updatedAt = new Date().toISOString();
+    try {
+      await this.worldStorage.save(this.world);
+      this.dirty = false;
+      this.saveStatusText.setText(SAVE_STATE_DISPLAY.saved.text).setColor(SAVE_STATE_DISPLAY.saved.color);
+    } catch (err) {
+      this.saveStatusText.setText(SAVE_STATE_DISPLAY.error.text).setColor(SAVE_STATE_DISPLAY.error.color);
+      this.statusText.setText("Save failed — your browser may be out of storage space");
+      console.error("World save failed:", err);
+    }
+  }
+
+  private async autosave(): Promise<void> {
+    if (!this.dirty || this.world.levelIds.length === 0) return;
+    this.saveStatusText.setText(SAVE_STATE_DISPLAY.saving.text).setColor(SAVE_STATE_DISPLAY.saving.color);
+    await this.persistWorld();
+  }
+
+  /** Same debounce pattern as EditorScene.markDirty — see that file. */
+  private markDirty(): void {
+    this.dirty = true;
+    this.saveStatusText.setText(SAVE_STATE_DISPLAY.unsaved.text).setColor(SAVE_STATE_DISPLAY.unsaved.color);
+    this.autosaveTimer?.remove(false);
+    this.autosaveTimer = this.time.delayedCall(AUTOSAVE_DEBOUNCE_MS, () => void this.autosave());
+  }
+
+  private async leaveToBrowser(): Promise<void> {
+    this.autosaveTimer?.remove(false);
+    if (this.dirty) await this.persistWorld();
+    this.scene.start("WorldBrowser");
+  }
+
+  /** The explicit "Save World" button — unlike autosave, a validation
+   * failure and a successful save both deserve visible feedback here, and
+   * success navigates back to the browser (the button means "I'm done"). */
   private async save(): Promise<void> {
     if (this.world.levelIds.length === 0) {
       this.statusText.setText("Add at least one level before saving.");
       return;
     }
-    if (!this.world.id) this.world.id = crypto.randomUUID();
-    this.world.updatedAt = new Date().toISOString();
-    await this.worldStorage.save(this.world);
-    this.scene.start("WorldBrowser");
+    this.autosaveTimer?.remove(false);
+    await this.persistWorld();
+    if (!this.dirty) this.scene.start("WorldBrowser");
   }
 }

@@ -21,6 +21,15 @@ interface EditorSceneData {
   level?: LevelData;
 }
 
+/** How long to wait after the last edit before autosaving — long enough
+ * that a fast paint drag or a burst of undo/redo doesn't trigger a storage
+ * write per keystroke, short enough that a tab crash/power loss can't lose
+ * much. Tab close/refresh/navigate-away are covered separately (by a
+ * synchronous flush on "pagehide" and before leaving to Menu), so this
+ * delay only bounds the "still actively editing" risk window, not the
+ * "about to leave" one. */
+const AUTOSAVE_DEBOUNCE_MS = 2000;
+
 export class EditorScene extends Phaser.Scene {
   private initialLevel?: LevelData;
   private level!: LevelData;
@@ -38,6 +47,13 @@ export class EditorScene extends Phaser.Scene {
   private dragLastX = -1;
   private dragLastY = -1;
   private lastActionFrame = new Map<string, number>();
+  private dirty = false;
+  private autosaveTimer?: Phaser.Time.TimerEvent;
+  // A stable bound reference so it can be removed on shutdown — an inline
+  // arrow passed straight to addEventListener can never be un-registered.
+  private readonly handlePageHide = (): void => {
+    if (this.dirty) void this.persistLevel();
+  };
 
   constructor() {
     super("Editor");
@@ -70,7 +86,7 @@ export class EditorScene extends Phaser.Scene {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),
-      onMenu: () => this.scene.start("Menu"),
+      onMenu: () => void this.leaveToMenu(),
       onClear: () => this.clearLevel(),
       onUndo: () => this.undo(),
       onRedo: () => this.redo(),
@@ -109,6 +125,18 @@ export class EditorScene extends Phaser.Scene {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       this.onceThisFrame("redo", () => this.redo());
+    });
+
+    // Best-effort save on tab close/refresh/navigate-away, independent of
+    // Phaser's scene lifecycle (still fires even if this scene is merely
+    // paused behind Test Play, unlike a delayedCall — see AUTOSAVE_DEBOUNCE_MS
+    // above). Relies on LocalStorageAdapter.save's write actually being
+    // synchronous under its `async` signature (see StorageAdapter.ts) —
+    // "pagehide" gives no guarantee that awaited work after it completes.
+    window.addEventListener("pagehide", this.handlePageHide);
+    this.events.once("shutdown", () => {
+      window.removeEventListener("pagehide", this.handlePageHide);
+      this.autosaveTimer?.remove(false);
     });
   }
 
@@ -167,6 +195,7 @@ export class EditorScene extends Phaser.Scene {
       this.dragCommands.length === 1 ? this.dragCommands[0] : new CompositeCommand(this.dragCommands);
     this.history.push(command);
     this.dragCommands = [];
+    this.markDirty();
   }
 
   private applyEntityBrushAt(tileX: number, tileY: number): void {
@@ -180,6 +209,7 @@ export class EditorScene extends Phaser.Scene {
     const command = new PlaceEntityCommand(this.entityPlacer, this.currentBrush, prev, { x: tileX, y: tileY });
     command.execute();
     this.history.push(command);
+    this.markDirty();
   }
 
   /** Builds the tilemap layer against all 4 ground skins at once — each
@@ -205,11 +235,13 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private undo(): void {
-    if (!this.history.undo()) this.ui.setStatus("Nothing to undo");
+    if (this.history.undo()) this.markDirty();
+    else this.ui.setStatus("Nothing to undo");
   }
 
   private redo(): void {
-    if (!this.history.redo()) this.ui.setStatus("Nothing to redo");
+    if (this.history.redo()) this.markDirty();
+    else this.ui.setStatus("Nothing to redo");
   }
 
   private testPlay(): void {
@@ -224,11 +256,60 @@ export class EditorScene extends Phaser.Scene {
     this.scene.pause();
   }
 
-  private async saveLevel(): Promise<void> {
+  /** The one place that actually writes to storage — shared by the manual
+   * Save button, autosave, the pre-Menu flush, and the pagehide flush, so
+   * id-minting/error-handling/dirty-clearing only exist once. Callers
+   * decide their own UI feedback on top (a toast for an explicit click,
+   * nothing for a silent autosave tick). */
+  private async persistLevel(): Promise<void> {
     if (!this.level.id) this.level.id = crypto.randomUUID();
     this.level.updatedAt = new Date().toISOString();
-    await this.storage.save(this.level);
-    this.ui.setStatus("Saved");
+    try {
+      await this.storage.save(this.level);
+      this.dirty = false;
+      this.ui.setSaveState("saved");
+    } catch (err) {
+      // Left dirty on purpose — nothing was actually persisted. Surfaces
+      // once here rather than retrying on a timer: if storage is genuinely
+      // full/unavailable, retrying every couple seconds would just be
+      // noise. The next edit (via markDirty) or another manual Save click
+      // will try again.
+      this.ui.setSaveState("error");
+      this.ui.setStatus("Save failed — your browser may be out of storage space");
+      console.error("Level save failed:", err);
+    }
+  }
+
+  private async saveLevel(): Promise<void> {
+    this.autosaveTimer?.remove(false);
+    await this.persistLevel();
+    // Only toast on success — persistLevel already surfaced a "Save
+    // failed" status in the failure case, and dirty stays true then.
+    if (!this.dirty) this.ui.setStatus("Saved");
+  }
+
+  private async autosave(): Promise<void> {
+    if (!this.dirty) return; // a manual Save (or an even newer edit) may have already handled it
+    this.ui.setSaveState("saving");
+    await this.persistLevel();
+  }
+
+  /** Marks the level as having edits storage doesn't know about yet, and
+   * (re)starts the autosave debounce — called on every paint drag, entity
+   * move, undo, and redo. Any call while a timer is already pending cancels
+   * and replaces it, so autosave fires a fixed delay after the *last* edit
+   * in a burst, not the first. */
+  private markDirty(): void {
+    this.dirty = true;
+    this.ui.setSaveState("unsaved");
+    this.autosaveTimer?.remove(false);
+    this.autosaveTimer = this.time.delayedCall(AUTOSAVE_DEBOUNCE_MS, () => void this.autosave());
+  }
+
+  private async leaveToMenu(): Promise<void> {
+    this.autosaveTimer?.remove(false);
+    if (this.dirty) await this.persistLevel();
+    this.scene.start("Menu");
   }
 
   private clearLevel(): void {
@@ -240,6 +321,7 @@ export class EditorScene extends Phaser.Scene {
     this.level.entities = [];
     this.rebuildVisualsFromLevel();
     this.history.clear();
+    this.markDirty();
     this.ui.setStatus("Cleared");
   }
 

@@ -85,7 +85,14 @@ Open the dev server URL in a browser. Controls:
   level count) with **Play**, **Edit**, and **Delete**; **New World**
   opens **World Maker** — click a saved level on the left to append it to
   the world's play order on the right, click an entry on the right to
-  remove it, then **Save World**. **Play** runs the first level; winning a
+  remove it, then **Save World**. World Maker has the same autosave and
+  persistent save-state indicator as the level editor (see "Autosave &
+  save-state tracking" under Art) — adding/removing a level marks it
+  unsaved and autosaves a couple seconds later, and **← Back** flushes an
+  unsaved change first, same as the editor's Menu button — with one
+  difference: an empty world (no levels yet) never autosaves or gets a
+  storage entry, matching **Save World**'s own "add at least one level
+  first" validation. **Play** runs the first level; winning a
   level that isn't the last one shows "Level Complete!" — press **N** to
   advance to the next level, or **R** to replay the current one; winning
   the last level shows "World Complete!"; **Esc** at any point returns to
@@ -118,8 +125,16 @@ Open the dev server URL in a browser. Controls:
   keyboard-only hint text, since there's no R/N/Esc key to press.
 - **Save**: persists the current level to `localStorage` under its own
   id — every level you save is kept (see My Levels), not just the most
-  recent one.
-- **Menu**: back to the home page.
+  recent one. As of 2026-08-14 you rarely need to click it: a persistent
+  **● Saved / ● Unsaved changes / ● Saving… / ● Save failed** indicator
+  next to Redo (see "Autosave & save-state tracking" under Art) tracks
+  whether the level in memory matches storage, and edits autosave a couple
+  seconds after you stop — Save itself still exists for "save right now
+  and show a confirmation toast," and still mints the level's id on first
+  use exactly like autosave does.
+- **Menu**: also flushes an unsaved autosave first if one's pending, so
+  navigating away never drops an edit still inside the debounce window —
+  back to the home page.
 - **Clear**: wipes the current grid and entities.
 - **Blocks palette**: every ground/brick/bounce/hazard skin — Grass/Desert/
   Castle/Snow Ground, Brick/Castle Brick, Bounce/Castle Bounce, Water/Lava,
@@ -334,6 +349,60 @@ it at the default depth was a real bug hit and fixed during this pass —
 every icon silently rendered a layer behind the opaque toolbar and never
 appeared, even though every other property (position, texture, visibility)
 was correct.
+
+**Autosave & save-state tracking.** As of 2026-08-14, Save is no longer
+the only thing standing between an edit and losing it. `EditorScene`
+tracks a `dirty` flag, flipped true by every paint drag, entity
+move, undo, and redo (`markDirty()`, called from those exact spots —
+`flushDragCommands`, `applyEntityBrushAt`, `undo`, `redo`), and flipped
+back false only once a save actually succeeds. A small persistent label
+in `EditorUI` (`saveStatusText`, next to Redo) mirrors that flag in real
+time as **● Saved** / **● Unsaved changes** / **● Saving…** / **●
+Save failed** — deliberately not the same mechanism as `setStatus`'s
+existing transient 2.5s toast (still used for one-off messages like
+"Cleared"), since a save-state readout needs to persist until the state
+actually changes, not disappear on a timer. `WorldMakerScene` has the
+identical `dirty`/`saveStatusText` pattern (added/removed levels mark it
+dirty), sharing the same four-state vocabulary and colors from
+`src/persistence/saveState.ts` rather than each scene inventing its own.
+
+Three triggers actually write to storage, all funneled through one
+`persistLevel()` (`persistWorld()` for Worlds) so id-minting,
+`updatedAt`, and error handling only exist once:
+1. **Manual Save** — the existing button, still shows the transient
+   "Saved" toast on top of updating the persistent indicator.
+2. **Autosave** — a `Phaser.Time.TimerEvent` debounced 2 seconds
+   (`AUTOSAVE_DEBOUNCE_MS`) past the *last* edit (each new edit cancels
+   and reschedules the pending timer via `.remove(false)`, so a long
+   paint session doesn't write on every stroke), skipped entirely if nothing's dirty.
+3. **Leave flushes** — clicking Menu (or World Maker's ← Back) awaits one
+   final save first if dirty, so navigating away can't drop an edit still
+   sitting inside the debounce window; a `"pagehide"` window listener
+   does the same for tab close/refresh/back, relying on
+   `LocalStorageAdapter.save`'s `localStorage.setItem` calls actually
+   completing synchronously before its `async` function's first (and
+   only) `await` — `pagehide` gives no guarantee an awaited continuation
+   *after* that point ever runs, so the write has to already be done by
+   the time the call returns control, not merely scheduled.
+
+A level's id is now effectively minted on **first edit** rather than
+first explicit Save (autosave reaches `persistLevel`'s
+`if (!this.level.id) this.level.id = crypto.randomUUID()` well before a
+user might ever click the button) — the practical effect is that a level
+you started, edited, and merely navigated away from now shows up in My
+Levels, where it previously wouldn't have unless Save was clicked. An
+empty, completely untouched level (or an empty World with zero levels)
+still never gets an id or a storage entry — nothing marks it dirty in
+the first place, so there's nothing for autosave to act on.
+
+Storage failures (quota exceeded, Safari private-browsing blocking
+`localStorage`) are now caught rather than becoming a silent unhandled
+promise rejection — `persistLevel`/`persistWorld` wrap the write in
+try/catch, leave `dirty` true on failure (nothing was actually
+persisted), and show **● Save failed** plus a status message rather than
+retrying on a timer (if storage is genuinely unavailable, retrying every
+couple seconds would just be noise — the next edit or another manual
+Save click tries again naturally).
 
 **Items & hit-points.** Five collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
@@ -704,7 +773,8 @@ src/
 │   ├── StorageAdapter.ts       interface (list/save/load/remove)
 │   ├── LocalStorageAdapter.ts
 │   ├── WorldStorageAdapter.ts  same interface, one level down, for Worlds
-│   └── LocalWorldStorageAdapter.ts
+│   ├── LocalWorldStorageAdapter.ts
+│   └── saveState.ts            shared SaveState type + text/color per state, used by EditorUI and WorldMakerScene's save-state indicators
 ├── world/
 │   └── WorldSchema.ts        WorldData: an ordered list of level ids + a name
 ├── config/

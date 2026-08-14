@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GRID_ROWS, TILE_SIZE, TOOLBAR_HEIGHT } from "../config/gameConfig";
+import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -29,6 +30,11 @@ const BUTTON_GAP = 8;
 export class EditorUI {
   private selectedOutline: Phaser.GameObjects.Image;
   private statusText: Phaser.GameObjects.Text;
+  // Persistent, unlike statusText above (which auto-clears after 2.5s and
+  // is reused for one-off messages like "Cleared") — always shows whether
+  // the level in memory currently matches what's in storage. See
+  // EditorScene's `dirty` flag/autosave for what drives it.
+  private saveStatusText: Phaser.GameObjects.Text;
   private iconRow: Phaser.GameObjects.Container;
   private tabButtons = new Map<BrushCategory, Phaser.GameObjects.Text>();
   private activeCategory: BrushCategory;
@@ -68,6 +74,18 @@ export class EditorUI {
     addActionButton("Clear", () => this.callbacks.onClear());
     addActionButton("Undo (Ctrl+Z)", () => this.callbacks.onUndo());
     addActionButton("Redo (Ctrl+Y)", () => this.callbacks.onRedo());
+
+    // Plain text, not a button (no interactivity, no hover/click) — this is
+    // a status readout, not an action. Starts "saved" since a level with no
+    // edits yet has nothing at risk, regardless of whether it's a freshly
+    // loaded save or a brand-new blank one; the first edit flips it.
+    this.saveStatusText = scene.add
+      .text(buttonX + 12, ROW1_Y, SAVE_STATE_DISPLAY.saved.text, {
+        fontSize: "13px",
+        color: SAVE_STATE_DISPLAY.saved.color,
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(21);
 
     // A Container is one entry in the scene's display list — its own depth
     // (not its children's) decides where it sits relative to siblings like
@@ -180,5 +198,10 @@ export class EditorUI {
     this.scene.time.delayedCall(2500, () => {
       if (this.statusText.text === message) this.statusText.setText("");
     });
+  }
+
+  setSaveState(state: SaveState): void {
+    const { text, color } = SAVE_STATE_DISPLAY[state];
+    this.saveStatusText.setText(text).setColor(color);
   }
 }
