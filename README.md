@@ -395,15 +395,21 @@ have different layer textures) and persisting the choice to the level on
 Save.
 
 The pool has five scenes, and every one of them is a large, fixed
-2048x476 image pair (matching `GAME_HEIGHT` exactly). Four are original
+2048x476 image pair (matching `GAME_HEIGHT` exactly). Three are original
 painted scenes from `scripts/generate-painted-backgrounds.py`
 (`<scene>-far.png` opaque sky + sun/moon/stars/clouds, `<scene>-near.png`
 transparent above a painted foreground), commissioned to match specific
 reference images the project owner provided — recreated as original art
 rather than reproduced pixel-for-pixel, since the script has no access to
-the reference files themselves. In pool order (see below for why this
-order): `green-valley` (sunny hills, sun, drifting clouds, a winding
-path, grazing sheep, tree-lined slopes — the pool's default), `pirate-cove`
+the reference files themselves. `green-valley` is the exception: the
+project owner later supplied that reference image directly (a chat
+upload, not a fetchable URL), so it's a real crop of the actual
+reference — resized/cropped to the shared 2048x476 canvas and split by
+hand into a `-far`/`-near` pair (a flat horizon cut with a soft feather,
+not the script's painted-in-two-passes approach) rather than a
+script-generated recreation of it. In pool order (see below for why this
+order): `green-valley` (sunny hills, sun, drifting clouds, mountain
+slopes over a valley — the pool's default), `pirate-cove`
 (a wrecked galleon under a crescent moon, tattered sails, a skull flag,
 flanking palm trees), `overgrown-ruins` (moss-swallowed towers with
 window grids and hanging vines, a stalled elevated train, a "?" block
