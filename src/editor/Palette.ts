@@ -25,6 +25,12 @@ export interface Brush {
   textureKey: string;
   tileIndex?: number;
   entityType?: EntityType;
+  /** Marks this brush as the "Erase" tool for its category (Markers/
+   * Enemies/Items/Decor each get their own, mirroring Blocks' own tile
+   * eraser) — has no entityType of its own; EditorScene routes a click to
+   * EntityPlacer.removeAt scoped to brushes sharing this brush's category,
+   * rather than to entity placement. */
+  eraseEntity?: boolean;
   /** Draws a little extra breathing room after this brush's icon in
    * EditorUI's palette row — used sparingly, only to separate the
    * Blocks category's ground-skin/block-kind/hazard/erase groups so an
@@ -48,12 +54,12 @@ export const CATEGORIES: { id: BrushCategory; label: string }[] = [
  * palette (see CATEGORIES above) so the toolbar reads as a small set of
  * labeled groups rather than one ever-widening row of icons.
  *
- * Items/Markers/Enemies/Decor entities are all placed the same one-per-type
- * way spawn/goal have always been (see EntityPlacer's docstring) — a level
- * can have one Coin, one Bush, etc., not a trail of several. Lifting that
- * is a separate, larger change (EntityPlacer's Map<EntityType, Image>
- * would need to become Map<EntityType, Image[]>, plus matching
- * PlaceEntityCommand/PlayScene changes) that wasn't part of this pass.
+ * Markers (Spawn/Goal/Chest) stay one-per-type-per-level — PlayScene's
+ * spawn/win/chest-open logic is built around exactly one of each, Spawn
+ * especially (the player can only start in one place). Enemies/Items/Decor
+ * have no such limit: a level can have any number of each, one per tile
+ * (see EntityPlacer's docstring for the shared "one entity per tile"
+ * invariant that makes each category's own Erase brush below unambiguous).
  *
  * Decor brushes (bottom of the list) are purely cosmetic — PlayScene
  * spawns them as plain static images with no collision or overlap logic,
@@ -115,16 +121,19 @@ export const PALETTE: Brush[] = [
   { id: "spawn", category: "markers", kind: "entity", label: "Spawn", textureKey: "marker-spawn", entityType: "player-spawn" },
   { id: "goal", category: "markers", kind: "entity", label: "Goal", textureKey: "goal-portal", entityType: "goal" },
   { id: "chest", category: "markers", kind: "entity", label: "Chest", textureKey: "chest", entityType: "chest" },
+  { id: "erase-marker", category: "markers", kind: "entity", label: "Erase", textureKey: "tile-eraser", eraseEntity: true },
   { id: "enemy-ghost", category: "enemies", kind: "entity", label: "Ghost", textureKey: "enemy-ghost-pillow", entityType: "enemy-ghost" },
   { id: "enemy-spike", category: "enemies", kind: "entity", label: "Spike", textureKey: "enemy-spike-crawler", entityType: "enemy-spike" },
   { id: "enemy-bat", category: "enemies", kind: "entity", label: "Bat", textureKey: "enemy-bat", entityType: "enemy-bat" },
   { id: "enemy-golem", category: "enemies", kind: "entity", label: "Golem", textureKey: "enemy-golem", entityType: "enemy-golem" },
+  { id: "erase-enemy", category: "enemies", kind: "entity", label: "Erase", textureKey: "tile-eraser", eraseEntity: true },
   { id: "item-coin", category: "items", kind: "entity", label: "Coin", textureKey: "item-coin", entityType: "item-coin" },
   { id: "item-heart", category: "items", kind: "entity", label: "Heart", textureKey: "item-heart", entityType: "item-heart" },
   { id: "item-speed", category: "items", kind: "entity", label: "Speed", textureKey: "item-speed", entityType: "item-speed" },
   { id: "item-feather", category: "items", kind: "entity", label: "Feather", textureKey: "item-feather", entityType: "item-feather" },
   { id: "item-shield", category: "items", kind: "entity", label: "Shield", textureKey: "item-shield", entityType: "item-shield" },
   { id: "item-key", category: "items", kind: "entity", label: "Key", textureKey: "item-key", entityType: "item-key" },
+  { id: "erase-item", category: "items", kind: "entity", label: "Erase", textureKey: "tile-eraser", eraseEntity: true },
   { id: "decor-bush", category: "decor", kind: "entity", label: "Bush", textureKey: "decor-bush", entityType: "decor-bush" },
   { id: "decor-tree", category: "decor", kind: "entity", label: "Tree", textureKey: "decor-tree", entityType: "decor-tree" },
   { id: "decor-cactus", category: "decor", kind: "entity", label: "Cactus", textureKey: "decor-cactus", entityType: "decor-cactus" },
@@ -135,4 +144,5 @@ export const PALETTE: Brush[] = [
   { id: "decor-mushroom", category: "decor", kind: "entity", label: "Mushroom", textureKey: "decor-mushroom", entityType: "decor-mushroom" },
   { id: "decor-rocks", category: "decor", kind: "entity", label: "Rocks", textureKey: "decor-rocks", entityType: "decor-rocks" },
   { id: "decor-bat", category: "decor", kind: "entity", label: "Sleep Bat", textureKey: "decor-bat", entityType: "decor-bat" },
+  { id: "erase-decor", category: "decor", kind: "entity", label: "Erase", textureKey: "tile-eraser", eraseEntity: true },
 ];

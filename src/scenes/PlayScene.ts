@@ -216,26 +216,30 @@ export class PlayScene extends Phaser.Scene {
       this.physics.add.overlap(this.player, goalZone, () => this.onWin());
     }
 
+    // Enemies/Items/Decor have no per-level instance limit (see Palette.ts),
+    // so every matching entity spawns, not just the first — unlike the
+    // Markers below (player-spawn/goal/chest), which EntityPlacer still
+    // keeps singleton and so are looked up with `.find`.
     for (const def of ENEMY_DEFS) {
-      const entity = this.level.entities.find((e) => e.type === def.type);
-      if (!entity) continue;
-      const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
-      const state = createGhostState(sprite);
-      this.enemies.push({ sprite, state, stompable: def.stompable });
-      this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable));
+      for (const entity of this.level.entities.filter((e) => e.type === def.type)) {
+        const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
+        const state = createGhostState(sprite);
+        this.enemies.push({ sprite, state, stompable: def.stompable });
+        this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable));
+      }
     }
 
     for (const type of ITEM_TYPES) {
-      const entity = this.level.entities.find((e) => e.type === type);
-      if (!entity) continue;
-      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
-      const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
-      // textureKey === entityType for every item brush (see Palette.ts).
-      const icon = this.add.image(x, y, type).setDepth(5);
-      this.tweens.add({ targets: icon, y: y - 6, yoyo: true, repeat: -1, duration: 700, ease: "Sine.easeInOut" });
-      const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
-      this.physics.add.existing(zone, true);
-      this.physics.add.overlap(this.player, zone, () => this.collectItem(type, icon, zone));
+      for (const entity of this.level.entities.filter((e) => e.type === type)) {
+        const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+        const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
+        // textureKey === entityType for every item brush (see Palette.ts).
+        const icon = this.add.image(x, y, type).setDepth(5);
+        this.tweens.add({ targets: icon, y: y - 6, yoyo: true, repeat: -1, duration: 700, ease: "Sine.easeInOut" });
+        const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+        this.physics.add.existing(zone, true);
+        this.physics.add.overlap(this.player, zone, () => this.collectItem(type, icon, zone));
+      }
     }
 
     const chestEntity = this.level.entities.find((e) => e.type === "chest");
@@ -250,13 +254,13 @@ export class PlayScene extends Phaser.Scene {
 
     // Decoration entities (see DECOR_TYPES) — plain static images, no
     // physics body, no overlap: purely visual, same as they look in the
-    // editor.
+    // editor. Like Enemies/Items above, every placed instance spawns.
     for (const type of DECOR_TYPES) {
-      const entity = this.level.entities.find((e) => e.type === type);
-      if (!entity) continue;
-      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
-      const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
-      this.add.image(x, y, type).setDepth(3);
+      for (const entity of this.level.entities.filter((e) => e.type === type)) {
+        const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+        const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
+        this.add.image(x, y, type).setDepth(3);
+      }
     }
 
     this.input$ = createPlayerInput(this);
@@ -431,10 +435,12 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
-  /** One-per-type item pickup (see Palette.ts's docstring on that scope
-   * cut) — applies the matching PlayerStats effect, removes the sprite and
-   * its overlap zone, and refreshes the HUD. Guarded by `icon.active` since
-   * a physics overlap can fire more than once in the same frame pair. */
+  /** Applies the matching PlayerStats effect for whichever item instance
+   * was touched, removes that one sprite and its overlap zone, and
+   * refreshes the HUD — a level can have several of the same item type
+   * (see Palette.ts), each collected independently. Guarded by
+   * `icon.active` since a physics overlap can fire more than once in the
+   * same frame pair. */
   private collectItem(type: EntityType, icon: Phaser.GameObjects.Image, zone: Phaser.GameObjects.Zone): void {
     if (!icon.active) return;
     const now = this.time.now;

@@ -1,10 +1,11 @@
 import Phaser from "phaser";
 import { GAME_WIDTH, GRID_ORIGIN_X, GRID_ROWS, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
+import { AddEntityCommand } from "../editor/commands/AddEntityCommand";
 import { Command } from "../editor/commands/Command";
 import { CompositeCommand } from "../editor/commands/CompositeCommand";
+import { EraseEntityCommand } from "../editor/commands/EraseEntityCommand";
 import { HistoryStack } from "../editor/commands/HistoryStack";
 import { PaintTileCommand } from "../editor/commands/PaintTileCommand";
-import { PlaceEntityCommand } from "../editor/commands/PlaceEntityCommand";
 import { EditorUI } from "../editor/EditorUI";
 import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
 import { EntityPlacer } from "../editor/EntityPlacer";
@@ -33,6 +34,11 @@ interface EditorSceneData {
  * delay only bounds the "still actively editing" risk window, not the
  * "about to leave" one. */
 const AUTOSAVE_DEBOUNCE_MS = 2000;
+
+/** Entity types kept singleton per level (see EntityPlacer's docstring) —
+ * placing one moves the existing instance rather than adding another,
+ * unlike Enemies/Items/Decor which have no such limit. */
+const MARKER_TYPES = new Set<EntityType>(["player-spawn", "goal", "chest"]);
 
 export class EditorScene extends Phaser.Scene {
   private initialLevel?: LevelData;
@@ -123,6 +129,8 @@ export class EditorScene extends Phaser.Scene {
         this.dragLastX = -1;
         this.dragLastY = -1;
         this.applyTileBrushAt(tileX, tileY);
+      } else if (this.currentBrush.eraseEntity) {
+        this.eraseEntityAt(tileX, tileY);
       } else {
         this.applyEntityBrushAt(tileX, tileY);
       }
@@ -234,15 +242,56 @@ export class EditorScene extends Phaser.Scene {
     this.markDirty();
   }
 
+  /** Places the current brush's entity at (tileX, tileY). Marker types
+   * (Spawn/Goal/Chest) stay singleton per level — placing one clears any
+   * earlier instance of that same type first, wherever it was, same as
+   * before multi-instance support existed. Enemies/Items/Decor have no such
+   * limit; only the target tile itself needs clearing, and only if
+   * something else already occupies it (EntityPlacer's "one entity per
+   * tile" invariant). Whatever gets displaced is erased via its own
+   * EraseEntityCommand rather than PlaceEntityCommand's old
+   * move-in-place trick, so undo can restore each displaced entity
+   * independently — see CompositeCommand for why running them in one
+   * array undoes correctly in reverse order. */
   private applyEntityBrushAt(tileX: number, tileY: number): void {
     const type = this.currentBrush.entityType;
     if (!type) return;
     if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
 
-    const prev = this.entityPlacer.getPosition(type);
-    if (prev && prev.x === tileX && prev.y === tileY) return; // no-op, same spot
+    const commands: Command[] = [];
 
-    const command = new PlaceEntityCommand(this.entityPlacer, this.currentBrush, prev, { x: tileX, y: tileY });
+    if (MARKER_TYPES.has(type)) {
+      const existingOfType = this.level.entities.find((e) => e.type === type);
+      if (existingOfType && existingOfType.x === tileX && existingOfType.y === tileY) return; // no-op, same spot
+      if (existingOfType) commands.push(new EraseEntityCommand(this.entityPlacer, this.brushesByType, existingOfType));
+    }
+
+    const occupant = this.entityPlacer.entityAt(tileX, tileY);
+    if (occupant) {
+      if (occupant.type === type) return; // no-op, this exact entity is already here
+      commands.push(new EraseEntityCommand(this.entityPlacer, this.brushesByType, occupant));
+    }
+
+    commands.push(new AddEntityCommand(this.entityPlacer, this.currentBrush, tileX, tileY));
+    const command = commands.length === 1 ? commands[0] : new CompositeCommand(commands);
+    command.execute();
+    this.history.push(command);
+    this.markDirty();
+  }
+
+  /** Erases whatever entity occupies (tileX, tileY), scoped to the current
+   * Erase brush's own category (Markers/Enemies/Items/Decor) — a no-op if
+   * the tile is empty, or occupied by an entity from a different category,
+   * so e.g. the Enemies eraser can never accidentally delete a Spawn
+   * marker sitting under an enemy that's since moved elsewhere. */
+  private eraseEntityAt(tileX: number, tileY: number): void {
+    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
+    const occupant = this.entityPlacer.entityAt(tileX, tileY);
+    if (!occupant) return;
+    const occupantBrush = this.brushesByType.get(occupant.type);
+    if (occupantBrush?.category !== this.currentBrush.category) return;
+
+    const command = new EraseEntityCommand(this.entityPlacer, this.brushesByType, occupant);
     command.execute();
     this.history.push(command);
     this.markDirty();

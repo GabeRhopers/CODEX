@@ -35,10 +35,15 @@ round-trips identically, every paint/erase/entity edit is undoable — a
 whole paint drag reverts as one step, not tile by tile — and a level can
 include a patrolling ghost-pillow enemy (stomp it from above to kill it,
 touch it any other way and you lose) plus a goal marker (currently a
-caged sheep — see "Goal art" under Art) to reach. See the plan doc §9.1
+caged sheep — see "Goal art" under Art) to reach. As of 2026-08-15,
+Enemies/Items/Decor can be placed any number of times per level (no longer
+one-per-type), and every entity category has its own Erase brush for
+removing a single placed instance — see "Entity eraser & multiple
+instances" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
-IndexedDB, backend sharing, renaming levels/worlds from the browser).
+IndexedDB, backend sharing, renaming worlds from the browser — levels
+themselves can be renamed as of 2026-08-14, see "Level name" under Art).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
 plus matching Actions-panel buttons. As of 2026-08-14 the editor's menus are
@@ -109,7 +114,20 @@ Open the dev server URL in a browser. Controls:
   blocks & enemies" / "Items & hit-points" / "Second content pass" for
   what each brush does. Every brush is ordinary — not limited to any
   specific template — so any level, new or existing, can place any of
-  them, from Coin to a Chest to a Sleeping Bat decoration.
+  them, from Coin to a Chest to a Sleeping Bat decoration. Enemies, Items,
+  and Decor have no per-level placement limit — a level can have five
+  Ghosts and a dozen Coins if you want them, each on its own tile (see
+  "Entity eraser & multiple instances" under Art). Markers (Spawn/Goal/
+  Chest) stay one-per-level as before: placing a second Spawn moves it
+  rather than adding another, since a level can only ever start in one
+  place.
+- **Erase (entities)**: every entity category — Markers, Enemies, Items,
+  Decor — ends its palette grid with its own red **✕ Erase** brush,
+  mirroring the Blocks category's tile eraser. Select it, then click a
+  placed enemy/item/marker/decor to remove just that one; it's scoped to
+  its own category, so the Enemies eraser only ever removes enemies, never
+  a Spawn marker sitting nearby. Undo/redo cover erases exactly like any
+  other edit.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; enemies and items are optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
@@ -453,10 +471,10 @@ scoring/hit-points-shaped ideas for lack of one. The rules live in
 `src/gameplay/PlayerStats.ts` as pure, unit-tested functions operating on
 a plain `PlayerStats` object (score/extraHits/buff timestamps) — no Phaser
 types touch that module; `PlayScene` owns spawning the item sprites (a
-gentle bob tween, a static overlap zone, one-per-type exactly like
-Spawn/Goal/enemies already are — see `Palette.ts`'s docstring on that
-scope cut), calling into `PlayerStats`, and reflecting the result as a HUD
-string and a player tint. One deliberate asymmetry: **falling off the
+gentle bob tween, a static overlap zone per placed instance — see "Entity
+eraser & multiple instances" under Art for why a level can have several of
+the same item type), calling into `PlayerStats`, and reflecting the result
+as a HUD string and a player tint. One deliberate asymmetry: **falling off the
 bottom of the level stays unconditional instant-loss**, untouched by
 Hearts or Shield — "bounce back and keep playing" fits absorbing a
 hazard/enemy touch, but doesn't fit falling the way it fits an on-screen
@@ -666,6 +684,47 @@ confirmed empirically rather than assumed:
   canvas handler — and therefore before whatever button was clicked —
   gets a chance to run.
 
+**Entity eraser & multiple instances.** As of 2026-08-15, Enemies/Items/
+Decor are no longer capped at one placed instance per type — until this
+pass, `EntityPlacer` stored `Map<EntityType, Image>`, literally one marker
+per *type* for the whole level, so placing a second Ghost just moved the
+existing one instead of adding another (the same MVP shortcut spawn/goal
+had always used, but never lifted for the categories that didn't need it).
+There was also no way to delete a single placed entity at all — the only
+options were undo immediately after placing, or Clear, which wipes the
+entire level.
+
+`EntityPlacer` now enforces a different, stricter invariant instead: **at
+most one entity total per tile**, regardless of type, keyed by position
+(`Map<"x,y", Image>`) rather than by type. That's what makes "click a tile
+to erase" unambiguous — there's always exactly zero or one thing there to
+remove. Markers (Spawn/Goal/Chest) are kept singleton *per type* on top of
+that, in `EditorScene` rather than `EntityPlacer` itself: `PlayScene`'s
+spawn/win/chest-open logic is built around exactly one of each, Spawn
+especially (the player can only start in one place), so placing a second
+Spawn still moves it rather than adding another. Enemies/Items/Decor have
+no such limit — placing one only ever clears whatever (if anything)
+already occupies that exact tile, not other instances elsewhere.
+
+Every entity category tab (Markers/Enemies/Items/Decor) now ends its
+palette grid with its own **✕ Erase** brush, mirroring the Blocks
+category's existing tile eraser. Selecting it and clicking a tile removes
+whatever entity is there — scoped to that brush's own category via each
+placed entity's `Brush.category` lookup, so the Enemies eraser can never
+accidentally delete a Spawn marker that happens to be nearby. Moving a
+Marker to a tile that's already occupied by something else (say, an enemy)
+displaces that occupant too, keeping the one-entity-per-tile invariant;
+both the displaced occupant and (for Markers) the marker's own previous
+position are erased via their own `EraseEntityCommand`s, composed with the
+new placement's `AddEntityCommand` into one `CompositeCommand` — so a
+single Ctrl+Z undoes the whole move/replace as one step, restoring each
+displaced entity to exactly where it was. `PlayScene` spawns every matching
+Enemy/Item/Decor entity now (a `.filter()` loop per type instead of the old
+first-match-only `.find()`), while Markers keep their `.find()`-based
+singleton lookup, unchanged. All 6 templates predate this pass and already
+had unique `(x, y)` per entity, so the new stricter invariant doesn't
+affect them.
+
 **Editor layout: side panels.** As of 2026-08-14 the editor's menus are
 two opaque, docked vertical panels flanking the grid, both rendered above
 the background (`StaticBackground`'s images sit at depth `-100`; the
@@ -857,8 +916,10 @@ place with a real mechanic, enemy, ground skin, or decoration, landing at
   the ghost and bat.
 - **Key → Chest.** `item-key` is an ordinary Items-tab collectible
   (`PlayerStats.collectKey`, a plain `hasKey` boolean — only one Key can
-  ever be held at a time, matching every entity type's one-per-level
-  placement limit). **Chest** is its own Markers-tab entity: touching it
+  ever be *held* at a time; a level can still place more than one Key
+  entity, see "Entity eraser & multiple instances" under Art, collecting
+  a second one while already holding one is just a no-op). **Chest** is
+  its own Markers-tab entity, kept singleton per level: touching it
   while `hasKey` is true opens it (`PlayerStats.openChest` — spends the
   key, awards a +5 score bonus, the sprite destroys itself), touching it
   without a key does nothing and leaves it there to come back to. Unlike
@@ -1007,7 +1068,7 @@ src/
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
-│   ├── EntityPlacer.ts       raw mutator for the entity layer
+│   ├── EntityPlacer.ts       raw mutator for the entity layer — position-keyed (one entity per tile), not type-keyed, since 2026-08-15's multi-instance rework
 │   ├── EditorUI.ts           left Tools panel (tabs + 2-col palette grid) + right Actions panel rendering
 │   ├── FileInputOverlay.ts   a real, invisible <input type=file> positioned over an EditorUI upload button (Upload BG or Upload Music) — see "Custom uploaded backgrounds" under Art for why a Phaser-driven click can't open a real file picker
 │   ├── LevelNameInput.ts     a real, visible <input type=text> for the level name (Phaser has no native text-entry widget) — see "Level name" under Art, including two non-obvious bugs found/fixed while building it
@@ -1018,8 +1079,9 @@ src/
 │   └── commands/
 │       ├── Command.ts         execute()/undo() interface
 │       ├── PaintTileCommand.ts
-│       ├── PlaceEntityCommand.ts
-│       ├── CompositeCommand.ts batches a whole drag into one undo step
+│       ├── AddEntityCommand.ts  adds one entity; undo removes it
+│       ├── EraseEntityCommand.ts removes one entity; undo re-adds it from its own snapshot
+│       ├── CompositeCommand.ts batches a whole drag (or an entity move/replace — see "Entity eraser & multiple instances" under Art) into one undo step
 │       └── HistoryStack.ts    undo/redo stacks (+ unit tests)
 ├── level/
 │   ├── LevelSchema.ts        LevelData / LevelEntity types (customBackgroundData/customMusicData/customMusicName included)
