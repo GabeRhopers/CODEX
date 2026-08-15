@@ -1,7 +1,8 @@
 import Phaser from "phaser";
-import { GAME_HEIGHT, GAME_WIDTH, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
+import { GAME_HEIGHT, GAME_WIDTH, GRID_ORIGIN_X, GRID_ROWS, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { FileInputOverlay } from "./FileInputOverlay";
+import { LevelNameInput } from "./LevelNameInput";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -17,6 +18,7 @@ export interface EditorUICallbacks {
   onUploadBackground: (file: File) => void;
   onUploadMusic: (file: File) => void;
   onClearMusic: () => void;
+  onRenameLevel: (name: string) => void;
 }
 
 const PANEL_DEPTH = 20;
@@ -42,6 +44,15 @@ const RIGHT_BUTTON_HEIGHT = 32;
 const RIGHT_BUTTON_GAP = 8;
 const RIGHT_PANEL_START_Y = 16;
 const RIGHT_PANEL_X = GAME_WIDTH - RIGHT_PANEL_WIDTH;
+
+// --- Level name field: the unused strip below the grid (between the two
+// panels, once the canvas grew taller than the grid to fit their content
+// — see gameConfig.ts's GAME_HEIGHT comment). Nothing else renders there.
+const NAME_ROW_Y = GRID_ROWS * TILE_SIZE + 26;
+const NAME_LABEL_X = GRID_ORIGIN_X + 20;
+const NAME_INPUT_X = NAME_LABEL_X + 100;
+const NAME_INPUT_HEIGHT = 28;
+const NAME_INPUT_WIDTH = GAME_WIDTH - RIGHT_PANEL_WIDTH - NAME_INPUT_X - 20;
 
 /**
  * Two docked vertical panels flanking the grid, both opaque and rendered
@@ -84,6 +95,7 @@ export class EditorUI {
     private readonly scene: Phaser.Scene,
     initialBackgroundLabel: string,
     initialMusicLabel: string | null,
+    initialLevelName: string,
     private readonly callbacks: EditorUICallbacks,
   ) {
     this.activeCategory = PALETTE[0].category;
@@ -226,6 +238,20 @@ export class EditorUI {
       })
       .setOrigin(0.5, 0)
       .setDepth(STATUS_DEPTH);
+
+    // Level name: a real DOM text input (see LevelNameInput — Phaser has no
+    // native text-entry widget), sitting in the otherwise-empty strip below
+    // the grid between the two panels.
+    scene.add
+      .text(NAME_LABEL_X, NAME_ROW_Y + NAME_INPUT_HEIGHT / 2, "Level Name:", { fontSize: "13px", color: "#c8c8e0" })
+      .setOrigin(0, 0.5)
+      .setDepth(CONTENT_DEPTH);
+    new LevelNameInput(
+      scene,
+      { x: NAME_INPUT_X, y: NAME_ROW_Y, width: NAME_INPUT_WIDTH, height: NAME_INPUT_HEIGHT },
+      initialLevelName,
+      (name) => this.callbacks.onRenameLevel(name),
+    );
   }
 
   /** Unlike the old toolbar's makeRowButton (a single auto-sized Text),

@@ -1,11 +1,5 @@
 import Phaser from "phaser";
-
-export interface GameRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+import { GameRect, positionOverlay } from "./domOverlay";
 
 /**
  * A real, always-present `<input type="file">`, positioned via CSS
@@ -87,12 +81,7 @@ export class FileInputOverlay {
   }
 
   private reposition(): void {
-    const canvasRect = this.scene.game.canvas.getBoundingClientRect();
-    const scale = canvasRect.width / this.scene.scale.width;
-    this.input.style.left = `${canvasRect.left + this.rect.x * scale}px`;
-    this.input.style.top = `${canvasRect.top + this.rect.y * scale}px`;
-    this.input.style.width = `${this.rect.width * scale}px`;
-    this.input.style.height = `${this.rect.height * scale}px`;
+    positionOverlay(this.scene, this.input, this.rect);
   }
 
   destroy(): void {

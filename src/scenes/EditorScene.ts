@@ -96,7 +96,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
 
-    this.ui = new EditorUI(this, backgroundDisplayLabel(this.backgroundId), this.level.customMusicName ?? null, {
+    this.ui = new EditorUI(this, backgroundDisplayLabel(this.backgroundId), this.level.customMusicName ?? null, this.level.name, {
       onSelectBrush: (brush) => (this.currentBrush = brush),
       onTestPlay: () => this.testPlay(),
       onSave: () => void this.saveLevel(),
@@ -108,6 +108,7 @@ export class EditorScene extends Phaser.Scene {
       onUploadBackground: (file) => this.uploadBackground(file),
       onUploadMusic: (file) => this.uploadMusic(file),
       onClearMusic: () => this.clearMusic(),
+      onRenameLevel: (name) => this.renameLevel(name),
     });
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
@@ -336,6 +337,15 @@ export class EditorScene extends Phaser.Scene {
     this.ui.setMusicLabel(null);
     this.markDirty();
     this.ui.setStatus("Music removed");
+  }
+
+  /** Called by LevelNameInput on commit (blur/Enter) — already trimmed
+   * and defaulted to "Untitled Level" if left blank, and already
+   * deduplicated against the last committed value, so this only runs on
+   * an actual change. Counts as an edit like any other, so it autosaves. */
+  private renameLevel(name: string): void {
+    this.level.name = name;
+    this.markDirty();
   }
 
   /** Shared by cycling and uploading — swaps the live preview (destroy +

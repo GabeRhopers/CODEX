@@ -172,6 +172,11 @@ Open the dev server URL in a browser. Controls:
   for the size cap, why audio can't be downscaled the way a background
   image is, and the shared mute/volume control (also on the home page)
   that affects whichever one is currently playing.
+- **Level Name** (below the grid): edit the level's own name — commits on
+  blur/Enter, Escape reverts without committing. See "Level name" under
+  Art for why this needed to be a real HTML text input and two bugs that
+  came with it (typing a space used to launch Test Play; clicking Save
+  right after typing a name used to silently drop it).
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
   paint drag or single entity placement/move undoes as one step. Clear
   resets the undo history (undoing past a full level swap doesn't make
@@ -619,6 +624,48 @@ mute-toggle + draggable-volume-slider widget, `src/audio/VolumeControl.ts`.
   sliders, so a muted player can't drag to 100% and hear nothing with no
   visual explanation why.
 
+**Level name.** As of 2026-08-14, a level's name can actually be changed —
+until this pass, `createEmptyLevel` always named a new level "Untitled
+Level" and nothing in the app could ever change it afterward (not the
+editor, not My Levels, not World Maker's level picker), so anyone with
+more than one blank level, or who used the same template twice, ended up
+with visually-identical rows distinguishable only by their "Updated
+\<date\>" timestamp. `src/editor/LevelNameInput.ts` fixes that with a
+**Level Name:** field docked in the otherwise-empty strip below the grid
+(the editor's canvas is taller than the grid to fit the side panels'
+content — see "Editor layout: side panels" below — and that strip, between
+the two panels, was unused). It's a real, always-visible
+`<input type="text">` rather than a Phaser Text object, since Phaser has
+no native text-entry widget at all; `src/editor/domOverlay.ts`'s
+`positionOverlay` (also used by `FileInputOverlay`) places it in real CSS
+pixels exactly over that spot in the canvas. Commits on blur or Enter
+(reverting to the last committed value on Escape without committing); an
+empty/whitespace-only value commits as "Untitled Level" rather than saving
+a blank name.
+
+Two non-obvious bugs surfaced and got fixed while building this, both
+confirmed empirically rather than assumed:
+
+- **Space/Ctrl+Z/Ctrl+Y while typing a name would fire the editor's own
+  shortcuts.** Phaser's keyboard shortcuts (Space for Test Play, Ctrl+Z/Y
+  for undo/redo) are bound via `window.addEventListener`, not scoped to
+  whether a DOM input currently has focus — typing a level name containing
+  a space would otherwise launch Test Play mid-keystroke. Fixed with
+  `stopPropagation()` on every keydown/keyup the input receives.
+- **Clicking Save (or any other button) right after typing a new name,
+  without pressing Enter first, silently saved the *previous* name.**
+  Phaser's MouseManager listens for clicks on the *canvas* itself
+  (bubble phase); every other button in this UI lives on that canvas, a
+  separate DOM element from the name input entirely, so clicking one
+  never bubbles through the input and never fires its `blur` handler on
+  its own — there's no native "click elsewhere to commit" the way an
+  ordinary web form gets for free. Fixed with a capture-phase
+  `pointerdown` listener on `document`: capture-phase listeners on an
+  ancestor always run before a target's own bubble-phase listener, so it
+  reliably blurs (and thus commits) the name input *before* Phaser's
+  canvas handler — and therefore before whatever button was clicked —
+  gets a chance to run.
+
 **Editor layout: side panels.** As of 2026-08-14 the editor's menus are
 two opaque, docked vertical panels flanking the grid, both rendered above
 the background (`StaticBackground`'s images sit at depth `-100`; the
@@ -963,6 +1010,8 @@ src/
 │   ├── EntityPlacer.ts       raw mutator for the entity layer
 │   ├── EditorUI.ts           left Tools panel (tabs + 2-col palette grid) + right Actions panel rendering
 │   ├── FileInputOverlay.ts   a real, invisible <input type=file> positioned over an EditorUI upload button (Upload BG or Upload Music) — see "Custom uploaded backgrounds" under Art for why a Phaser-driven click can't open a real file picker
+│   ├── LevelNameInput.ts     a real, visible <input type=text> for the level name (Phaser has no native text-entry widget) — see "Level name" under Art, including two non-obvious bugs found/fixed while building it
+│   ├── domOverlay.ts         positionOverlay() — converts game coordinates to real CSS pixels over the canvas, shared by FileInputOverlay and LevelNameInput
 │   ├── customBackgroundUpload.ts downscales/re-encodes a picked image file into a background-ready JPEG data URL
 │   ├── musicUpload.ts        reads a picked audio file as-is (no re-encoding possible), rejecting anything over 4MB — see "Music" under Art
 │   ├── spriteFit.ts          scales any texture down to fit one tile
