@@ -9,7 +9,7 @@
 export const PROFILES = ["Mike", "Gabriel", "Andressa"] as const;
 export type Profile = (typeof PROFILES)[number];
 
-const PROFILE_KEY = "mario-maker:profile";
+const PROFILE_KEY = "spellbound:profile";
 
 export function isProfile(value: string): value is Profile {
   return (PROFILES as readonly string[]).includes(value);

@@ -1,8 +1,9 @@
-# Mario Maker–Style In-Browser Level Editor
+# Spellbound Level Editor
 
-A browser-only, Mario-Maker-inspired level editor and player built on
-Phaser 3 (MIT). See `docs/mario-maker-editor-implementation-plan.md` for
-the full architecture, data model, and milestone plan.
+A browser-only, drag-and-drop platformer level editor and player, built
+from scratch on Phaser 3 (MIT). See
+`docs/spellbound-editor-implementation-plan.md` for the full architecture,
+data model, and milestone plan.
 
 ## Status
 
@@ -518,7 +519,7 @@ legitimate here.
 
 *Data model.* Each level/world is its own `level-<id>.json` /
 `world-<id>.json` file (see `src/drive/driveClient.ts`) inside a
-dedicated **"Mario Maker Editor"** subfolder created on first connect
+dedicated **"Spellbound Level Editor"** subfolder created on first connect
 inside the project owner's shared folder — a subfolder rather than using
 that folder directly, so this app's many small JSON files stay organized
 and don't clutter anything else kept there. Every file is tagged with
@@ -536,7 +537,7 @@ single-request operations.
 "Andressa"]` are exactly what the project owner asked for — "something
 super simple" — and deliberately **not** real per-person accounts: there's
 one shared Google sign-in behind all three (see "Auth" above), and picking
-a profile only sets a tiny `mario-maker:profile` `localStorage` key (unaffected
+a profile only sets a tiny `spellbound:profile` `localStorage` key (unaffected
 by the quota problem that moved everything else off `localStorage` — it's
 a handful of bytes) that scopes which levels/worlds `list()` returns via
 the `profile` `appProperties` tag. Every profile's files are equally
@@ -562,7 +563,7 @@ endpoints — this environment has no outbound network path to Google's
 servers at all, confirmed separately via a plain `page.goto()` timeout, so
 this mock was the only way to exercise `driveClient.ts`'s actual request
 formation and `GoogleDriveStorageAdapter`'s save/list/load logic before
-shipping) before this fix; a single "Mario Maker Editor" folder gets
+shipping) before this fix; a single "Spellbound Level Editor" folder gets
 created after it.
 
 **Items & hit-points.** Five collectible brushes, all in the palette's
@@ -742,7 +743,7 @@ mute-toggle + draggable-volume-slider widget, `src/audio/VolumeControl.ts`.
   are — without that explicit cleanup, a level's music would keep playing
   after leaving it.
 - **Mute/volume**: a single global setting (`src/audio/audioPrefs.ts`,
-  persisted to localStorage as `mario-maker:audio-prefs`), applied once at
+  persisted to localStorage as `spellbound:audio-prefs`), applied once at
   boot to `scene.sound.volume`/`scene.sound.mute` — the *game's* shared
   SoundManager, not a per-scene one — so it affects whichever sound is
   currently playing (the home theme or a level's music) without any
@@ -1165,7 +1166,7 @@ objects in `PlayScene` are unaffected and render at full native size.
 
 ## Project layout
 
-See `docs/mario-maker-editor-implementation-plan.md` §4 for the intended
+See `docs/spellbound-editor-implementation-plan.md` §4 for the intended
 full layout. Implemented so far:
 
 ```

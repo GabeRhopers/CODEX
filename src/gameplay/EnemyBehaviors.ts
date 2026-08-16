@@ -54,7 +54,7 @@ export function updateGhostPatrol(ghost: Phaser.Physics.Arcade.Sprite, state: Gh
 /**
  * A falling player landing on top of the ghost stomps it; any other
  * contact (walking into its side, or touching it while rising/level) costs
- * the player. Mirrors the classic Mario-style "stomp from above" rule.
+ * the player. Mirrors the classic platformer "stomp from above" rule.
  */
 export function isStompFromAbove(player: Phaser.Physics.Arcade.Sprite, ghost: Phaser.Physics.Arcade.Sprite): boolean {
   const playerBody = player.body as Phaser.Physics.Arcade.Body;

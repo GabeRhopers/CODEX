@@ -2,8 +2,8 @@ import { LevelData, LevelSummary } from "../level/LevelSchema";
 import { deserializeLevel, serializeLevel } from "../level/LevelSerializer";
 import { StorageAdapter } from "./StorageAdapter";
 
-const INDEX_KEY = "mario-maker:index";
-const levelKey = (id: string) => `mario-maker:level:${id}`;
+const INDEX_KEY = "spellbound:index";
+const levelKey = (id: string) => `spellbound:level:${id}`;
 
 function readIndex(): LevelSummary[] {
   const raw = localStorage.getItem(INDEX_KEY);

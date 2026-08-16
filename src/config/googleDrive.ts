@@ -21,7 +21,7 @@ export const GOOGLE_CLIENT_ID = "91862983568-1ugtv2n1e6n03bf0lbsnpma4epcdj972.ap
  * JSON files stay organized and don't clutter anything else kept there. */
 export const DRIVE_ROOT_FOLDER_ID = "1na4ngjW-kvCRJIb7G8O_Qqc-a9L-hsVE";
 
-export const APP_FOLDER_NAME = "Mario Maker Editor";
+export const APP_FOLDER_NAME = "Spellbound Level Editor";
 
 /** Full Drive access, not the narrower drive.file scope — deliberately:
  * drive.file only grants visibility into files/folders the app itself

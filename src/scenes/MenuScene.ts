@@ -52,7 +52,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     this.add
-      .text(cx, 26, "Mario Maker–Style Level Editor", {
+      .text(cx, 26, "Spellbound Level Editor", {
         fontSize: "24px",
         color: "#ffffff",
         fontStyle: "bold",

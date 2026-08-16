@@ -1,4 +1,4 @@
-# Mario Maker–Style In-Browser Level Editor — Implementation Plan
+# Spellbound Level Editor — Implementation Plan
 
 Status: **Planning only.** No application code has been written yet. This
 repository is currently empty except for this document. The plan below
@@ -11,7 +11,10 @@ Stage 1 coding starts.
 
 ## 1. Scope and goals
 
-A browser-only, Mario-Maker-inspired level editor + player:
+A browser-only, drag-and-drop platformer level editor + player, inspired
+by the "paint tiles, place a spawn and a goal, play it instantly" style of
+level editor popularized by console level-maker games without deriving
+from or referencing any of them by name:
 
 - A **palette** of tiles/entities the user selects a "brush" from.
 - A **grid canvas** where the user paints/erases tiles and places
@@ -98,7 +101,7 @@ never a plan to source those from an asset pack.
 ```
 /
 ├── docs/
-│   └── mario-maker-editor-implementation-plan.md   (this file)
+│   └── spellbound-editor-implementation-plan.md   (this file)
 ├── public/
 │   └── assets/
 │       ├── tiles/            # Kenney pixel-platformer tileset(s)
@@ -213,7 +216,7 @@ Painting loop (per research §3 and §6):
 4. Shift+click (or a dedicated eraser brush) removes a tile —
    `removeTileAtWorldXY`.
 5. A hover-highlight overlay (a semi-transparent tile-sized rectangle that
-   snaps to `tileToWorldXY`) gives Mario-Maker-style placement feedback,
+   snaps to `tileToWorldXY`) gives clear, immediate placement feedback,
    per `mikewesthad`'s tutorial pattern.
 6. Multi-tile drag-fills (e.g. click-drag a rectangle of ground) should be
    wrapped as **one batched command** (a `CompositeCommand` holding N
@@ -315,8 +318,8 @@ top of an unverified assumption.
    exactly **one** ground-tile brush + an eraser, pointer paint/erase via
    `worldToTileXY`/`putTileAtWorldXY`, debounced on tile-coordinate
    change, plus the hover-highlight overlay (cheap, and it's the single
-   biggest "does this feel like Mario Maker" signal, so it stays in
-   scope even though everything else is being cut).
+   biggest "does this feel like a real level editor" signal, so it stays
+   in scope even though everything else is being cut).
    *Rule that pays for itself later:* route every grid mutation through
    one function (e.g. `TilePainter.paint(x, y, tileIndex)`), never
    inline in the pointer handler — undo/redo (§9.2) wraps this function
@@ -671,7 +674,7 @@ review stays scoped.
 | Large maps tank FPS on low-end hardware | §6, explicitly reported Phaser forum issue | Clamp map size in "New Level" UI (M6); revisit chunking only if a real level exceeds the cap and still lags |
 | TileSprite/pixel-art smoothing edge cases across Phaser versions | §4 | Pin an exact Phaser version early; visually verify `pixelArt`+`roundPixels` on the actual chosen tileset during M0, not later |
 | `draggable` toggle unreliable mid-interaction in some 3.x versions | §6 | Avoid Phaser object-drag entirely for tile painting (use pointer+worldToTileXY instead, already the plan); manage editor mode via one explicit state object |
-| No turnkey Phaser Mario Maker to fork — assembly risk | Caveats | Mitigated by treating official "Paint Tiles"/"Put Tiles" examples and `mikewesthad/phaser-3-tilemap-blog-posts` as required reading before M2, not optional inspiration |
+| No turnkey Phaser level-editor starter to fork — assembly risk | Caveats | Mitigated by treating official "Paint Tiles"/"Put Tiles" examples and `mikewesthad/phaser-3-tilemap-blog-posts` as required reading before M2, not optional inspiration |
 | Free-tier backend terms change (Supabase 7-day pause, Firebase Blaze requirement) | Caveats | Deferred entirely — not relevant until M7; re-verify current terms at that time, don't build against today's numbers |
 | Level JSON format changes after users have saved levels | Not covered by research | `schemaVersion` field from M1 onward; write a migration function stub even if it's a no-op initially |
 

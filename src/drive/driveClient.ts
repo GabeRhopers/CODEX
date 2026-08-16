@@ -3,7 +3,7 @@ import { APP_FOLDER_NAME, DRIVE_ROOT_FOLDER_ID } from "../config/googleDrive";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
-const BOUNDARY = "mario-maker-editor-boundary";
+const BOUNDARY = "spellbound-editor-boundary";
 
 export interface DriveFileMeta {
   id: string;
@@ -55,7 +55,7 @@ let cachedAppFolderId: string | null = null;
 // eventual result), both calls would race past the "does it exist yet"
 // check before either had cached an answer, each conclude "no" and create
 // their own folder. Confirmed with a mocked Drive backend during
-// development: two "Mario Maker Editor" folders got created from a single
+// development: two "Spellbound Level Editor" folders got created from a single
 // page load before this existed.
 let appFolderPromise: Promise<string> | null = null;
 
