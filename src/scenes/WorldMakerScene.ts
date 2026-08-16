@@ -166,9 +166,15 @@ export class WorldMakerScene extends Phaser.Scene {
    * no-ops on an empty world (nothing meaningful to persist, and an empty
    * `levelIds` would just mint a pointless storage entry) — the manual
    * `save()` wrapper below is what surfaces that as a message, since only
-   * an explicit click deserves to be told "add a level first." */
+   * an explicit click deserves to be told "add a level first." Flips the
+   * save-state indicator to "saving" first (after the empty-world no-op
+   * check, so an empty world's indicator isn't touched by a click that did
+   * nothing) so every path — not just autosave's own tick — shows
+   * immediate feedback rather than a stale "Unsaved changes" during a slow
+   * Drive round trip. */
   private async persistWorld(): Promise<void> {
     if (this.world.levelIds.length === 0) return;
+    this.saveStatusText.setText(SAVE_STATE_DISPLAY.saving.text).setColor(SAVE_STATE_DISPLAY.saving.color);
     if (!this.world.id) this.world.id = crypto.randomUUID();
     this.world.updatedAt = new Date().toISOString();
     try {
@@ -184,7 +190,6 @@ export class WorldMakerScene extends Phaser.Scene {
 
   private async autosave(): Promise<void> {
     if (!this.dirty || this.world.levelIds.length === 0) return;
-    this.saveStatusText.setText(SAVE_STATE_DISPLAY.saving.text).setColor(SAVE_STATE_DISPLAY.saving.color);
     await this.persistWorld();
   }
 
@@ -196,9 +201,14 @@ export class WorldMakerScene extends Phaser.Scene {
     this.autosaveTimer = this.time.delayedCall(AUTOSAVE_DEBOUNCE_MS, () => void this.autosave());
   }
 
+  /** Same "only navigate once the flush genuinely succeeded" guard as
+   * EditorScene.leaveToMenu — see its docstring for why checking `dirty`
+   * again after the await (not just awaiting) is what stops a failed Drive
+   * write from being silently discarded by leaving the scene. */
   private async leaveToBrowser(): Promise<void> {
     this.autosaveTimer?.remove(false);
     if (this.dirty) await this.persistWorld();
+    if (this.dirty) return; // save failed — stay put rather than lose the edit
     this.scene.start("WorldBrowser");
   }
 

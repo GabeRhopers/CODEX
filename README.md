@@ -459,6 +459,36 @@ Three triggers actually write to storage, all funneled through one
    sitting inside the debounce window; a `"pagehide"` window listener
    attempts the same for tab close/refresh/back.
 
+   **A real bug found and fixed here (2026-08-16, same day as the Drive
+   move):** `leaveToMenu`/`leaveToBrowser` *awaited* `persistLevel`/
+   `persistWorld` before navigating, but never checked whether that save
+   had actually *succeeded* — `persistLevel` catches its own errors
+   internally (see "Storage failures" below) rather than throwing, so the
+   `await` always resolved normally even on a failed Drive write, and the
+   very next line unconditionally called `scene.start("Menu")` anyway.
+   Concretely: click Menu right as Drive is unreachable, and the app
+   silently threw the edit away and moved on — the "● Save failed"
+   indicator and status toast were set a moment earlier, but had no chance
+   to actually register before the scene tore down, and the user simply
+   landed back on the home page as if everything were fine. Fixed by
+   re-checking `dirty` *after* the await (a failed `persistLevel` leaves
+   it `true`, same flag a successful one clears) and returning early
+   instead of navigating when it's still set — the failed level stays
+   open, mid-edit, with the failure still visible, so the user can retry
+   (click Menu again, click Save, or just keep editing) rather than
+   silently lose work. Confirmed with a mocked-Drive Playwright test that
+   forces the upload endpoint to return a 500: before the fix, the scene
+   moved to Menu and the level was gone from Drive entirely; after it, the
+   editor stayed open showing **● Save failed**, and a second Menu click
+   once the mock was un-broken saved successfully and navigated normally,
+   the level then showing up correctly in My Levels with its edit intact.
+   `persistLevel`/`persistWorld` also now set **● Saving…** themselves as
+   the very first thing they do (previously only autosave's own call site
+   set it before invoking them) — a manual Save click or a Menu/← Back
+   flush now shows the same "something is happening" feedback autosave
+   already had, rather than sitting on a stale **● Unsaved changes** for
+   however long the Drive round trip takes.
+
    **Known gap since the 2026-08-16 move to Google Drive:** the
    `"pagehide"` flush (`if (this.dirty) void this.persistLevel();` —
    deliberately not awaited, since `pagehide` itself can't be blocked
@@ -499,7 +529,9 @@ try/catch, leave `dirty` true on failure (nothing was actually
 persisted), and show **● Save failed** plus a status message rather than
 retrying on a timer (if storage is genuinely unavailable, retrying every
 couple seconds would just be noise — the next edit or another manual
-Save click tries again naturally).
+Save click tries again naturally). `dirty` staying `true` on failure is
+exactly what the Menu/← Back leave-flush fix above now keys off of to
+know a save didn't actually go through.
 
 **Google Drive storage & profiles.** As of 2026-08-16, persistence moved
 off `localStorage` onto Google Drive — the trigger was `localStorage`'s

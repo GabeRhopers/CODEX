@@ -566,10 +566,18 @@ export class EditorScene extends Phaser.Scene {
 
   /** The one place that actually writes to storage — shared by the manual
    * Save button, autosave, the pre-Menu flush, and the pagehide flush, so
-   * id-minting/error-handling/dirty-clearing only exist once. Callers
-   * decide their own UI feedback on top (a toast for an explicit click,
-   * nothing for a silent autosave tick). */
+   * id-minting/error-handling/dirty-clearing only exist once. Always flips
+   * the persistent save-state indicator to "saving" first (not just
+   * autosave's own tick) so every path — including a manual Save click or
+   * the pre-Menu flush — gives the same immediate "something is happening"
+   * feedback rather than sitting on a stale "Unsaved changes" while a slow
+   * Drive round trip is in flight. Callers decide their own UI feedback on
+   * top of that (a toast for an explicit click, nothing for a silent
+   * autosave tick) and whether `this.dirty` staying true afterward (a
+   * failed save never clears it) should block whatever they were about to
+   * do next — see leaveToMenu. */
   private async persistLevel(): Promise<void> {
+    this.ui.setSaveState("saving");
     if (!this.level.id) this.level.id = crypto.randomUUID();
     this.level.updatedAt = new Date().toISOString();
     try {
@@ -598,7 +606,6 @@ export class EditorScene extends Phaser.Scene {
 
   private async autosave(): Promise<void> {
     if (!this.dirty) return; // a manual Save (or an even newer edit) may have already handled it
-    this.ui.setSaveState("saving");
     await this.persistLevel();
   }
 
@@ -615,9 +622,20 @@ export class EditorScene extends Phaser.Scene {
     this.autosaveTimer = this.time.delayedCall(AUTOSAVE_DEBOUNCE_MS, () => void this.autosave());
   }
 
+  /** Flushes a pending edit to Drive before leaving, same as the pagehide
+   * flush but able to actually wait for it (a real navigation, not a tab
+   * close). Critically, only actually navigates once that flush has
+   * genuinely succeeded — `persistLevel` catches its own errors and leaves
+   * `dirty` true rather than throwing, so checking it here (not just
+   * awaiting) is what stops a failed Drive write from being silently
+   * discarded by leaving the scene out from under it; the "● Save failed"
+   * indicator and status toast persistLevel already set stay on screen so
+   * the user can see what happened and retry (Menu, Save, or just editing
+   * again all try again). */
   private async leaveToMenu(): Promise<void> {
     this.autosaveTimer?.remove(false);
     if (this.dirty) await this.persistLevel();
+    if (this.dirty) return; // save failed — stay put rather than lose the edit
     this.scene.start("Menu");
   }
 
