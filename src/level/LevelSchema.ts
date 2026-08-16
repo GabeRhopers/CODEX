@@ -21,9 +21,13 @@ export const BRICK_CASTLE_TILE = 5;
 export const BOUNCE_TILE = 6;
 export const BOUNCE_CASTLE_TILE = 7;
 
-// Hazard: Water (grass/desert/snow, real art, non-solid) vs. Lava
-// (castle's procedural stand-in for it) — same hazard behavior, see
-// PlayScene's HAZARD_FRAMES check.
+// Hazard-shaped tiles: Water (grass/desert/snow, real art, non-solid,
+// swimmable) vs. Lava (castle's procedural stand-in, non-solid, instant
+// hazard) — same autotiled top/fill rendering (see groundAutotile.ts) but
+// opposite gameplay: water never damages the player and can be swum
+// through (see PlayScene's swim handling in update()), while lava keeps
+// costing a hit on contact (see PlayScene's HAZARD_FRAMES check, which no
+// longer includes water).
 export const WATER_TILE = 8;
 export const LAVA_TILE = 9;
 

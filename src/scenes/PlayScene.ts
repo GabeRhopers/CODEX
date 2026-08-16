@@ -34,7 +34,7 @@ import {
 } from "../gameplay/PlayerStats";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
-import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES } from "../level/groundAutotile";
+import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelData } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
@@ -42,6 +42,17 @@ import { StorageAdapter } from "../persistence/StorageAdapter";
 import { resolveSkinTextureKeys } from "../skins/skinLoader";
 
 const BOUNCE_VELOCITY_Y = -650;
+// Swimming (see the water check in update()) sets vertical velocity
+// directly every frame rather than fighting gravity, so these aren't
+// forces — SWIM_UP_VELOCITY while jump/up is held, SWIM_SINK_VELOCITY
+// otherwise, both far gentler than JUMP_VELOCITY/gravity so movement in
+// water reads as buoyant control rather than a normal fall/jump.
+const SWIM_UP_VELOCITY = -160;
+const SWIM_SINK_VELOCITY = 80;
+// Applied on top of speedMultiplierAt's own Speed Potion multiplier (see
+// update()) — water slows horizontal movement the same way it would in
+// any platformer, without needing a second buff-stacking system.
+const SWIM_SPEED_MULTIPLIER = 0.6;
 
 /** Every item brush's textureKey equals its EntityType (see Palette.ts), so
  * spawning just needs the type list — no separate texture lookup like
@@ -197,8 +208,8 @@ export class PlayScene extends Phaser.Scene {
       this.music?.destroy();
     });
 
-    // One Tileset per ground skin, each claiming its own 5-wide gid range
-    // (grass 0-4, desert 5-9, castle 10-14, snow 15-19 — see
+    // One Tileset per ground skin, each claiming its own 6-wide gid range
+    // (grass 0-5, desert 6-11, castle 12-17, snow 18-23 — see
     // groundAutotile.ts) so a level can freely mix all four skins' ground/
     // brick/bounce/hazard blocks on one layer instead of being locked to
     // whichever one tileset a level-wide theme used to pick.
@@ -209,12 +220,16 @@ export class PlayScene extends Phaser.Scene {
     });
     const tilesets = GROUND_SKINS.map((skin, i) => {
       const key = groundTilesetKey(skin);
-      return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 5)!;
+      return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
     });
     this.groundLayer = map.createLayer(0, tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
-    // Water/Lava aren't solid — standing in either is a hazard (see the
-    // per-frame check in update()), not a floor to stand on.
-    this.groundLayer.setCollisionByExclusion([-1, ...HAZARD_FRAMES]);
+    // Lava isn't solid — standing in it is an instant hazard (see the
+    // per-frame check in update()), not a floor to stand on. Water isn't
+    // solid either, but for the opposite reason: it's swimmable, not a
+    // hazard at all (see the swim handling in update()) — excluded here
+    // via its own WATER_FRAMES set now that it no longer shares
+    // HAZARD_FRAMES with lava.
+    this.groundLayer.setCollisionByExclusion([-1, ...WATER_FRAMES, ...HAZARD_FRAMES]);
 
     const spawn = this.level.entities.find((e) => e.type === "player-spawn");
     const spawnX = spawn ? GRID_ORIGIN_X + spawn.x * TILE_SIZE + TILE_SIZE / 2 : GRID_ORIGIN_X + TILE_SIZE;
@@ -444,14 +459,30 @@ export class PlayScene extends Phaser.Scene {
     const justPressedJump = jumpDown && !this.jumpWasDown;
     this.jumpWasDown = jumpDown;
 
+    // Submersion is checked at roughly waist height (half a tile above the
+    // bottom-anchored player.y — see the sprite's setOrigin(0.5, 1) above)
+    // rather than at the feet, so a player merely standing on a submerged
+    // floor (body.blocked.down true) doesn't get floaty swim controls —
+    // only genuinely swimming through open water does.
+    const waistTile = this.groundLayer.getTileAtWorldXY(this.player.x, this.player.y - TILE_SIZE / 2);
+    const inWater = !!waistTile && WATER_FRAMES.has(waistTile.index);
+    const swimming = inWater && !body.blocked.down;
+
     if (body.blocked.down) {
       resetDoubleJump(this.stats);
+    } else if (swimming) {
+      // Direct per-frame vertical control instead of the normal jump/
+      // gravity branches below — held jump/up swims up, released gently
+      // sinks, matching updatePlayerMovement's own per-frame
+      // setVelocityX pattern rather than fighting gravity with a one-off
+      // impulse.
+      body.setVelocityY(jumpDown ? SWIM_UP_VELOCITY : SWIM_SINK_VELOCITY);
     } else if (justPressedJump && canDoubleJump(this.stats, body.blocked.down)) {
       body.setVelocityY(JUMP_VELOCITY);
       useDoubleJump(this.stats);
     }
 
-    updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time));
+    updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time) * (swimming ? SWIM_SPEED_MULTIPLIER : 1));
     updateWizardAnimation(this.player, this.wizardAnim, delta);
     this.updateBuffVisuals(time);
     this.background?.update(this.player.x);
@@ -460,11 +491,12 @@ export class PlayScene extends Phaser.Scene {
       updateGhostPatrol(enemy.sprite, enemy.state, time);
     }
 
-    // Water/Lava are a hazard, not solid ground (see the collision
-    // exclusion in create()) — standing in either costs a hit exactly like
-    // a bad enemy touch, debounced the same way via registerHit's grace
-    // period so it doesn't drain multiple hearts per frame of continued
-    // contact.
+    // Lava is a hazard, not solid ground (see the collision exclusion in
+    // create()) — standing in it costs a hit exactly like a bad enemy
+    // touch, debounced the same way via registerHit's grace period so it
+    // doesn't drain multiple hearts per frame of continued contact. Water
+    // used to be included here too; it's swimmable now (see above) and
+    // never damages the player.
     const footTile = this.groundLayer.getTileAtWorldXY(this.player.x, this.player.y - 2);
     if (footTile && HAZARD_FRAMES.has(footTile.index)) {
       this.takeHit();

@@ -188,7 +188,14 @@ export function generateTextures(scene: Phaser.Scene): void {
   drawBrick(g, TILE_SIZE * 2);
   drawBounce(g, TILE_SIZE * 3);
   drawLava(g, TILE_SIZE * 4);
-  g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 5, TILE_SIZE);
+  // A second lava frame, pixel-identical to the first, purely so castle's
+  // tileset has the same 6-frame stride every other skin's now has (see
+  // groundAutotile.ts's HAZARD_KIND_FRAMES — water gained a real top/fill
+  // distinction, but lava deliberately didn't: it's still meant to be an
+  // instant hazard regardless of depth, not something to swim through, so
+  // there's no "deeper lava" look to draw here).
+  drawLava(g, TILE_SIZE * 5);
+  g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 6, TILE_SIZE);
 
   // Single-frame Palette icons matching castle's own procedural brick/
   // bounce/lava above — without these the palette would keep showing the

@@ -382,10 +382,10 @@ export class EditorScene extends Phaser.Scene {
   }
 
   /** Builds the tilemap layer against all 4 ground skins at once — each
-   * skin's 5-frame image (top/fill/brick/bounce/hazard) is registered as
-   * its own Phaser Tileset, claiming a 5-wide gid range in GROUND_SKINS
-   * order (grass 0-4, desert 5-9, castle 10-14, snow 15-19 — see
-   * groundAutotile.ts, which is the single source of truth for that
+   * skin's 6-frame image (top/fill/brick/bounce/hazard-top/hazard-fill) is
+   * registered as its own Phaser Tileset, claiming a 6-wide gid range in
+   * GROUND_SKINS order (grass 0-5, desert 6-11, castle 12-17, snow 18-23 —
+   * see groundAutotile.ts, which is the single source of truth for that
    * layout). A tile's stored value picks both its skin and its frame, so
    * one level can freely mix all four skins; there's no level-wide
    * "active" tileset to rebuild when nothing's just been placed. */
@@ -398,7 +398,7 @@ export class EditorScene extends Phaser.Scene {
     });
     const tilesets = GROUND_SKINS.map((skin, i) => {
       const key = groundTilesetKey(skin);
-      return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 5)!;
+      return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
     });
     this.groundLayer = map.createBlankLayer("ground", tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
   }

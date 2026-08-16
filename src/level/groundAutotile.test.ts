@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOUNCE_FRAMES, buildRenderGrid, groundFrameAt, HAZARD_FRAMES } from "./groundAutotile";
+import { BOUNCE_FRAMES, buildRenderGrid, groundFrameAt, HAZARD_FRAMES, WATER_FRAMES } from "./groundAutotile";
 import {
   BOUNCE_CASTLE_TILE,
   BOUNCE_TILE,
@@ -57,15 +57,15 @@ describe("groundFrameAt", () => {
     expect(groundFrameAt(grid, 1, 1)).toBe(0);
   });
 
-  it("each ground skin has its own top/fill frame pair, in GROUND_SKINS order", () => {
+  it("each ground skin has its own top/fill frame pair, in GROUND_SKINS order (6-wide stride)", () => {
     expect(groundFrameAt([[G]], 0, 0)).toBe(0); // grass top
-    expect(groundFrameAt([[D]], 0, 0)).toBe(5); // desert top
-    expect(groundFrameAt([[C]], 0, 0)).toBe(10); // castle top
-    expect(groundFrameAt([[S]], 0, 0)).toBe(15); // snow top
+    expect(groundFrameAt([[D]], 0, 0)).toBe(6); // desert top
+    expect(groundFrameAt([[C]], 0, 0)).toBe(12); // castle top
+    expect(groundFrameAt([[S]], 0, 0)).toBe(18); // snow top
     expect(groundFrameAt([[G], [G]], 0, 1)).toBe(1); // grass fill
-    expect(groundFrameAt([[D], [D]], 0, 1)).toBe(6); // desert fill
-    expect(groundFrameAt([[C], [C]], 0, 1)).toBe(11); // castle fill
-    expect(groundFrameAt([[S], [S]], 0, 1)).toBe(16); // snow fill
+    expect(groundFrameAt([[D], [D]], 0, 1)).toBe(7); // desert fill
+    expect(groundFrameAt([[C], [C]], 0, 1)).toBe(13); // castle fill
+    expect(groundFrameAt([[S], [S]], 0, 1)).toBe(19); // snow fill
   });
 
   it("is BRICK for a brick cell regardless of what's above it — shared vs. castle frames differ", () => {
@@ -74,21 +74,28 @@ describe("groundFrameAt", () => {
       [B, BC],
     ];
     expect(groundFrameAt(grid, 0, 1)).toBe(2);
-    expect(groundFrameAt(grid, 1, 1)).toBe(12);
+    expect(groundFrameAt(grid, 1, 1)).toBe(14);
   });
 
   it("is BOUNCE for a bounce cell regardless of what's above it — shared vs. castle frames differ", () => {
     expect(groundFrameAt([[P]], 0, 0)).toBe(3);
-    expect(groundFrameAt([[PC]], 0, 0)).toBe(13);
+    expect(groundFrameAt([[PC]], 0, 0)).toBe(15);
   });
 
-  it("is WATER/LAVA for a hazard cell regardless of what's above it", () => {
+  it("water/lava are TOP at the surface and FILL when buried, like ground", () => {
     const grid = [
-      [G, E],
+      [E, E],
       [W, L],
     ];
-    expect(groundFrameAt(grid, 0, 1)).toBe(4);
-    expect(groundFrameAt(grid, 1, 1)).toBe(14);
+    expect(groundFrameAt(grid, 0, 1)).toBe(4); // water top
+    expect(groundFrameAt(grid, 1, 1)).toBe(16); // lava top
+
+    const buried = [
+      [W, L],
+      [W, L],
+    ];
+    expect(groundFrameAt(buried, 0, 1)).toBe(5); // water fill
+    expect(groundFrameAt(buried, 1, 1)).toBe(17); // lava fill
   });
 
   it("a ground cell buried under a brick still reads as FILL (still solid above it)", () => {
@@ -97,13 +104,25 @@ describe("groundFrameAt", () => {
   });
 });
 
-describe("BOUNCE_FRAMES / HAZARD_FRAMES", () => {
-  it("cover both the shared and castle-specific frame for their kind", () => {
+describe("BOUNCE_FRAMES / WATER_FRAMES / HAZARD_FRAMES", () => {
+  it("BOUNCE_FRAMES covers both the shared and castle-specific bounce frame", () => {
     expect(BOUNCE_FRAMES.has(3)).toBe(true);
-    expect(BOUNCE_FRAMES.has(13)).toBe(true);
+    expect(BOUNCE_FRAMES.has(15)).toBe(true);
     expect(BOUNCE_FRAMES.has(4)).toBe(false);
-    expect(HAZARD_FRAMES.has(4)).toBe(true);
-    expect(HAZARD_FRAMES.has(14)).toBe(true);
+  });
+
+  it("WATER_FRAMES covers water's top and fill frames only — water is swimmable, not a hazard", () => {
+    expect(WATER_FRAMES.has(4)).toBe(true);
+    expect(WATER_FRAMES.has(5)).toBe(true);
+    expect(WATER_FRAMES.has(16)).toBe(false);
+    expect(WATER_FRAMES.has(17)).toBe(false);
+  });
+
+  it("HAZARD_FRAMES covers lava's top and fill frames only, not water's", () => {
+    expect(HAZARD_FRAMES.has(16)).toBe(true);
+    expect(HAZARD_FRAMES.has(17)).toBe(true);
+    expect(HAZARD_FRAMES.has(4)).toBe(false);
+    expect(HAZARD_FRAMES.has(5)).toBe(false);
     expect(HAZARD_FRAMES.has(3)).toBe(false);
   });
 });
@@ -127,6 +146,6 @@ describe("buildRenderGrid", () => {
 
   it("a level mixing every ground skin renders each with its own frames", () => {
     const grid = [[G, D, C, S]];
-    expect(buildRenderGrid(grid)).toEqual([[0, 5, 10, 15]]);
+    expect(buildRenderGrid(grid)).toEqual([[0, 6, 12, 18]]);
   });
 });

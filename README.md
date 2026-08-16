@@ -55,7 +55,11 @@ placed as **Small/Medium/Large** and every enemy's hitbox now tracks its
 actual art instead of Phaser's default full-texture box — see "Enemy
 hitboxes & sizes" under Art, which also covers two real bugs that pass
 found: a skinned entity's size wasn't normalized in Test Play, and a
-second Test Play in one session could crash. See the plan doc §9.1
+second Test Play in one session could crash. Also as of 2026-08-16,
+Water no longer damages the player and can be swum through, with its own
+"deeper" fill frame when stacked (mirroring Ground's top/fill look) —
+Lava is unchanged and still an instant hazard — see "Water is swimmable,
+not a hazard" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -811,6 +815,81 @@ that point on if it happened not to throw. Fixed by resetting
 `spritesByBrushId` in `init()`, alongside every other per-run field
 already reset there.
 
+**Water is swimmable, not a hazard (2026-08-16).** Prompted by a user
+report: Water used to behave exactly like Lava (an instant hit on
+contact, via the shared `HAZARD_FRAMES` set — see "Water" under "Second
+content pass" above) and looked the same at every depth, unlike Ground
+blocks, which already show a different frame at the exposed top vs. when
+buried. Both are fixed together, since the render side had to grow before
+the gameplay side could split cleanly.
+
+*Rendering: a real "deep water" frame.* Each real-art ground tileset
+(`tileset-grass/desert/snow.png`) grew from 5 frames (top/fill/brick/
+bounce/hazard) to 6 (top/fill/brick/bounce/hazard-top/hazard-fill) — the
+same top-vs-buried split Ground already had, extended to the hazard slot.
+No Kenney source pack is available in this sandbox to draw a new tile
+from scratch (`prepare-kenney-assets.py` needs it as an input, and it
+isn't committed to the repo), so `scripts/add-water-depth-frame.py`
+derives the new frame procedurally instead: it samples the existing
+surface frame's own flat fill color, darkens it, and adds a few
+speckle dots (mirroring `drawGroundFill`'s own dot accents) rather than
+inventing new pixel art — a plain, darker, wave-free tile that reads as
+the same water, just deeper. `groundAutotile.ts`'s `groundFrameAt` picks
+between it and the surface frame exactly the way it already picks Ground's
+top vs. fill: by checking whether the cell directly above is empty
+(exposed) or another hazard cell (buried). Castle's procedural Lava tile
+gained a matching 6th frame too, purely so all four skins keep the same
+stride for the shared gid math (`generateTextures.ts`'s `drawLava` is
+called a second time, pixel-identical, at the new slot) — Lava
+deliberately does **not** get a real "deeper" look, since unlike Water it
+never stopped being an instant hazard regardless of depth.
+
+*Gameplay: two sets, not one.* `groundAutotile.ts` used to export one
+`HAZARD_FRAMES` set covering both Water's and Lava's frames, checked in
+two places in `PlayScene`: `setCollisionByExclusion` (neither is solid)
+and the per-frame damage check in `update()` (either costs a hit). Water
+needed the first without the second, so it now has its own `WATER_FRAMES`
+export; `HAZARD_FRAMES` narrowed to Lava only. `setCollisionByExclusion`
+now excludes both sets (Water and Lava are still equally non-solid — you
+fall/swim into either rather than standing on them) while the damage
+check kept reading only `HAZARD_FRAMES`, which — now that it's Lava-only —
+means Water stopped costing a hit with no new "is this water" branch
+needed there at all.
+
+*Gameplay: swimming.* A new per-frame check in `PlayScene.update()` reads
+the tile at roughly the player's waist (half a tile above the
+bottom-anchored `player.y`, not at the feet — checking the feet would
+also flag a player merely *standing* on a submerged floor) against
+`WATER_FRAMES`. `swimming` is that check **and** `!body.blocked.down`: a
+player standing on solid ground that happens to be underwater still gets
+normal grounded-jump physics, not floaty controls — only genuinely
+swimming through open water does. While swimming, the normal grounded-
+jump and double-jump branches are bypassed entirely in favor of setting
+`body.setVelocityY` directly every frame (holding jump/up swims up at a
+gentle `SWIM_UP_VELOCITY`, releasing it sinks slowly at
+`SWIM_SINK_VELOCITY` — both far gentler than a normal jump/fall, so it
+reads as buoyant control rather than fighting gravity with a one-off
+impulse), the same per-frame-override pattern `updatePlayerMovement`
+already uses for horizontal movement. Horizontal speed is reduced while
+swimming via the same `speedMultiplier` parameter the Speed Potion buff
+already uses, no signature changes needed. No changes were needed to the
+wizard's animation: the player is already airborne (not grounded) while
+freely swimming, so the existing jump pose already applies with zero
+extra code.
+
+Verified end-to-end in a mocked-Drive Playwright session: a level with a
+2-tile-deep Water pit (floor removed, `WATER_TILE` at both depths, solid
+ground beneath to catch a sinking swimmer) let the player fall in, sit at
+the bottom, and jump back out to reach the goal and win — with no lose
+banner at any point, confirming Water no longer costs a hit even on
+prolonged contact. A separate level with a single `LAVA_TILE` in the
+walking path still triggered an instant "You Lose" on contact, confirming
+Lava's original hazard behavior is completely unchanged. The stacked-water
+render fix was checked visually too: two Water tiles placed one above the
+other show the bright wavy-crest surface frame on top and the flat,
+speckled, darker fill frame below — the same visual language Ground
+blocks already use.
+
 **Items & hit-points.** Five collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
 hardcoded into specific templates) exactly like a Ground tile or a Ghost:
@@ -1349,17 +1428,14 @@ place with a real mechanic, enemy, ground skin, or decoration, landing at
   only via the **Frozen Cavern** template; now, like every ground skin,
   it's just an icon in the Blocks palette, selectable on any level (see
   "Blocks palette" under Controls).
-- **Water** (`WATER_TILE`, a hazard alongside Ground/Brick/Bounce) —
-  not solid ground: excluded from `setCollisionByExclusion` so the
-  player falls through it onto whatever *is* solid beneath, and
-  `PlayScene.update` checks the tile under the player's feet every
-  frame, calling the same `takeHit()` an enemy touch does (Hearts/Shield
-  apply exactly the same way) — reuses the hit-points system entirely
-  rather than inventing a second one. Real Kenney water art for grass/
+- **Water** (`WATER_TILE`) — not solid ground, and (as of 2026-08-16,
+  see "Water is swimmable, not a hazard" under Art) not a hazard either:
+  it's swimmable, never costs a hit. Real Kenney water art for grass/
   desert/snow; Castle's blocks instead paint a procedural **lava**
   frame (`LAVA_TILE`, drawn by `drawLava` in `generateTextures.ts`) for
   the same never-mix-real-and-procedural-within-one-skin reason Castle's
-  Brick/Bounce blocks already follow.
+  Brick/Bounce blocks already follow — Lava kept its original
+  hazard-on-touch behavior unchanged; only Water's changed.
 - **Golem** (`enemy-golem`) — a 4th enemy `EntityType`, added to
   `ENEMY_DEFS` exactly like Bat/Spike Crawler were (100% shared patrol/
   stomp code, just a texture and a `stompable` flag) — stompable, like
@@ -1395,7 +1471,8 @@ place with a real mechanic, enemy, ground skin, or decoration, landing at
 **Frozen Cavern** (snow ground skin, `template-frozen-cavern`) is the template
 that showcases this pass: a Bush/Golem/Snowman/Key/Rocks run leading into
 a 3-tile Water gap (comfortably jumpable at this game's normal ~6-tile
-reach; walking through it instead costs a hit, same as any hazard) with a
+reach; walking through it instead means a shallow swim now — see "Water is
+swimmable, not a hazard" under Art — not a lost hit) with a
 Cloud floating above it, then a Chest, a Lamp, and the goal — with a
 Sleeping Bat perched up near the end for flavor. Not every one of the 10
 Decor types appears in it (Tree, Cactus, Sprout, Mushroom don't fit this
@@ -1482,7 +1559,8 @@ outline — are still generated at runtime in
 `src/assets/generateTextures.ts`, same technique as before. Castle's own
 procedural Brick/Bounce/Lava also get dedicated single-frame Palette icons
 (`blockIconKey("castle", block)` in `groundSkins.ts`) generated right
-alongside its 5-frame tileset strip, distinct from the shared real-art
+alongside its 6-frame tileset strip (as of 2026-08-16 — see "Water is
+swimmable, not a hazard" under Art for why it grew from 5), distinct from the shared real-art
 Brick/Bounce/Water icons the other three skins' Brick/Bounce/Water
 brushes use — necessary because, since every skin's blocks are always
 in the palette together (see "Blocks palette" under Controls), Castle
@@ -1599,5 +1677,6 @@ public/assets/
 
 scripts/
 ├── prepare-kenney-assets.py       derives public/assets/{tiles,entities,items,decor}' Kenney-sourced PNGs (one-off, not part of the build)
-└── generate-painted-backgrounds.py derives public/assets/backgrounds/scenes/'s original painted PNGs (one-off, not part of the build)
+├── generate-painted-backgrounds.py derives public/assets/backgrounds/scenes/'s original painted PNGs (one-off, not part of the build)
+└── add-water-depth-frame.py       adds tileset-{grass,desert,snow}.png's 6th "deep water" fill frame (one-off, not part of the build — see "Water is swimmable, not a hazard" under Art)
 ```
