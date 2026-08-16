@@ -1,4 +1,9 @@
-# Spellbound Level Editor — Implementation Plan
+# Rhopers Game Maker — Implementation Plan
+
+(Written under this project's original working name, "Spellbound Level
+Editor" — kept here, and in this file's own name, purely so existing links
+to it don't break; see README.md's "Rebrand" under Art for the full
+renaming story. Historical content below is otherwise unchanged.)
 
 Status: **Planning only.** No application code has been written yet. This
 repository is currently empty except for this document. The plan below

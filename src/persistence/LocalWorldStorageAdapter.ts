@@ -1,8 +1,8 @@
 import { WorldData, WorldSummary } from "../world/WorldSchema";
 import { WorldStorageAdapter } from "./WorldStorageAdapter";
 
-const INDEX_KEY = "spellbound:world-index";
-const worldKey = (id: string) => `spellbound:world:${id}`;
+const INDEX_KEY = "rhopers:world-index";
+const worldKey = (id: string) => `rhopers:world:${id}`;
 
 function readIndex(): WorldSummary[] {
   const raw = localStorage.getItem(INDEX_KEY);

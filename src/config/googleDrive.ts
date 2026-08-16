@@ -21,7 +21,18 @@ export const GOOGLE_CLIENT_ID = "91862983568-1ugtv2n1e6n03bf0lbsnpma4epcdj972.ap
  * JSON files stay organized and don't clutter anything else kept there. */
 export const DRIVE_ROOT_FOLDER_ID = "1na4ngjW-kvCRJIb7G8O_Qqc-a9L-hsVE";
 
-export const APP_FOLDER_NAME = "Spellbound Level Editor";
+export const APP_FOLDER_NAME = "Rhopers Game Maker";
+
+/** Every earlier name this app's Drive folder has shipped under, checked
+ * (in order) by `driveClient.ts`'s `resolveAppFolder` if a folder named
+ * `APP_FOLDER_NAME` isn't found — a found match gets renamed in place
+ * (same folder id, so every level/world file already saved inside it
+ * stays exactly where it is) rather than the app silently creating a
+ * second, empty folder under the new name and stranding everything
+ * already saved under an old one. Never remove an entry once shipped —
+ * someone could still be on a build old enough to only ever have created
+ * the very first name. */
+export const LEGACY_APP_FOLDER_NAMES = ["Spellbound Level Editor"];
 
 /** Full Drive access, not the narrower drive.file scope — deliberately:
  * drive.file only grants visibility into files/folders the app itself

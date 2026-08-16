@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-const STORAGE_KEY = "spellbound:audio-prefs";
+const STORAGE_KEY = "rhopers:audio-prefs";
 
 export interface AudioPrefs {
   volume: number; // 0-1

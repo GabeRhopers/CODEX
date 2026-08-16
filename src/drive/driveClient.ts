@@ -1,9 +1,9 @@
-import { APP_FOLDER_NAME, DRIVE_ROOT_FOLDER_ID } from "../config/googleDrive";
+import { APP_FOLDER_NAME, DRIVE_ROOT_FOLDER_ID, LEGACY_APP_FOLDER_NAMES } from "../config/googleDrive";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
-const BOUNDARY = "spellbound-editor-boundary";
+const BOUNDARY = "rhopers-game-maker-boundary";
 
 export interface DriveFileMeta {
   id: string;
@@ -55,7 +55,7 @@ let cachedAppFolderId: string | null = null;
 // eventual result), both calls would race past the "does it exist yet"
 // check before either had cached an answer, each conclude "no" and create
 // their own folder. Confirmed with a mocked Drive backend during
-// development: two "Spellbound Level Editor" folders got created from a single
+// development: two "Rhopers Game Maker" folders got created from a single
 // page load before this existed.
 let appFolderPromise: Promise<string> | null = null;
 
@@ -71,16 +71,40 @@ export function ensureAppFolder(token: string): Promise<string> {
   return appFolderPromise;
 }
 
-async function resolveAppFolder(token: string): Promise<string> {
-  const q = `name='${escapeForQuery(APP_FOLDER_NAME)}' and '${DRIVE_ROOT_FOLDER_ID}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`;
+async function findFolderId(token: string, name: string): Promise<string | null> {
+  const q = `name='${escapeForQuery(name)}' and '${DRIVE_ROOT_FOLDER_ID}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`;
   const listRes = await driveFetch(
     token,
     `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent("files(id,name)")}`,
   );
   const listed = (await listRes.json()) as { files: { id: string }[] };
-  if (listed.files.length > 0) {
-    cachedAppFolderId = listed.files[0].id;
-    return cachedAppFolderId;
+  return listed.files[0]?.id ?? null;
+}
+
+async function resolveAppFolder(token: string): Promise<string> {
+  const currentId = await findFolderId(token, APP_FOLDER_NAME);
+  if (currentId) {
+    cachedAppFolderId = currentId;
+    return currentId;
+  }
+
+  // Not found under the current name — check every earlier name this
+  // folder has shipped under (see LEGACY_APP_FOLDER_NAMES) before assuming
+  // this is a genuine first-time connect. A match gets renamed in place
+  // (same folder id, so every level/world file inside it stays put)
+  // rather than silently creating a second, empty folder and stranding
+  // everything already saved under the old name.
+  for (const legacyName of LEGACY_APP_FOLDER_NAMES) {
+    const legacyId = await findFolderId(token, legacyName);
+    if (legacyId) {
+      await driveFetch(token, `${DRIVE_API}/files/${legacyId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: APP_FOLDER_NAME }),
+      });
+      cachedAppFolderId = legacyId;
+      return legacyId;
+    }
   }
 
   const createRes = await driveFetch(token, `${DRIVE_API}/files?fields=id`, {

@@ -1,4 +1,4 @@
-# Spellbound Level Editor
+# Rhopers Game Maker
 
 A browser-only, drag-and-drop platformer level editor and player, built
 from scratch on Phaser 3 (MIT). See
@@ -64,7 +64,9 @@ are now confined to the level's own left/right edges — see "Player/enemy
 world bounds" under Art. Also as of 2026-08-16, the game canvas no longer
 gets stuck at a stale size on mobile when the browser's own address bar
 shows/hides — see "Cross-device layout, part 2: the stale-canvas-size bug"
-under Art. See the plan doc §9.1
+under Art. Also as of 2026-08-16, the app was renamed from "Spellbound
+Level Editor" to **Rhopers Game Maker** — see "Rebrand" under Art for how
+existing users' saved levels/worlds carry over. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -604,7 +606,7 @@ legitimate here.
 
 *Data model.* Each level/world is its own `level-<id>.json` /
 `world-<id>.json` file (see `src/drive/driveClient.ts`) inside a
-dedicated **"Spellbound Level Editor"** subfolder created on first connect
+dedicated **"Rhopers Game Maker"** subfolder created on first connect
 inside the project owner's shared folder — a subfolder rather than using
 that folder directly, so this app's many small JSON files stay organized
 and don't clutter anything else kept there. Every file is tagged with
@@ -622,7 +624,7 @@ single-request operations.
 "Andressa"]` are exactly what the project owner asked for — "something
 super simple" — and deliberately **not** real per-person accounts: there's
 one shared Google sign-in behind all three (see "Auth" above), and picking
-a profile only sets a tiny `spellbound:profile` `localStorage` key (unaffected
+a profile only sets a tiny `rhopers:profile` `localStorage` key (unaffected
 by the quota problem that moved everything else off `localStorage` — it's
 a handful of bytes) that scopes which levels/worlds `list()` returns via
 the `profile` `appProperties` tag. Every profile's files are equally
@@ -648,7 +650,7 @@ endpoints — this environment has no outbound network path to Google's
 servers at all, confirmed separately via a plain `page.goto()` timeout, so
 this mock was the only way to exercise `driveClient.ts`'s actual request
 formation and `GoogleDriveStorageAdapter`'s save/list/load logic before
-shipping) before this fix; a single "Spellbound Level Editor" folder gets
+shipping) before this fix; a single "Rhopers Game Maker" folder gets
 created after it.
 
 **Custom skins.** As of 2026-08-16, any Marker/Enemy/Item/Decor brush can
@@ -1677,6 +1679,57 @@ icons vs. the larger ghost/portal illustrations), so both the editor
 palette and the in-grid placement markers scale any texture down to fit
 one tile via `src/editor/spriteFit.ts`, preserving aspect ratio. Gameplay
 objects in `PlayScene` are unaffected and render at full native size.
+
+**Rebrand: "Spellbound Level Editor" → Rhopers Game Maker (2026-08-16).**
+Prompted by a user report that old references to the previous name (and,
+in the git branch name, an even earlier "Mario Maker"-flavored working
+title) were still showing up. Every user-facing string was updated — the
+browser tab title (`index.html`), the home-page heading (`MenuScene.ts`),
+this README's own title, and `package.json`'s package name (with
+`package-lock.json` regenerated to match via `npm install
+--package-lock-only`, not hand-edited).
+
+The one part of this that needed real care rather than a find-and-replace:
+`APP_FOLDER_NAME` in `googleDrive.ts` isn't just a label, it's the literal
+Google Drive folder name `driveClient.ts`'s `ensureAppFolder` searches for
+on every single save/load/list — the name every profile's actual level
+and world files already live inside of. Renaming the constant outright
+would have made the app search for a folder that doesn't exist under the
+new name, silently create a fresh *empty* one, and make every
+already-saved level/world look like it had vanished — not actually lost
+(the old folder and its contents would still sit there untouched), just
+invisible to the app from that point on. Fixed with a one-time, in-place
+migration instead of a plain rename: a new `LEGACY_APP_FOLDER_NAMES`
+array (currently just `["Spellbound Level Editor"]`, never meant to
+shrink — a build old enough to have only ever created that very first
+name still needs it found) is checked by `resolveAppFolder` if a folder
+named `APP_FOLDER_NAME` isn't found; a match gets *renamed* via a Drive
+`PATCH` to the new name — same folder id, so every file already inside it
+stays exactly where it is — rather than a second folder being created
+next to it. A brand new connect (no folder under either name yet) still
+just creates one under the new name directly, same as before.
+`src/profile/Profile.ts`'s `localStorage` key (which profile — Mike/
+Gabriel/Andressa — is remembered on a given device; unrelated to Drive,
+much lower stakes since it's just a UI convenience, not saved content)
+got the same treatment in miniature: renamed to `rhopers:profile`, with
+`loadActiveProfile` falling back to the old `spellbound:profile` key (and
+migrating it forward) so an existing device doesn't get sent back through
+the profile picker just because the key changed underneath it.
+`audioPrefs.ts`'s volume/mute key and the unused (Drive-migration-era
+dead code) `LocalStorageAdapter`/`LocalWorldStorageAdapter` classes' key
+prefixes were renamed too, without a migration — genuinely low enough
+stakes (a reset-to-default volume; classes nothing currently imports) that
+matching the extra migration machinery above would have been overkill.
+The multipart upload boundary string `driveClient.ts` uses when talking to
+Drive (`BOUNDARY`) was renamed as well; it's an arbitrary delimiter token
+Google's API never inspects for meaning, so this was pure cosmetic
+consistency, not a compatibility concern. The git branch name
+(`claude/mario-maker-editor-plan-cgyxrl`) and
+`docs/spellbound-editor-implementation-plan.md`'s *filename* were
+deliberately left alone — the former is pinned by this project's own
+development instructions, the latter would break any existing link to it
+for no user-facing benefit; the document's own title/prose inside it were
+still updated.
 
 ## Project layout
 
