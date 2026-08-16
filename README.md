@@ -38,28 +38,36 @@ include a patrolling ghost-pillow enemy (stomp it from above to kill it,
 touch it any other way and you lose) plus a goal marker (currently a
 caged sheep — see "Goal art" under Art) to reach. As of 2026-08-15,
 Enemies/Items/Decor can be placed any number of times per level (no longer
-one-per-type), and every entity category has its own Erase brush for
-removing a single placed instance — see "Entity eraser & multiple
-instances" under Art. As of 2026-08-16, persistence moved off
+one-per-type). As of 2026-08-16, persistence moved off
 `localStorage` (whose ~5-10MB per-origin quota was routinely getting
 exceeded by custom background/music uploads) onto Google Drive, gated
 behind a lightweight "Who's playing?" profile picker (Mike/Gabriel/
 Andressa) — see "Google Drive storage & profiles" under Art. Also as of
 2026-08-16, any Marker/Enemy/Item/Decor brush can be reskinned with a
 user-uploaded image, shared instantly across all 3 profiles — see
-"Custom skins" under Art. See the plan doc §9.1
+"Custom skins" under Art. Also as of 2026-08-16, the editor's menus were
+restructured into a header (Level Name/Undo/Redo/Eraser/Save/Test Play/
+Menu), a left "Palette" panel and a right "Level Settings" panel flanking
+the grid, and a stats footer — replacing the earlier per-category Erase
+brushes with one universal header Eraser toggle — see "Editor layout:
+header/footer/dropdown" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
 themselves can be renamed as of 2026-08-14, see "Level name" under Art).
 
 Controls add **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) for undo/redo,
-plus matching Actions-panel buttons. As of 2026-08-14 the editor's menus are
-two docked vertical panels flanking the grid — a **Tools** panel (category
-tabs + a 2-column palette grid) on the left, an **Actions** panel
-(Test Play/Save/Menu/Clear/Undo/Redo/Background/save-state) on the right —
-replacing the earlier single bottom toolbar strip (see "Editor layout:
-side panels" under Art).
+plus matching header buttons. As of 2026-08-16 the editor's menus are a
+header (Level Name/Undo/Redo/Eraser/Save/Test Play/Menu) above, a stats
+footer (level size/cursor tile/entity count) below, and two docked
+vertical panels flanking the grid in between — a left **Palette** panel
+(a category chip that expands into Blocks/Markers/Enemies/Items/Decor,
+that category's 2-column icon grid, then Skin/Upload Skin) and a right
+**Level Settings** panel (Background/Upload BG/Music/Upload Music/Clear)
+— replacing the earlier 5-tab "Tools" panel and single-purpose "Actions"
+panel, and replacing the old 5 per-category Erase brushes with one
+universal Eraser toggle in the header (see "Editor layout: header/footer/
+dropdown" under Art).
 
 *Engineering note:* undo/redo keyboard shortcuts are guarded against a
 real, reproducible quirk found while testing in this project's headless
@@ -115,34 +123,36 @@ Open the dev server URL in a browser. Controls:
   advance to the next level, or **R** to replay the current one; winning
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
-- **Palette** (left "Tools" panel): a vertical stack of **category tabs** —
-  Blocks, Markers, Enemies, Items, Decor — switches which 2-column grid of
-  brushes shows below them; click a brush, then click/drag on the grid to
-  paint or place. See "Categorized palette" under Art for why it's tabbed and "New
-  blocks & enemies" / "Items & hit-points" / "Second content pass" for
-  what each brush does. Every brush is ordinary — not limited to any
-  specific template — so any level, new or existing, can place any of
-  them, from Coin to a Chest to a Sleeping Bat decoration. Enemies, Items,
-  and Decor have no per-level placement limit — a level can have five
-  Ghosts and a dozen Coins if you want them, each on its own tile (see
-  "Entity eraser & multiple instances" under Art). Markers (Spawn/Goal/
-  Chest) stay one-per-level as before: placing a second Spawn moves it
-  rather than adding another, since a level can only ever start in one
-  place.
-- **Erase (entities)**: every entity category — Markers, Enemies, Items,
-  Decor — ends its palette grid with its own red **✕ Erase** brush,
-  mirroring the Blocks category's tile eraser. Select it, then click a
-  placed enemy/item/marker/decor to remove just that one; it's scoped to
-  its own category, so the Enemies eraser only ever removes enemies, never
-  a Spawn marker sitting nearby. Undo/redo cover erases exactly like any
-  other edit.
-- **Custom skins**: select any Marker/Enemy/Item/Decor brush, then
-  **Upload Skin** to reskin it with your own image — applies to that
-  brush's palette icon, every already-placed instance, and gameplay,
-  shared instantly across all 3 profiles (not just the current level).
-  The **Skin** button next to it shows whether the selected brush has one
-  and clears it on click. Blocks aren't reskinnable yet. See "Custom
-  skins" under Art.
+- **Palette** (left panel): a **category chip** at the top (e.g. "Blocks
+  ▾") expands into the 5 categories — Blocks, Markers, Enemies, Items,
+  Decor — on tap; picking one collapses it back and shows that category's
+  2-column brush grid below the chip. Click a brush, then click/drag on the
+  grid to paint or place. See "Categorized palette" under Art for the
+  category split and "New blocks & enemies" / "Items & hit-points" /
+  "Second content pass" for what each brush does. Every brush is ordinary —
+  not limited to any specific template — so any level, new or existing,
+  can place any of them, from Coin to a Chest to a Sleeping Bat decoration.
+  Enemies, Items, and Decor have no per-level placement limit — a level can
+  have five Ghosts and a dozen Coins if you want them, each on its own tile
+  (see "Multiple instances & the universal Eraser" under Art). Markers
+  (Spawn/Goal/Chest) stay one-per-level as before: placing a second Spawn
+  moves it rather than adding another, since a level can only ever start
+  in one place.
+- **Eraser** (header toggle): erases whatever occupies a clicked/dragged
+  tile — an entity of any category if one's there, otherwise the ground
+  tile itself — regardless of which Palette category tab happens to be
+  open. Replaced the earlier 5 separate per-category Erase brushes as of
+  2026-08-16 (see "Multiple instances & the universal Eraser" under Art);
+  the header button stays visibly highlighted while active, and a second
+  click turns it back off. Undo/redo cover erases exactly like any other
+  edit.
+- **Custom skins**: select any Marker/Enemy/Item/Decor brush in the left
+  panel, then **Upload Skin** to reskin it with your own image — applies
+  to that brush's palette icon, every already-placed instance, and
+  gameplay, shared instantly across all 3 profiles (not just the current
+  level). The **Skin** button above it shows whether the selected brush
+  has one and clears it on click. Blocks aren't reskinnable yet. See
+  "Custom skins" under Art.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; enemies and items are optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
@@ -161,21 +171,24 @@ Open the dev server URL in a browser. Controls:
   "Mobile/touch" below) do the same three things and the win/lose screen
   grows tappable **Restart**/**Next Level** buttons next to its
   keyboard-only hint text, since there's no R/N/Esc key to press.
-- **Save**: persists the current level to Google Drive under its own id
-  (as of 2026-08-16 — see "Google Drive storage & profiles" under Art for
-  why this replaced `localStorage`) — every level you save is kept (see My
-  Levels), not just the most recent one. You rarely need to click it: a persistent
-  **● Saved / ● Unsaved changes / ● Saving… / ● Save failed** indicator
-  below the Background button in the right "Actions" panel (see "Autosave &
-  save-state tracking" under Art) tracks
+- **Save** (header button): persists the current level to Google Drive
+  under its own id (as of 2026-08-16 — see "Google Drive storage &
+  profiles" under Art for why this replaced `localStorage`) — every level
+  you save is kept (see My Levels), not just the most recent one. You
+  rarely need to click it: a persistent **● Saved / ● Unsaved changes /
+  ● Saving… / ● Save failed** indicator just left of the Save button in
+  the header (see "Autosave & save-state tracking" under Art) tracks
   whether the level in memory matches storage, and edits autosave a couple
   seconds after you stop — Save itself still exists for "save right now
   and show a confirmation toast," and still mints the level's id on first
   use exactly like autosave does.
-- **Menu**: also flushes an unsaved autosave first if one's pending, so
-  navigating away never drops an edit still inside the debounce window —
-  back to the home page.
-- **Clear**: wipes the current grid and entities.
+- **Menu** (header button): also flushes an unsaved autosave first if
+  one's pending, so navigating away never drops an edit still inside the
+  debounce window — back to the home page.
+- **Clear** (right "Level Settings" panel): wipes the current grid and
+  entities. A two-tap confirm, not a native popup — the first tap arms it
+  (label changes to "Clear? Tap again," red highlight, auto-reverts after
+  ~3s if you don't follow up), the second tap while armed actually clears.
 - **Blocks palette**: every ground/brick/bounce/hazard skin — Grass/Desert/
   Castle/Snow Ground, Brick/Castle Brick, Bounce/Castle Bounce, Water/Lava,
   plus Erase — sits in the palette simultaneously, grouped with a small gap
@@ -223,8 +236,11 @@ adapts. Three things make that true, all in `main.ts`/`index.html` unless
 noted:
 
 - **Scaling**: the game's internal resolution stays a fixed
-  `GAME_WIDTH`×`GAME_HEIGHT` (1050×560 — see `config/gameConfig.ts`; every
-  scene's layout math is untouched), but Phaser's Scale Manager runs in
+  `GAME_WIDTH`×`GAME_HEIGHT` (1050×468 as of the 2026-08-16 header/footer
+  layout pass, computed rather than hand-tuned — see `config/gameConfig.ts`
+  and "Editor layout: header/footer/dropdown" under Art; every scene's
+  layout math is untouched by the scaling itself), but Phaser's Scale
+  Manager runs in
   `FIT` + `CENTER_BOTH` mode, so it's letterboxed down (or up) to whatever
   viewport it's opened in, phone included, instead of getting clipped or
   forcing page scroll. `index.html`'s viewport meta tag disables pinch/
@@ -403,14 +419,14 @@ selected brush's category isn't the one currently showing, and reappears
 when you tab back. The grid of active-brush icons lives in a
 `Phaser.GameObjects.Container` — as a single entry in the scene's display
 list, a Container's *own* depth (not its children's) decides whether it
-draws in front of or behind sibling objects like the Tools panel's
+draws in front of or behind sibling objects like the Palette panel's
 background rectangle, so `EditorUI` sets it explicitly above that
 background; leaving it at the default depth was a real bug hit and fixed
 during this pass — every icon silently rendered a layer behind the opaque
 panel and never appeared, even though every other property (position,
 texture, visibility) was correct. (As of the side-panel layout pass, the
-icon grid is 2 columns instead of 1 row — see "Editor layout: side panels"
-below — but the Container-depth mechanics are unchanged.)
+icon grid is 2 columns instead of 1 row — see "Editor layout: header/
+footer/dropdown" below — but the Container-depth mechanics are unchanged.)
 
 **Autosave & save-state tracking.** As of 2026-08-14, Save is no longer
 the only thing standing between an edit and losing it. `EditorScene`
@@ -418,7 +434,8 @@ tracks a `dirty` flag, flipped true by every paint drag, entity
 move, undo, and redo (`markDirty()`, called from those exact spots —
 `flushDragCommands`, `applyEntityBrushAt`, `undo`, `redo`), and flipped
 back false only once a save actually succeeds. A small persistent label
-in `EditorUI` (`saveStatusText`, next to Redo) mirrors that flag in real
+in `EditorUI` (`saveStatusText`, in the header just left of Save as of
+2026-08-16) mirrors that flag in real
 time as **● Saved** / **● Unsaved changes** / **● Saving…** / **●
 Save failed** — deliberately not the same mechanism as `setStatus`'s
 existing transient 2.5s toast (still used for one-off messages like
@@ -579,7 +596,9 @@ created after it.
 **Custom skins.** As of 2026-08-16, any Marker/Enemy/Item/Decor brush can
 be reskinned with a user-uploaded image — click the brush in the palette
 (the selection doubles as "which type," so there's no separate type
-picker), then **Upload Skin** in the Actions panel. The image is
+picker), then **Upload Skin** — in the left Palette panel, below the icon
+grid, as of the 2026-08-16 header/footer layout pass; originally in the
+right Actions panel. The image is
 downscaled to a small PNG (`src/skins/skinUpload.ts`, `MAX_DIMENSION =
 128` — much smaller than a background's 1600px, since these render at
 roughly one tile; PNG rather than JPEG, since JPEG has no alpha channel
@@ -723,8 +742,8 @@ Valley" aren't the same length), which meant the save-state indicator
 sitting after it had to reposition itself every time the label changed —
 omitting that was a real bug hit while wiring this back up, and the two
 overlapped the first time "Sunny Valley" was selected. The side-panel
-layout pass (see "Editor layout: side panels" below) eliminated that whole
-bug class rather than patching it further: every Actions-panel button,
+layout pass (see "Editor layout: header/footer/dropdown" below) eliminated
+that whole bug class rather than patching it further: every panel button,
 background picker included, is now a fixed width, so a longer label never
 pushes into whatever comes next.
 
@@ -854,10 +873,13 @@ editor, not My Levels, not World Maker's level picker), so anyone with
 more than one blank level, or who used the same template twice, ended up
 with visually-identical rows distinguishable only by their "Updated
 \<date\>" timestamp. `src/editor/LevelNameInput.ts` fixes that with a
-**Level Name:** field docked in the otherwise-empty strip below the grid
-(the editor's canvas is taller than the grid to fit the side panels'
-content — see "Editor layout: side panels" below — and that strip, between
-the two panels, was unused). It's a real, always-visible
+**Name:** field — originally docked in the otherwise-empty strip below the
+grid (the editor's canvas used to be taller than the grid to fit the side
+panels' content, and that strip, between the two panels, was unused); as
+of the 2026-08-16 header/footer layout pass it lives in the header instead
+(see "Editor layout: header/footer/dropdown" below), since that empty
+strip no longer exists once `GAME_HEIGHT` is computed to fit exactly. It's
+a real, always-visible
 `<input type="text">` rather than a Phaser Text object, since Phaser has
 no native text-entry widget at all; `src/editor/domOverlay.ts`'s
 `positionOverlay` (also used by `FileInputOverlay`) places it in real CSS
@@ -889,7 +911,7 @@ confirmed empirically rather than assumed:
   canvas handler — and therefore before whatever button was clicked —
   gets a chance to run.
 
-**Entity eraser & multiple instances.** As of 2026-08-15, Enemies/Items/
+**Multiple instances & the universal Eraser.** As of 2026-08-15, Enemies/Items/
 Decor are no longer capped at one placed instance per type — until this
 pass, `EntityPlacer` stored `Map<EntityType, Image>`, literally one marker
 per *type* for the whole level, so placing a second Ghost just moved the
@@ -911,13 +933,23 @@ Spawn still moves it rather than adding another. Enemies/Items/Decor have
 no such limit — placing one only ever clears whatever (if anything)
 already occupies that exact tile, not other instances elsewhere.
 
-Every entity category tab (Markers/Enemies/Items/Decor) now ends its
-palette grid with its own **✕ Erase** brush, mirroring the Blocks
-category's existing tile eraser. Selecting it and clicking a tile removes
-whatever entity is there — scoped to that brush's own category via each
-placed entity's `Brush.category` lookup, so the Enemies eraser can never
-accidentally delete a Spawn marker that happens to be nearby. Moving a
-Marker to a tile that's already occupied by something else (say, an enemy)
+Every entity category tab (Markers/Enemies/Items/Decor) originally ended
+its palette grid with its own **✕ Erase** brush, mirroring the Blocks
+category's tile eraser, scoped to that brush's own category so the
+Enemies eraser could never accidentally delete a nearby Spawn marker. As
+of 2026-08-16 those 5 per-category brushes were removed in favor of one
+**header-level Eraser toggle** (`EditorScene.eraserActive`, wired through
+`EditorUI.setEraserActive`) — turning it on and clicking/dragging over the
+grid erases whatever occupies a tile (an entity of *any* category first
+via `EntityPlacer.entityAt`, the ground tile itself if none is there) no
+matter which Palette category tab happens to be open, rather than only
+whichever one the eraser brush used to live under. `EditorScene.applyEraseAt`
+mirrors `applyTileBrushAt`'s drag-debounce (`dragLastX`/`dragLastY`) and
+`applyEntityBrushAt`'s immediate-execute command pattern, so an entity
+erase and a tile erase can share one `dragCommands` array across a single
+drag — `HistoryStack.push` never re-calls `.execute()`, so recording an
+already-applied command works the same way drag-painting already did.
+Moving a Marker to a tile that's already occupied by something else (say, an enemy)
 displaces that occupant too, keeping the one-entity-per-tile invariant;
 both the displaced occupant and (for Markers) the marker's own previous
 position are erased via their own `EraseEntityCommand`s, composed with the
@@ -930,64 +962,79 @@ singleton lookup, unchanged. All 6 templates predate this pass and already
 had unique `(x, y)` per entity, so the new stricter invariant doesn't
 affect them.
 
-**Editor layout: side panels.** As of 2026-08-14 the editor's menus are
-two opaque, docked vertical panels flanking the grid, both rendered above
-the background (`StaticBackground`'s images sit at depth `-100`; the
-panels and everything on them sit at depth 20+) instead of one crowded
-row below it. `LEFT_PANEL_WIDTH` (Tools) and `RIGHT_PANEL_WIDTH` (Actions)
-in `config/gameConfig.ts` set both panels' widths and, together, how much
-wider `GAME_WIDTH` is than the bare tile grid; `GAME_HEIGHT` (560) is
-taller than the grid itself (`GRID_ROWS * TILE_SIZE` = 384) so the Tools
-panel's 5 category tabs plus a 2-column icon grid (Blocks, the widest
-category at 11 brushes, needs 6 rows) have room to fit without crowding —
-the dead space below the grid, within its own x-range, stays unpaintable
-and unpainted-into (see the masking note below).
+**Editor layout: header/footer/dropdown (2026-08-14 side panels, revised
+2026-08-16).** As of 2026-08-14 the editor's menus moved off one crowded
+toolbar row into two opaque, docked vertical panels flanking the grid — a
+left "Tools" panel (5 stacked category tabs + a 2-column palette grid) and
+a right "Actions" panel (every button, stacked). As of 2026-08-16 that was
+revised again: a header now sits above the grid and a stats footer below
+it, both spanning the full canvas width, with the two side panels
+narrowed to flank only the grid's own height in between — not the header/
+footer bands. `HEADER_HEIGHT`/`FOOTER_HEIGHT`/`GRID_ORIGIN_Y` (new) join
+`LEFT_PANEL_WIDTH`/`RIGHT_PANEL_WIDTH`/`GRID_ORIGIN_X` (from the 2026-08-14
+pass) in `config/gameConfig.ts`; `GAME_HEIGHT` is now *computed*
+(`HEADER_HEIGHT + GRID_ROWS * TILE_SIZE + FOOTER_HEIGHT` = 468) rather than
+a hand-tuned constant (560), since removing the 5 per-category Erase
+brushes (see "Multiple instances & the universal Eraser" above) freed up
+enough vertical room in the side panels that the canvas no longer needs to
+be taller than header+grid+footer to fit their content — unlike the
+2026-08-14 pass, there's no leftover dead space below the grid at all now.
 
-The left **Tools** panel stacks its 5 category tabs vertically, then
-renders whichever category is active as a 2-column icon grid
-(`EditorUI.iconPositions`) instead of the old single ever-widening row. A
-`groupEnd` brush (see `Palette.ts`) still closes out a visual cluster —
-Blocks' ground-skin/brick/bounce/hazard/erase groups — but where it used
-to add a horizontal gap in the 1-row layout, here it forces the *next*
-brush to start a new row, so those clusters still read as separate
-groups, just stacked instead of spread sideways. The right **Actions**
-panel stacks Test Play/Save/Menu/Clear/Undo/Redo/Background as
-fixed-width buttons, one per row, with the save-state indicator as its
-own row below them — see the static-background note above for the bug
-class fixing "fixed-width" like this was meant to close.
+The **header** holds Level Name (moved here from its own row below the
+grid), Undo/Redo, the Eraser toggle, and — anchored to the right edge
+instead, so neither the variable-length save-state text nor the level
+name ever shifts them — the save-state indicator, Save, an accent-colored
+Test Play, and Menu. The left **Palette** panel replaced the 5 stacked
+category tabs with a single **chip** (`EditorUI.chipButton`, e.g. "Blocks
+▾") that expands into all 5 categories on tap (a small `Phaser.GameObjects.
+Container` toggled visible/hidden, not a native `<select>` — chosen so the
+whole UI stays one visual language, canvas-rendered start to finish, no
+DOM popover to keep in sync); picking one collapses it back and swaps the
+icon grid below, same `EditorUI.iconPositions` 2-column layout as the
+2026-08-14 pass. The Skin/Upload Skin buttons live in this same left panel
+now too, pinned to a fixed row (`SKIN_SECTION_Y`) below the grid regardless
+of the active category's row count, so they never jump up and down when
+you switch categories — unlike the icon grid above them, whose height does
+vary category to category. The right panel, retitled **Level Settings**,
+keeps Background/Upload BG/Music/Upload Music, plus Clear (now a two-tap
+arm/confirm — see the Controls section above — instead of firing
+immediately); Test Play/Save/Menu/Undo/Redo moved out of it into the
+header, and the save-state indicator moved with Save. The **footer** is
+new: read-only level size (`W×H`), the live cursor tile (`EditorScene`
+calls `EditorUI.setCursorTile` from the same `onPointerMove` that already
+drives the hover highlight), and entity count (`EditorUI.setEntityCount`,
+called from `markDirty` since almost every edit could have changed it —
+cheaper than threading a "did the count actually change" check through
+every call site).
 
-Repositioning the grid itself (not just the menus around it) was the
-harder part: tile (0,0)'s pixel origin moved from the canvas's left edge
-to `GRID_ORIGIN_X` (= `LEFT_PANEL_WIDTH`), which meant touching every
-tile↔pixel conversion in the codebase — the ground tilemap layer's own
-origin, entity marker/enemy sprite placement, the hover highlight, and
-pointer-click→tile math (both directions) in `EditorScene`,
-`EntityPlacer.ts`, `EnemyBehaviors.ts`, and `PlayScene.ts`. The
-straightforward alternative — wrapping the grid's contents in one
-`Phaser.GameObjects.Container` and offsetting *that* — was deliberately
-not used: Arcade Physics bodies (which `PlayScene`'s player, zones, and
-enemies all rely on) don't reliably work when their GameObject is nested
-inside a Container, a known Phaser engine limitation, so explicit
-per-call-site offset arithmetic was used instead everywhere a pixel
-position is computed from a tile coordinate. `PlayScene` — which has no
-side panels of its own — deliberately gets the *same* `GRID_ORIGIN_X`
-offset as `EditorScene` purely so Test Play doesn't visually shift the
-level sideways when transitioning from Edit to Play and back.
-`StaticBackground`'s mask (see above) now clips to both the grid's width
-*and* its height (`GRID_ROWS * TILE_SIZE`, not the taller `GAME_HEIGHT`)
-— previously only width mattered, since the canvas ran flush to the
-grid's height; now that the canvas is taller to fit the side panels'
-content, an unmasked height would bleed the background into the dead
-space below the grid the same way an unmasked width used to bleed it into
-the margin beside it (see "That clip matters beyond looks" below for the
-original bug this pattern guards against).
+Shifting the grid down (not just right, as the 2026-08-14 pass already
+did) needed the same treatment `GRID_ORIGIN_X` got: a new `GRID_ORIGIN_Y`
+(= `HEADER_HEIGHT`) threaded through every tile↔pixel conversion again —
+the ground tilemap layer's origin, entity marker/enemy sprite placement
+(`EntityPlacer.ts`, `EnemyBehaviors.ts`), the hover highlight, pointer-
+click→tile math in both directions, and `StaticBackground`'s mask/image
+position — in both `EditorScene.ts` and `PlayScene.ts`, plus
+`TouchControls.ts`'s on-screen button Y. `PlayScene` — which renders no
+header/footer bands of its own — deliberately shares the same
+`GRID_ORIGIN_Y` as `EditorScene`, exactly like it already shared
+`GRID_ORIGIN_X`, purely so Test Play doesn't visually shift the level up
+or down when transitioning from Edit to Play and back; its existing HUD/
+back-button/volume-control overlay (already independent of the grid) just
+settles into the new top margin instead of floating over row 0 of the
+grid the way it used to. One real miss surfaced by this pass's own
+regression testing: `EnemyBehaviors.ts`'s `createPatrolEnemy` computed its
+spawn `worldY` from `tileY * TILE_SIZE` with no `GRID_ORIGIN_Y` at all —
+inherited from before the header existed and never touched by the
+2026-08-14 `GRID_ORIGIN_X` pass (enemies only need vertical placement) —
+which would have spawned every enemy `HEADER_HEIGHT` px too high in Test
+Play relative to where it was painted in the editor.
 
 The through-line with every other UI pass in this project holds here too:
-`LEFT_PANEL_WIDTH`/`RIGHT_PANEL_WIDTH`/`GAME_HEIGHT`'s exact values were
-tuned empirically against real rendered screenshots (Playwright,
-calibrated via the canvas's `boundingBox()` scale) rather than derived
-from a formula — comfortable for the default 20x12 grid and every
-category's icon count, not the extreme case.
+`LEFT_PANEL_WIDTH`/`RIGHT_PANEL_WIDTH`/`HEADER_HEIGHT`/`FOOTER_HEIGHT`'s
+exact values were tuned empirically against real rendered screenshots
+(Playwright, calibrated via the canvas's `boundingBox()` scale) rather
+than derived from a formula — comfortable for the default 20x12 grid and
+every category's icon count, not the extreme case.
 
 The multi-scene parallax system below is still **dormant, not deleted**
 — every asset and every file it depends on (`ParallaxBackground.ts`,
@@ -1275,7 +1322,7 @@ src/
 │   ├── Palette.ts            data-driven brush definitions
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
 │   ├── EntityPlacer.ts       raw mutator for the entity layer — position-keyed (one entity per tile), not type-keyed, since 2026-08-15's multi-instance rework
-│   ├── EditorUI.ts           left Tools panel (tabs + 2-col palette grid) + right Actions panel rendering
+│   ├── EditorUI.ts           header + footer + left Palette panel (category chip/dropdown + 2-col grid + Skin) + right Level Settings panel rendering
 │   ├── FileInputOverlay.ts   a real, invisible <input type=file> positioned over an EditorUI upload button (Upload BG or Upload Music) — see "Custom uploaded backgrounds" under Art for why a Phaser-driven click can't open a real file picker
 │   ├── LevelNameInput.ts     a real, visible <input type=text> for the level name (Phaser has no native text-entry widget) — see "Level name" under Art, including two non-obvious bugs found/fixed while building it
 │   ├── domOverlay.ts         positionOverlay() — converts game coordinates to real CSS pixels over the canvas, shared by FileInputOverlay and LevelNameInput

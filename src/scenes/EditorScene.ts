@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GAME_WIDTH, GRID_ORIGIN_X, GRID_ROWS, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
+import { GAME_WIDTH, GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_ROWS, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
 import { AddEntityCommand } from "../editor/commands/AddEntityCommand";
 import { Command } from "../editor/commands/Command";
 import { CompositeCommand } from "../editor/commands/CompositeCommand";
@@ -17,7 +17,7 @@ import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
-import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
+import { createEmptyLevel, EMPTY_TILE, EntityType, LevelData } from "../level/LevelSchema";
 import { backgroundDisplayLabel, nextStaticBackgroundId, resolveStaticBackground, StaticBackgroundId } from "../level/staticBackgrounds";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
@@ -54,6 +54,9 @@ export class EditorScene extends Phaser.Scene {
   private highlight!: Phaser.GameObjects.Image;
   private currentBrush: Brush = PALETTE[0];
   private isPointerDown = false;
+  // Header-level toggle, independent of currentBrush — see applyEraseAt's
+  // docstring for why erasing stopped being a per-category brush.
+  private eraserActive = false;
   private storage: StorageAdapter = getLevelStorage();
   private brushesByType = new Map<EntityType, Brush>();
   private history = new HistoryStack();
@@ -112,22 +115,32 @@ export class EditorScene extends Phaser.Scene {
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
 
-    this.ui = new EditorUI(this, backgroundDisplayLabel(this.backgroundId), this.level.customMusicName ?? null, this.level.name, {
-      onSelectBrush: (brush) => (this.currentBrush = brush),
-      onTestPlay: () => this.testPlay(),
-      onSave: () => void this.saveLevel(),
-      onMenu: () => void this.leaveToMenu(),
-      onClear: () => this.clearLevel(),
-      onUndo: () => this.undo(),
-      onRedo: () => this.redo(),
-      onCycleBackground: () => this.cycleBackground(),
-      onUploadBackground: (file) => this.uploadBackground(file),
-      onUploadMusic: (file) => this.uploadMusic(file),
-      onClearMusic: () => this.clearMusic(),
-      onRenameLevel: (name) => this.renameLevel(name),
-      onUploadSkin: (file) => this.uploadSkin(file),
-      onClearSkin: () => this.clearSkin(),
-    });
+    this.ui = new EditorUI(
+      this,
+      backgroundDisplayLabel(this.backgroundId),
+      this.level.customMusicName ?? null,
+      this.level.name,
+      this.level.width,
+      this.level.height,
+      this.level.entities.length,
+      {
+        onSelectBrush: (brush) => (this.currentBrush = brush),
+        onTestPlay: () => this.testPlay(),
+        onSave: () => void this.saveLevel(),
+        onMenu: () => void this.leaveToMenu(),
+        onClear: () => this.clearLevel(),
+        onUndo: () => this.undo(),
+        onRedo: () => this.redo(),
+        onCycleBackground: () => this.cycleBackground(),
+        onUploadBackground: (file) => this.uploadBackground(file),
+        onUploadMusic: (file) => this.uploadMusic(file),
+        onClearMusic: () => this.clearMusic(),
+        onRenameLevel: (name) => this.renameLevel(name),
+        onUploadSkin: (file) => this.uploadSkin(file),
+        onClearSkin: () => this.clearSkin(),
+        onToggleEraser: () => this.toggleEraser(),
+      },
+    );
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
 
@@ -139,17 +152,21 @@ export class EditorScene extends Phaser.Scene {
     void resolveSkinTextureKeys(this).then((skinTextureKeys) => this.applySkinTextureKeys(skinTextureKeys));
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (!this.isOverGrid(pointer)) return; // Tools/Actions panel, or the dead space below the grid
+      if (!this.isOverGrid(pointer)) return; // Palette/Level Settings panel, header, footer, or the dead space below the grid
       const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
-      const tileY = Math.floor(pointer.y / TILE_SIZE);
-      if (this.currentBrush.kind === "tile") {
+      const tileY = Math.floor((pointer.y - GRID_ORIGIN_Y) / TILE_SIZE);
+      if (this.eraserActive) {
+        this.isPointerDown = true;
+        this.dragCommands = [];
+        this.dragLastX = -1;
+        this.dragLastY = -1;
+        this.applyEraseAt(tileX, tileY);
+      } else if (this.currentBrush.kind === "tile") {
         this.isPointerDown = true;
         this.dragCommands = [];
         this.dragLastX = -1;
         this.dragLastY = -1;
         this.applyTileBrushAt(tileX, tileY);
-      } else if (this.currentBrush.eraseEntity) {
-        this.eraseEntityAt(tileX, tileY);
       } else {
         this.applyEntityBrushAt(tileX, tileY);
       }
@@ -200,19 +217,21 @@ export class EditorScene extends Phaser.Scene {
   }
 
   /** True when the pointer is over the grid's own screen area — not the
-   * Tools panel on the left, the Actions panel on the right, or the dead
-   * space below the grid (within its x-range) that exists now that the
-   * canvas is taller than GRID_ROWS tiles to fit those panels' content.
-   * Used to gate both painting and the hover highlight; doesn't check
-   * against `level.width`/`level.height` (narrower than the panel-to-panel
-   * gap for most levels) — `applyTileBrushAt`/`applyEntityBrushAt` already
-   * no-op on an out-of-bounds tile, same as before this layout existed. */
+   * Palette panel on the left, the Level Settings panel on the right, the
+   * header above, the stats footer below, or the dead space beside the
+   * grid (within its y-range) that exists now that the canvas is wider
+   * than GRID_COLS tiles to fit those panels' content. Used to gate both
+   * painting and the hover highlight; doesn't check against
+   * `level.width`/`level.height` (narrower than the panel-to-panel gap for
+   * most levels) — `applyTileBrushAt`/`applyEntityBrushAt`/`applyEraseAt`
+   * already no-op on an out-of-bounds tile, same as before this layout
+   * existed. */
   private isOverGrid(pointer: Phaser.Input.Pointer): boolean {
     return (
       pointer.x >= GRID_ORIGIN_X &&
       pointer.x < GAME_WIDTH - RIGHT_PANEL_WIDTH &&
-      pointer.y >= 0 &&
-      pointer.y < GRID_ROWS * TILE_SIZE
+      pointer.y >= GRID_ORIGIN_Y &&
+      pointer.y < GRID_ORIGIN_Y + GRID_ROWS * TILE_SIZE
     );
   }
 
@@ -222,14 +241,19 @@ export class EditorScene extends Phaser.Scene {
       return;
     }
     const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
-    const tileY = Math.floor(pointer.y / TILE_SIZE);
+    const tileY = Math.floor((pointer.y - GRID_ORIGIN_Y) / TILE_SIZE);
     if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) {
       this.highlight.setPosition(-100, -100);
     } else {
-      this.highlight.setPosition(GRID_ORIGIN_X + tileX * TILE_SIZE + TILE_SIZE / 2, tileY * TILE_SIZE + TILE_SIZE / 2);
+      this.highlight.setPosition(
+        GRID_ORIGIN_X + tileX * TILE_SIZE + TILE_SIZE / 2,
+        GRID_ORIGIN_Y + tileY * TILE_SIZE + TILE_SIZE / 2,
+      );
     }
-    if (this.isPointerDown && this.currentBrush.kind === "tile") {
-      this.applyTileBrushAt(tileX, tileY);
+    this.ui.setCursorTile(tileX >= 0 && tileY >= 0 && tileX < this.level.width && tileY < this.level.height ? { x: tileX, y: tileY } : null);
+    if (this.isPointerDown) {
+      if (this.eraserActive) this.applyEraseAt(tileX, tileY);
+      else if (this.currentBrush.kind === "tile") this.applyTileBrushAt(tileX, tileY);
     }
   }
 
@@ -298,22 +322,44 @@ export class EditorScene extends Phaser.Scene {
     this.markDirty();
   }
 
-  /** Erases whatever entity occupies (tileX, tileY), scoped to the current
-   * Erase brush's own category (Markers/Enemies/Items/Decor) — a no-op if
-   * the tile is empty, or occupied by an entity from a different category,
-   * so e.g. the Enemies eraser can never accidentally delete a Spawn
-   * marker sitting under an enemy that's since moved elsewhere. */
-  private eraseEntityAt(tileX: number, tileY: number): void {
-    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
-    const occupant = this.entityPlacer.entityAt(tileX, tileY);
-    if (!occupant) return;
-    const occupantBrush = this.brushesByType.get(occupant.type);
-    if (occupantBrush?.category !== this.currentBrush.category) return;
+  /** Header-level Eraser toggle (replacing the old 5 per-category Erase
+   * brushes) — flips `eraserActive` and hands the new state to the UI so
+   * the header button can show it's engaged. Turning the eraser on doesn't
+   * touch `currentBrush`, so switching it back off leaves whatever brush
+   * was selected before untouched. */
+  private toggleEraser(): void {
+    this.eraserActive = !this.eraserActive;
+    this.ui.setEraserActive(this.eraserActive);
+  }
 
-    const command = new EraseEntityCommand(this.entityPlacer, this.brushesByType, occupant);
-    command.execute();
-    this.history.push(command);
-    this.markDirty();
+  /** Erases whatever occupies (tileX, tileY): an entity first (any
+   * category — unlike the old per-category erase brushes, the header
+   * eraser isn't scoped to whichever tab happens to be open), or failing
+   * that the ground tile itself. A no-op on an already-empty tile. Mirrors
+   * applyTileBrushAt's drag-debounce (dragLastX/dragLastY) and
+   * applyEntityBrushAt's immediate-execute command pattern, so both erase
+   * paths can share one dragCommands array with flushDragCommands. */
+  private applyEraseAt(tileX: number, tileY: number): void {
+    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
+
+    const occupant = this.entityPlacer.entityAt(tileX, tileY);
+    if (occupant) {
+      if (tileX === this.dragLastX && tileY === this.dragLastY) return;
+      this.dragLastX = tileX;
+      this.dragLastY = tileY;
+      const command = new EraseEntityCommand(this.entityPlacer, this.brushesByType, occupant);
+      command.execute();
+      this.dragCommands.push(command);
+      return;
+    }
+
+    if (tileX === this.dragLastX && tileY === this.dragLastY) return;
+    this.dragLastX = tileX;
+    this.dragLastY = tileY;
+    const prevIndex = this.level.layers.ground[tileY]?.[tileX];
+    if (prevIndex === undefined || prevIndex === EMPTY_TILE) return; // out of bounds, or already empty
+    if (!this.painter.paint(tileX, tileY, EMPTY_TILE)) return;
+    this.dragCommands.push(new PaintTileCommand(this.painter, tileX, tileY, prevIndex, EMPTY_TILE));
   }
 
   /** Builds the tilemap layer against all 4 ground skins at once — each
@@ -335,7 +381,7 @@ export class EditorScene extends Phaser.Scene {
       const key = groundTilesetKey(skin);
       return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 5)!;
     });
-    this.groundLayer = map.createBlankLayer("ground", tilesets, GRID_ORIGIN_X, 0)!;
+    this.groundLayer = map.createBlankLayer("ground", tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
   }
 
   private undo(): void {
@@ -564,6 +610,7 @@ export class EditorScene extends Phaser.Scene {
   private markDirty(): void {
     this.dirty = true;
     this.ui.setSaveState("unsaved");
+    this.ui.setEntityCount(this.level.entities.length);
     this.autosaveTimer?.remove(false);
     this.autosaveTimer = this.time.delayedCall(AUTOSAVE_DEBOUNCE_MS, () => void this.autosave());
   }

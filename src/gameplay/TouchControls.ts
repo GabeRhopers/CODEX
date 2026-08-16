@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GAME_WIDTH, GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
+import { GAME_WIDTH, GRID_ORIGIN_Y, GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
 
 export interface TouchControlState {
   left: boolean;
@@ -12,9 +12,10 @@ const BUTTON_ALPHA = 0.35;
 const MARGIN = 56;
 
 // The level's own visible height, not GAME_HEIGHT — GAME_HEIGHT is taller
-// than the grid to fit the editor's side panels (see gameConfig.ts), and
-// PlayScene has no panels of its own, so anchoring to GAME_HEIGHT stranded
-// these buttons deep in that dead space below the actual level content.
+// than the grid to fit the editor's header/footer/side panels (see
+// gameConfig.ts), and PlayScene renders no header/footer bands of its own
+// into that reserved space, so anchoring to GAME_HEIGHT stranded these
+// buttons deep in the dead space below the actual level content.
 const PLAYABLE_HEIGHT = GRID_ROWS * TILE_SIZE;
 
 /** On-screen left/right/jump buttons for PlayScene, OR'd into keyboard
@@ -30,7 +31,7 @@ export class TouchControls {
   private state: TouchControlState = { left: false, right: false, jump: false };
 
   constructor(scene: Phaser.Scene) {
-    const y = PLAYABLE_HEIGHT - MARGIN;
+    const y = GRID_ORIGIN_Y + PLAYABLE_HEIGHT - MARGIN;
     this.makeButton(scene, MARGIN, y, "◀", (down) => (this.state.left = down));
     this.makeButton(scene, MARGIN + BUTTON_RADIUS * 2 + 16, y, "▶", (down) => (this.state.right = down));
     this.makeButton(scene, GAME_WIDTH - MARGIN, y, "▲", (down) => (this.state.jump = down));

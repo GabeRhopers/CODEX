@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GRID_ORIGIN_X } from "../config/gameConfig";
+import { GRID_ORIGIN_X, GRID_ORIGIN_Y } from "../config/gameConfig";
 import { EntityType, LevelData, LevelEntity } from "../level/LevelSchema";
 import { Brush } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
@@ -70,7 +70,7 @@ export class EntityPlacer {
     const type = brush.entityType;
     if (!type) return;
     const worldX = GRID_ORIGIN_X + tileX * this.tileSize + this.tileSize / 2;
-    const worldY = tileY * this.tileSize + this.tileSize / 2;
+    const worldY = GRID_ORIGIN_Y + tileY * this.tileSize + this.tileSize / 2;
 
     this.level.entities.push({ type, x: tileX, y: tileY });
     const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
@@ -104,7 +104,7 @@ export class EntityPlacer {
       const brush = brushesByType.get(entity.type);
       if (!brush) continue;
       const worldX = GRID_ORIGIN_X + entity.x * this.tileSize + this.tileSize / 2;
-      const worldY = entity.y * this.tileSize + this.tileSize / 2;
+      const worldY = GRID_ORIGIN_Y + entity.y * this.tileSize + this.tileSize / 2;
       const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
       marker.setDepth(10);
       fitWithinTile(marker);

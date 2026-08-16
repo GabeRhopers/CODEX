@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GRID_ORIGIN_X, TILE_SIZE } from "../config/gameConfig";
+import { GRID_ORIGIN_X, GRID_ORIGIN_Y, TILE_SIZE } from "../config/gameConfig";
 
 const PATROL_SPEED = 60;
 const PATROL_RANGE_TILES = 2;
@@ -24,7 +24,7 @@ export function createPatrolEnemy(
   textureKey: string,
 ): Phaser.Physics.Arcade.Sprite {
   const worldX = GRID_ORIGIN_X + tileX * TILE_SIZE + TILE_SIZE / 2;
-  const worldY = tileY * TILE_SIZE + TILE_SIZE / 2;
+  const worldY = GRID_ORIGIN_Y + tileY * TILE_SIZE + TILE_SIZE / 2;
   const enemy = scene.physics.add.sprite(worldX, worldY, textureKey);
   const body = enemy.body as Phaser.Physics.Arcade.Body;
   body.setAllowGravity(false);
