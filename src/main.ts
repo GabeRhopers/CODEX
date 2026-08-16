@@ -54,4 +54,23 @@ const config: Phaser.Types.Core.GameConfig = {
   ],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// Phaser's own ScaleManager only ever listens for `window`'s 'resize' and
+// 'orientationchange' events (see node_modules/phaser/src/scale/
+// ScaleManager.js) — it has no ResizeObserver or visualViewport listener
+// of its own. On Android Chrome specifically, the dynamic address/tab bar
+// showing or hiding (e.g. on scroll) changes the actual visible viewport
+// — the same change index.html's `#app` already tracks via `100dvh` — but
+// does so via a `visualViewport` resize, which doesn't reliably also fire
+// a `window` 'resize'. Without this, the canvas stays sized for whatever
+// the toolbar state was at the last event Phaser DID see, so it can end up
+// alternately too large (spilling past the now-shorter visible area,
+// forcing a scroll/crop) or too small, independently of anything the page
+// itself did — exactly the "sometimes too big, sometimes too small" report
+// this fixes. `scale.refresh()` is Phaser's own public API for forcing a
+// fresh measurement of its parent and re-fitting the canvas to it;
+// `visualViewport` itself is undefined in a handful of older browsers,
+// hence the guard (Phaser's own window-resize listening still covers
+// those as before).
+window.visualViewport?.addEventListener("resize", () => game.scale.refresh());

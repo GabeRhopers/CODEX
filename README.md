@@ -61,7 +61,10 @@ Water no longer damages the player and can be swum through, with its own
 Lava is unchanged and still an instant hazard — see "Water is swimmable,
 not a hazard" under Art. Also as of 2026-08-16, the player and every enemy
 are now confined to the level's own left/right edges — see "Player/enemy
-world bounds" under Art. See the plan doc §9.1
+world bounds" under Art. Also as of 2026-08-16, the game canvas no longer
+gets stuck at a stale size on mobile when the browser's own address bar
+shows/hides — see "Cross-device layout, part 2: the stale-canvas-size bug"
+under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -1352,6 +1355,44 @@ screen sizes" pass:
   the *browser's own default* gesture handling on top of a touch; Phaser
   still receives every pointer event underneath it either way, so this
   doesn't change how taps/drags reach the game itself.
+
+**Cross-device layout, part 2: the stale-canvas-size bug (2026-08-16).** A
+second, distinct report on the same general area — "sometimes too big,
+sometimes too small," this time with two screenshots of the same phone
+a minute apart, one showing the game badly oversized (cropped off the left
+edge, forcing a horizontal scroll) and the other correctly fit. Not the
+double-centering bug above (that produced a consistent, symmetric
+offset, not an oversized/cropped canvas), and not something a Playwright
+viewport sweep on desktop Chromium can reproduce directly, since it's
+specific to how a *real* mobile browser's own UI chrome behaves — so this
+one was root-caused by reading Phaser's own source rather than by
+reproducing it pixel-for-pixel. `node_modules/phaser/src/scale/
+ScaleManager.js` only ever listens for `window`'s `resize` and
+`orientationchange` events — it has no `ResizeObserver` or
+`visualViewport` listener of its own, despite this project's `#app`
+already tracking the *dynamic* viewport via `100dvh` (see above). Android
+Chrome's address/tab bar showing or hiding (typically on scroll) changes
+that dynamic viewport — the same thing `100dvh` is *for* — via a
+`visualViewport` resize, which doesn't reliably also fire a `window`
+resize. Phaser's canvas can end up sized for whatever the toolbar state
+was at the last event it actually saw, drifting out of sync with the
+CSS-driven `#app` size independently of anything the page itself did —
+alternately spilling past the now-shorter visible viewport (cropped,
+needing a scroll) or sitting smaller than it needs to, matching both
+screenshots and the "sometimes too big, sometimes too small" description
+exactly. Fixed in `main.ts` with one additional listener alongside
+Phaser's own: `window.visualViewport?.addEventListener("resize", () =>
+game.scale.refresh())` — `refresh()` is Phaser's own public API for
+forcing a fresh measurement of its parent and re-fitting the canvas,
+`visualViewport` is guarded since it's undefined in a handful of older
+browsers (which keep relying on Phaser's own window-resize listening,
+same as before). Verified in a Playwright session by capturing the actual
+handler function `main.ts` registers (intercepting
+`visualViewport.addEventListener` before the module loads, since the
+`Phaser.Game` instance itself isn't exposed globally) and invoking it
+directly — confirming it runs without error and leaves the canvas
+correctly fitted, the same call path a real toolbar-triggered
+`visualViewport` resize would take.
 
 The multi-scene parallax system below is still **dormant, not deleted**
 — every asset and every file it depends on (`ParallaxBackground.ts`,
