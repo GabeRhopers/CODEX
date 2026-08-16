@@ -19,6 +19,8 @@ export interface EditorUICallbacks {
   onUploadMusic: (file: File) => void;
   onClearMusic: () => void;
   onRenameLevel: (name: string) => void;
+  onUploadSkin: (file: File) => void;
+  onClearSkin: () => void;
 }
 
 const PANEL_DEPTH = 20;
@@ -86,10 +88,17 @@ export class EditorUI {
   private saveStatusText: Phaser.GameObjects.Text;
   private backgroundButton!: PanelButton;
   private musicButton!: PanelButton;
+  private skinButton!: PanelButton;
+  private uploadSkinButton!: PanelButton;
   private iconGrid: Phaser.GameObjects.Container;
   private tabButtons = new Map<BrushCategory, PanelButton>();
   private activeCategory: BrushCategory;
   private selectedBrushId: string;
+  // brushId -> texture key for every brush with a custom skin uploaded
+  // (see skinLoader.ts) — empty until EditorScene's async resolve pass
+  // finishes and calls applySkins, same "pop in a moment later" tolerance
+  // as a custom background/music.
+  private skinTextureKeys = new Map<string, string>();
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -216,6 +225,43 @@ export class EditorUI {
     );
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
+    // Skin: reskins whichever brush is currently selected in the palette
+    // (see "Custom skins" under Art) — the selection itself doubles as
+    // "which type", so there's no separate type-picker UI. Clicking the
+    // status button clears an existing custom skin (same pattern as the
+    // Music button above); Upload Skin (with its own file-input overlay)
+    // sets one. Both labels are refreshed on every brush selection change
+    // (see selectBrush) and after applySkins, since which brush is
+    // selected — not anything level-specific — decides what they show.
+    this.skinButton = this.makeFixedWidthButton(
+      RIGHT_PANEL_X + PANEL_PADDING,
+      rowY,
+      RIGHT_BUTTON_WIDTH,
+      RIGHT_BUTTON_HEIGHT,
+      this.skinStatusLabel(),
+      () => this.callbacks.onClearSkin(),
+    );
+    this.skinButton.bg.on("pointerover", () => this.skinButton.bg.setFillStyle(BUTTON_HOVER_COLOR));
+    this.skinButton.bg.on("pointerout", () => this.skinButton.bg.setFillStyle(BUTTON_COLOR));
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
+    this.uploadSkinButton = this.makeFixedWidthButton(
+      RIGHT_PANEL_X + PANEL_PADDING,
+      rowY,
+      RIGHT_BUTTON_WIDTH,
+      RIGHT_BUTTON_HEIGHT,
+      this.uploadSkinLabel(),
+      () => {},
+    );
+    new FileInputOverlay(
+      scene,
+      { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
+      "image/*",
+      (file) => this.callbacks.onUploadSkin(file),
+      (hovering) => this.uploadSkinButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
+    );
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
     // Plain text, not a button (no interactivity, no hover/click) — this is
     // a status readout, not an action. Starts "saved" since a level with no
     // edits yet has nothing at risk, regardless of whether it's a freshly
@@ -324,13 +370,21 @@ export class EditorUI {
     return positions;
   }
 
+  /** The texture a brush's icon (and, via EntityPlacer/PlayScene using
+   * this same lookup, every placed/spawned instance of it) should render
+   * with right now — the custom skin if one's been uploaded for this
+   * brush id, else its own built-in art. */
+  private textureKeyFor(brush: Brush): string {
+    return this.skinTextureKeys.get(brush.id) ?? brush.textureKey;
+  }
+
   private renderIconGrid(): void {
     this.iconGrid.removeAll(true);
     const brushes = PALETTE.filter((brush) => brush.category === this.activeCategory);
     const positions = this.iconPositions(brushes);
     brushes.forEach((brush, i) => {
       const { x, y } = positions[i];
-      const icon = this.scene.add.image(x, y, brush.textureKey).setDepth(CONTENT_DEPTH).setInteractive({ useHandCursor: true });
+      const icon = this.scene.add.image(x, y, this.textureKeyFor(brush)).setDepth(CONTENT_DEPTH).setInteractive({ useHandCursor: true });
       fitWithinTile(icon);
       icon.on("pointerdown", () => this.selectBrush(brush));
       const label = this.scene.add
@@ -359,6 +413,7 @@ export class EditorUI {
   selectBrush(brush: Brush): void {
     this.selectedBrushId = brush.id;
     this.updateSelectedOutlinePosition();
+    this.refreshSkinButtons();
     this.callbacks.onSelectBrush(brush);
   }
 
@@ -395,5 +450,48 @@ export class EditorUI {
    * the level has no music. */
   setMusicLabel(name: string | null): void {
     this.musicButton.label.setText(this.musicLabelText(name));
+  }
+
+  private selectedBrush(): Brush | undefined {
+    return PALETTE.find((brush) => brush.id === this.selectedBrushId);
+  }
+
+  /** Only Markers/Enemies/Items/Decor's real placeable brushes are
+   * skinnable — the same `entityType !== undefined` check EditorScene
+   * uses to route clicks, which happens to also exclude every category's
+   * own Erase brush (kind "entity" but no entityType) for free. Blocks
+   * render through Phaser's tilemap system (a shared, GID-indexed
+   * spritesheet per ground skin — see groundAutotile.ts) rather than one
+   * swappable image per brush the way every entity does, so reskinning
+   * them isn't a "just upload an image" change and isn't supported here. */
+  private isSkinnable(brush: Brush): boolean {
+    return brush.entityType !== undefined;
+  }
+
+  private skinStatusLabel(): string {
+    const brush = this.selectedBrush();
+    if (!brush || !this.isSkinnable(brush)) return "Skin: N/A";
+    return this.skinTextureKeys.has(brush.id) ? "Skin: Custom (tap to clear)" : "Skin: Default";
+  }
+
+  private uploadSkinLabel(): string {
+    const brush = this.selectedBrush();
+    if (!brush || !this.isSkinnable(brush)) return "Upload Skin";
+    return `Upload Skin: ${brush.label}`;
+  }
+
+  private refreshSkinButtons(): void {
+    this.skinButton.label.setText(this.skinStatusLabel());
+    this.uploadSkinButton.label.setText(this.uploadSkinLabel());
+  }
+
+  /** Called by EditorScene once its async skin-resolution pass (see
+   * skinLoader.ts) finishes — re-renders the icon grid so every skinned
+   * brush's icon picks up its custom texture, and refreshes the Skin/
+   * Upload Skin button labels for whichever brush is currently selected. */
+  applySkins(skinTextureKeys: Map<string, string>): void {
+    this.skinTextureKeys = skinTextureKeys;
+    this.renderIconGrid();
+    this.refreshSkinButtons();
   }
 }

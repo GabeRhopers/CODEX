@@ -21,6 +21,10 @@ import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
 import { backgroundDisplayLabel, nextStaticBackgroundId, resolveStaticBackground, StaticBackgroundId } from "../level/staticBackgrounds";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
+import { loadActiveProfile } from "../profile/Profile";
+import { resolveSkinTextureKeys } from "../skins/skinLoader";
+import { removeCustomSkin, saveCustomSkin } from "../skins/skinStorage";
+import { readAndDownscaleSkinImage } from "../skins/skinUpload";
 
 interface EditorSceneData {
   level?: LevelData;
@@ -65,6 +69,12 @@ export class EditorScene extends Phaser.Scene {
   // backgroundLoader.ts), so nothing can rely on this existing until that
   // promise resolves.
   private background?: StaticBackground;
+  // brushId -> texture key for every brush with a custom skin uploaded —
+  // see skinLoader.ts. Resolved async in create() (Drive round trip, same
+  // "pop in a moment later" tolerance as a custom background/music), then
+  // handed to the UI/EntityPlacer; rebuildVisualsFromLevel re-applies it
+  // to whatever fresh EntityPlacer it creates so Clear/Load never lose it.
+  private skinTextureKeys = new Map<string, string>();
   // A stable bound reference so it can be removed on shutdown — an inline
   // arrow passed straight to addEventListener can never be un-registered.
   private readonly handlePageHide = (): void => {
@@ -115,9 +125,18 @@ export class EditorScene extends Phaser.Scene {
       onUploadMusic: (file) => this.uploadMusic(file),
       onClearMusic: () => this.clearMusic(),
       onRenameLevel: (name) => this.renameLevel(name),
+      onUploadSkin: (file) => this.uploadSkin(file),
+      onClearSkin: () => this.clearSkin(),
     });
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
+
+    // Custom skins (see "Custom skins" under Art) are shared across all 3
+    // profiles and every level, so there's no level data to wait on the
+    // way backgrounds/music have — just one Drive read, kicked off once
+    // per Editor visit. Palette icons and any already-placed entities show
+    // their built-in art until this resolves, then swap in place.
+    void resolveSkinTextureKeys(this).then((skinTextureKeys) => this.applySkinTextureKeys(skinTextureKeys));
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (!this.isOverGrid(pointer)) return; // Tools/Actions panel, or the dead space below the grid
@@ -388,6 +407,68 @@ export class EditorScene extends Phaser.Scene {
     this.ui.setStatus("Music removed");
   }
 
+  /** Shared by the initial resolve pass and every upload/clear — hands the
+   * current brushId->textureKey map to the UI (re-renders the palette
+   * icons) and EntityPlacer (re-syncs every already-placed marker), so a
+   * skin change is visible everywhere in the editor immediately, not just
+   * for brushes placed afterward. */
+  private applySkinTextureKeys(skinTextureKeys: Map<string, string>): void {
+    this.skinTextureKeys = skinTextureKeys;
+    this.ui.applySkins(skinTextureKeys);
+    this.entityPlacer.setSkinTextureKeys(skinTextureKeys);
+    this.entityPlacer.syncFromLevel(this.brushesByType);
+  }
+
+  /** Called by EditorUI once its Upload Skin file input has a file —
+   * reskins whichever brush is currently selected (see EditorUI's Skin/
+   * Upload Skin buttons; the palette selection doubles as "which type",
+   * no separate picker). Downscales to a small PNG (see skinUpload.ts),
+   * saves it to the shared, non-profile-scoped skins.json (see
+   * skinStorage.ts — every one of the 3 profiles sees this immediately,
+   * not just the one who uploaded it), then re-resolves so this and every
+   * other open level picks it up. */
+  private uploadSkin(file: File): void {
+    const brush = this.currentBrush;
+    if (!brush.entityType) {
+      this.ui.setStatus("Only Markers/Enemies/Items/Decor can be reskinned");
+      return;
+    }
+    const uploadedBy = loadActiveProfile() ?? "unknown";
+    readAndDownscaleSkinImage(file)
+      .then((dataUrl) => saveCustomSkin(brush.id, dataUrl, uploadedBy))
+      .then(() => resolveSkinTextureKeys(this))
+      .then(
+        (skinTextureKeys) => {
+          this.applySkinTextureKeys(skinTextureKeys);
+          this.ui.setStatus(`${brush.label} skin updated`);
+        },
+        (err: unknown) => {
+          console.error("Skin upload failed:", err);
+          this.ui.setStatus("Couldn't upload that skin");
+        },
+      );
+  }
+
+  /** Called by the Skin status button — clears whichever brush is
+   * currently selected, a no-op (matching clearMusic's own guard) if it
+   * isn't skinnable or has no custom skin uploaded. */
+  private clearSkin(): void {
+    const brush = this.currentBrush;
+    if (!brush.entityType || !this.skinTextureKeys.has(brush.id)) return;
+    removeCustomSkin(brush.id)
+      .then(() => resolveSkinTextureKeys(this))
+      .then(
+        (skinTextureKeys) => {
+          this.applySkinTextureKeys(skinTextureKeys);
+          this.ui.setStatus(`${brush.label} skin removed`);
+        },
+        (err: unknown) => {
+          console.error("Skin removal failed:", err);
+          this.ui.setStatus("Couldn't remove that skin");
+        },
+      );
+  }
+
   /** Called by LevelNameInput on commit (blur/Enter) — already trimmed
    * and defaulted to "Untitled Level" if left blank, and already
    * deduplicated against the last committed value, so this only runs on
@@ -516,6 +597,7 @@ export class EditorScene extends Phaser.Scene {
       }
     }
     this.entityPlacer = new EntityPlacer(this, this.level, TILE_SIZE);
+    this.entityPlacer.setSkinTextureKeys(this.skinTextureKeys);
     this.entityPlacer.syncFromLevel(this.brushesByType);
   }
 }

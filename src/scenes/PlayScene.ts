@@ -37,6 +37,7 @@ import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../leve
 import { EntityType, LevelData } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
+import { resolveSkinTextureKeys } from "../skins/skinLoader";
 
 const BOUNCE_VELOCITY_Y = -650;
 
@@ -124,6 +125,19 @@ export class PlayScene extends Phaser.Scene {
   private music?: Phaser.Sound.BaseSound;
   private hud!: Phaser.GameObjects.Text;
   private trophy!: Phaser.GameObjects.Image;
+  // Every goal/chest/enemy/item/decor sprite spawned below, grouped by
+  // its Palette brush id (equal to its EntityType for every one of these
+  // — only Spawn's id/type differ, "spawn"/"player-spawn", and Spawn has
+  // no sprite here at all) — see the resolveSkinTextureKeys call at the
+  // end of create(), which patches in any custom skin via setTexture once
+  // resolved. Populated by trackSprite as each is created.
+  private spritesByBrushId = new Map<string, (Phaser.GameObjects.Image | Phaser.Physics.Arcade.Sprite)[]>();
+
+  private trackSprite(brushId: string, sprite: Phaser.GameObjects.Image | Phaser.Physics.Arcade.Sprite): void {
+    const list = this.spritesByBrushId.get(brushId) ?? [];
+    list.push(sprite);
+    this.spritesByBrushId.set(brushId, list);
+  }
 
   constructor() {
     super("Play");
@@ -203,6 +217,7 @@ export class PlayScene extends Phaser.Scene {
       const goalX = GRID_ORIGIN_X + goal.x * TILE_SIZE + TILE_SIZE / 2;
       const goalY = goal.y * TILE_SIZE + TILE_SIZE / 2;
       const goalSprite = this.add.image(goalX, goalY, "goal-portal").setDepth(5);
+      this.trackSprite("goal", goalSprite);
       this.tweens.add({
         targets: goalSprite,
         scale: { from: 1, to: 1.08 },
@@ -223,6 +238,7 @@ export class PlayScene extends Phaser.Scene {
     for (const def of ENEMY_DEFS) {
       for (const entity of this.level.entities.filter((e) => e.type === def.type)) {
         const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
+        this.trackSprite(def.type, sprite);
         const state = createGhostState(sprite);
         this.enemies.push({ sprite, state, stompable: def.stompable });
         this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable));
@@ -235,6 +251,7 @@ export class PlayScene extends Phaser.Scene {
         const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
         // textureKey === entityType for every item brush (see Palette.ts).
         const icon = this.add.image(x, y, type).setDepth(5);
+        this.trackSprite(type, icon);
         this.tweens.add({ targets: icon, y: y - 6, yoyo: true, repeat: -1, duration: 700, ease: "Sine.easeInOut" });
         const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
         this.physics.add.existing(zone, true);
@@ -247,6 +264,7 @@ export class PlayScene extends Phaser.Scene {
       const x = GRID_ORIGIN_X + chestEntity.x * TILE_SIZE + TILE_SIZE / 2;
       const y = chestEntity.y * TILE_SIZE + TILE_SIZE / 2;
       const chestSprite = this.add.image(x, y, "chest").setDepth(5);
+      this.trackSprite("chest", chestSprite);
       const chestZone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(chestZone, true);
       this.physics.add.overlap(this.player, chestZone, () => this.tryOpenChest(chestSprite, chestZone));
@@ -259,9 +277,22 @@ export class PlayScene extends Phaser.Scene {
       for (const entity of this.level.entities.filter((e) => e.type === type)) {
         const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
         const y = entity.y * TILE_SIZE + TILE_SIZE / 2;
-        this.add.image(x, y, type).setDepth(3);
+        this.trackSprite(type, this.add.image(x, y, type).setDepth(3));
       }
     }
+
+    // Custom skins (see "Custom skins" under Art) apply to gameplay too,
+    // not just the editor — same async "pop in a moment later" tolerance
+    // as the background/music resolves above; every sprite tracked via
+    // trackSprite above just has its texture swapped in place once this
+    // resolves, no scale/physics-body changes.
+    void resolveSkinTextureKeys(this).then((skinTextureKeys) => {
+      for (const [brushId, sprites] of this.spritesByBrushId) {
+        const key = skinTextureKeys.get(brushId);
+        if (!key) continue;
+        for (const sprite of sprites) sprite.setTexture(key);
+      }
+    });
 
     this.input$ = createPlayerInput(this);
     this.touch = new TouchControls(this);

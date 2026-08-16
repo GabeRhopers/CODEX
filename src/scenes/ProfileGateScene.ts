@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
-import { connect, tryReconnectSilently } from "../drive/googleAuth";
+import { connect, isConnected, tryReconnectSilently } from "../drive/googleAuth";
 import { loadActiveProfile, Profile, PROFILES, saveActiveProfile } from "../profile/Profile";
 
 /**
@@ -40,16 +40,24 @@ export class ProfileGateScene extends Phaser.Scene {
 
   /** Re-checked after both a profile pick and a Drive connect attempt,
    * not just once at boot — either action alone might still leave the
-   * other step outstanding. */
+   * other step outstanding. Explicitly re-checks isConnected() (rather
+   * than assuming boot()'s tryReconnectSilently settling means "not
+   * connected") since this is also reached straight from pickProfile(),
+   * which runs *after* that silent attempt already succeeded — skipping
+   * this check meant a returning visitor's silent reconnect was resolved
+   * correctly but then thrown away, always showing "Connect Google
+   * Drive" anyway. Caught via a mocked-Drive Playwright test while
+   * building the custom-skins feature, not in production. */
   private proceed(): void {
     const profile = loadActiveProfile();
     if (!profile) {
       this.renderProfilePicker();
       return;
     }
-    // tryReconnectSilently's own resolution already tells us whether
-    // we're connected — no separate isConnected() re-check needed here
-    // since boot() only calls proceed() after that promise settles.
+    if (isConnected()) {
+      this.scene.start("Menu");
+      return;
+    }
     this.renderConnectPrompt(profile);
   }
 

@@ -44,7 +44,10 @@ instances" under Art. As of 2026-08-16, persistence moved off
 `localStorage` (whose ~5-10MB per-origin quota was routinely getting
 exceeded by custom background/music uploads) onto Google Drive, gated
 behind a lightweight "Who's playing?" profile picker (Mike/Gabriel/
-Andressa) — see "Google Drive storage & profiles" under Art. See the plan doc §9.1
+Andressa) — see "Google Drive storage & profiles" under Art. Also as of
+2026-08-16, any Marker/Enemy/Item/Decor brush can be reskinned with a
+user-uploaded image, shared instantly across all 3 profiles — see
+"Custom skins" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -133,6 +136,13 @@ Open the dev server URL in a browser. Controls:
   its own category, so the Enemies eraser only ever removes enemies, never
   a Spawn marker sitting nearby. Undo/redo cover erases exactly like any
   other edit.
+- **Custom skins**: select any Marker/Enemy/Item/Decor brush, then
+  **Upload Skin** to reskin it with your own image — applies to that
+  brush's palette icon, every already-placed instance, and gameplay,
+  shared instantly across all 3 profiles (not just the current level).
+  The **Skin** button next to it shows whether the selected brush has one
+  and clears it on click. Blocks aren't reskinnable yet. See "Custom
+  skins" under Art.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; enemies and items are optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
@@ -565,6 +575,85 @@ this mock was the only way to exercise `driveClient.ts`'s actual request
 formation and `GoogleDriveStorageAdapter`'s save/list/load logic before
 shipping) before this fix; a single "Spellbound Level Editor" folder gets
 created after it.
+
+**Custom skins.** As of 2026-08-16, any Marker/Enemy/Item/Decor brush can
+be reskinned with a user-uploaded image — click the brush in the palette
+(the selection doubles as "which type," so there's no separate type
+picker), then **Upload Skin** in the Actions panel. The image is
+downscaled to a small PNG (`src/skins/skinUpload.ts`, `MAX_DIMENSION =
+128` — much smaller than a background's 1600px, since these render at
+roughly one tile; PNG rather than JPEG, since JPEG has no alpha channel
+and would turn a reskinned ghost/item's transparent pixels solid white).
+Skins apply everywhere that brush is used — the palette icon, every
+already-placed instance in the current level, and actual gameplay — not
+just future placements.
+
+Blocks aren't reskinnable (the **Skin** button reads "Skin: N/A" for
+them, and Upload Skin is a no-op if clicked anyway): all block rendering
+goes through Phaser's tilemap system, drawing from one shared, GID-
+indexed spritesheet per ground skin (`groundAutotile.ts`), not one
+swappable image per brush the way every entity (a plain
+`scene.add.image`) works. Reskinning a block would mean patching a
+specific frame inside that shared spritesheet texture rather than
+swapping a texture key — a meaningfully bigger change than "upload an
+image," and not part of this pass.
+
+*Shared across all 3 profiles, not per-level.* Unlike a level's own
+custom background/music (inline in that level's own JSON, private to
+whoever's editing it), skins are the one piece of this app's data
+deliberately **not** scoped to a profile — see Profile.ts's docstring on
+the 3 profiles being a filter, not an access boundary. Every skin any of
+Mike/Gabriel/Andressa uploads shows up for all three, in every level,
+immediately, because there's only one shared Google sign-in behind all
+three profiles anyway (see "Google Drive storage & profiles" above). All
+currently-uploaded skins live in one consolidated `skins.json` file
+(`src/skins/skinStorage.ts`) in the same app-managed Drive folder as
+levels/worlds, keyed by Palette brush id — with only ~20-something
+skinnable brushes total, resolving every skin needed to render the
+palette or a level is one Drive read instead of one-per-skin, and
+uploading a new one is a single read-modify-write. Known, accepted
+limitation: two people uploading different skins at the exact same
+moment could lose one (the second write's read-modify-write starts from
+a snapshot that doesn't yet include the first) — not worth real
+optimistic-concurrency handling for a 3-person household's occasional
+skin uploads.
+
+*Rendering.* `src/skins/skinLoader.ts`'s `resolveSkinTextureKeys` mirrors
+`backgroundLoader.ts`'s exact pattern (see "Autosave & save-state
+tracking" above and `backgroundLoader.ts` itself): each skin registers as
+its own `skin-<brushId>` Phaser texture (via `scene.textures.addBase64`),
+cached by which data URL is currently loaded so an unchanged skin skips
+the destructive remove-and-recreate path — the same "don't destroy a GPU
+texture a still-alive GameObject is rendering" concern that pattern was
+built to solve in the first place, and just as real here since
+EditorScene/PlayScene can both be alive during Test Play. Deliberately a
+*separate* texture key per skin rather than overwriting a brush's
+built-in key in place: several built-in textures (e.g.
+`"enemy-ghost-pillow"`) are also reused as pure decoration elsewhere
+(MenuScene's home-page icons) that has nothing to do with level content
+and shouldn't silently change just because someone reskinned the Ghost
+enemy for gameplay.
+
+Resolution is async (a Drive read) but never blocks anything from
+appearing — `EditorScene`/`PlayScene` build the palette/level with
+built-in art first, then the resolve pass patches in any skins a moment
+later (`EditorUI.applySkins`/`EntityPlacer.setSkinTextureKeys` re-render
+the icon grid and re-sync placed markers; `PlayScene` just calls
+`setTexture()` on every sprite it tracked via `trackSprite` as it
+spawned them) — the same "pop in imperceptibly" tolerance every other
+async texture resolution in this app already has.
+
+*A real bug caught building this, unrelated to skins themselves:*
+`ProfileGateScene.proceed()` never actually checked whether its own
+silent Drive-reconnect attempt had succeeded before deciding whether to
+show "Connect Google Drive" — it showed that prompt unconditionally
+every time a profile was already picked, silently discarding a
+successful silent reconnect and demanding an unnecessary click on every
+single visit. The docstring even claimed otherwise ("no separate
+isConnected() re-check needed"). Found via the same mocked-Drive
+Playwright testing used to verify skins, not in production; fixed by
+actually checking `isConnected()` and skipping straight to Menu when
+true.
 
 **Items & hit-points.** Five collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
@@ -1234,6 +1323,11 @@ src/
 │   └── driveClient.ts         thin Drive REST v3 wrapper (fetch-based) — ensureAppFolder/findFileByName/createFile/updateFileContent/getFileContent/trashFile/listFiles
 ├── profile/
 │   └── Profile.ts             PROFILES = [Mike, Gabriel, Andressa] + load/save/clear the active one (tiny, still in localStorage — see "Google Drive storage & profiles" under Art)
+├── skins/
+│   ├── CustomSkins.ts          CustomSkinRecord/CustomSkinsFile types
+│   ├── skinUpload.ts           downscales a picked image to a small alpha-preserving PNG (see "Custom skins" under Art)
+│   ├── skinStorage.ts          load/save/remove against the shared, non-profile-scoped skins.json
+│   └── skinLoader.ts           resolveSkinTextureKeys — registers each skin as its own Phaser texture, same caching pattern as backgroundLoader.ts
 ├── world/
 │   └── WorldSchema.ts        WorldData: an ordered list of level ids + a name
 ├── config/

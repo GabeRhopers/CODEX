@@ -30,12 +30,25 @@ function tileKey(x: number, y: number): string {
  */
 export class EntityPlacer {
   private markers = new Map<string, Phaser.GameObjects.Image>();
+  // brushId -> texture key for every brush with a custom skin — see
+  // skinLoader.ts. Set once by EditorScene's async skin-resolution pass;
+  // add/syncFromLevel consult it via textureKeyFor so placed markers pick
+  // up a skin the same way EditorUI's palette icons do.
+  private skinTextureKeys = new Map<string, string>();
 
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly level: LevelData,
     private readonly tileSize: number,
   ) {}
+
+  setSkinTextureKeys(skinTextureKeys: Map<string, string>): void {
+    this.skinTextureKeys = skinTextureKeys;
+  }
+
+  private textureKeyFor(brush: Brush): string {
+    return this.skinTextureKeys.get(brush.id) ?? brush.textureKey;
+  }
 
   /** Current position of a singleton marker type (Spawn/Goal/Chest).
    * Meaningless for multi-instance types, where "the" position doesn't
@@ -60,7 +73,7 @@ export class EntityPlacer {
     const worldY = tileY * this.tileSize + this.tileSize / 2;
 
     this.level.entities.push({ type, x: tileX, y: tileY });
-    const marker = this.scene.add.image(worldX, worldY, brush.textureKey);
+    const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
     marker.setDepth(10);
     fitWithinTile(marker);
     this.markers.set(tileKey(tileX, tileY), marker);
@@ -92,7 +105,7 @@ export class EntityPlacer {
       if (!brush) continue;
       const worldX = GRID_ORIGIN_X + entity.x * this.tileSize + this.tileSize / 2;
       const worldY = entity.y * this.tileSize + this.tileSize / 2;
-      const marker = this.scene.add.image(worldX, worldY, brush.textureKey);
+      const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
       marker.setDepth(10);
       fitWithinTile(marker);
       this.markers.set(tileKey(entity.x, entity.y), marker);
