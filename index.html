@@ -2,9 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Pinch-zoom is intentionally allowed (up to 5x) — the game already
+         scales itself to fill the viewport (see main.ts's Scale.FIT), but
+         that only ever shows the fixed GAME_WIDTH/GAME_HEIGHT layout at
+         whatever size fits; on a tall, narrow phone screen the letterboxed
+         game can end up quite short (its 1050x468 aspect ratio doesn't
+         match the screen's), shrinking every button/label along with it.
+         Browser pinch-zoom is the user's own escape hatch for that case.
+         See README.md's "Cross-device layout: the double-centering bug"
+         for why this was re-enabled and how on-screen controls stay
+         unaffected (touch-action: pinch-zoom below, not none). -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover"
     />
     <title>Spellbound Level Editor</title>
     <style>
@@ -13,23 +23,49 @@
         padding: 0;
         background: #1a1a2e;
         overflow: hidden;
-        /* Stop the browser from turning taps on the on-screen game
-           controls into scroll/pinch/double-tap-zoom gestures. */
-        touch-action: none;
+        /* `pinch-zoom` (not `none`): stops the browser from turning a
+           single-finger tap/drag on an on-screen game control into a page
+           scroll, and blocks double-tap-zoom (which could easily
+           misfire on a fast double-tap on a small button) — while still
+           routing a genuine two-finger pinch through to the browser's own
+           zoom, which `none` used to block outright. Single-finger drags
+           still reach Phaser's own pointer handling either way; touch-
+           action only governs the browser's *default* gesture handling on
+           top of that, not whether JS gets the events. */
+        touch-action: pinch-zoom;
         overscroll-behavior: none;
       }
+      /* Deliberately NOT flex/centered — Phaser's own Scale Manager
+         (mode: FIT, autoCenter: CENTER_BOTH in main.ts) already centers
+         the canvas within this parent by setting its own margin-top/
+         margin-left inline styles. Centering it a second time here via
+         flexbox used to compound with that margin instead of replacing
+         it (flexbox centers the canvas's already-offset margin box, which
+         only has a top/left margin and no matching bottom/right one, so
+         the two centering passes added up into a large, asymmetric gap —
+         confirmed via Playwright measurements across ~10 viewport sizes,
+         up to a 370px top-vs-bottom mismatch on a tall phone). This plain
+         100vw/100vh block container lets Phaser's own centering be the
+         only one that runs. */
       #app {
-        display: flex;
-        justify-content: center;
-        align-items: center;
         width: 100vw;
+        /* 100vh first as a fallback for browsers that don't understand
+           dvh; 100dvh (the *dynamic* viewport height) second so it wins
+           in every browser that does. Plain 100vh is fixed to the
+           viewport's largest possible size and doesn't shrink when a
+           mobile browser's own address bar/toolbar is showing, so the
+           bottom of the canvas can end up sitting underneath that chrome
+           — visually present but not actually tappable, since the
+           browser (not the page) owns input there. 100dvh tracks
+           whatever's actually visible right now instead. */
         height: 100vh;
-        touch-action: none;
+        height: 100dvh;
+        touch-action: pinch-zoom;
       }
       canvas {
         image-rendering: pixelated;
         image-rendering: crisp-edges;
-        touch-action: none;
+        touch-action: pinch-zoom;
       }
     </style>
   </head>

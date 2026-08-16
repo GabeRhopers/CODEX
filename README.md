@@ -243,9 +243,12 @@ noted:
   Manager runs in
   `FIT` + `CENTER_BOTH` mode, so it's letterboxed down (or up) to whatever
   viewport it's opened in, phone included, instead of getting clipped or
-  forcing page scroll. `index.html`'s viewport meta tag disables pinch/
-  double-tap zoom and `touch-action: none` stops taps on the on-screen
-  buttons from also scrolling the page.
+  forcing page scroll. See "Cross-device layout: the double-centering bug"
+  below for how that centering used to go wrong, and for why pinch-zoom is
+  deliberately allowed rather than blocked — `index.html`'s viewport meta
+  and `touch-action` are tuned specifically to stop a tap on an on-screen
+  button from also scrolling/double-tap-zooming the page, without blocking
+  an intentional two-finger pinch.
 - **Editor & menus**: every button/palette icon/list row is already a
   Phaser interactive object driven by pointer events, which Phaser treats
   identically whether the pointer is a mouse or a finger — no separate
@@ -1067,6 +1070,67 @@ exact values were tuned empirically against real rendered screenshots
 (Playwright, calibrated via the canvas's `boundingBox()` scale) rather
 than derived from a formula — comfortable for the default 20x12 grid and
 every category's icon count, not the extreme case.
+
+**Cross-device layout: the double-centering bug (2026-08-16).** A real,
+shipped bug, reported as "sometimes I see a huge gap at the top" and
+"things aren't clickable down below" — reproduced and root-caused with a
+Playwright sweep across ~10 viewport sizes (phones portrait/landscape,
+tablets, short/wide desktop windows, narrow windows) that measured the
+game canvas's `getBoundingClientRect()` against its actual container.
+Every one of them showed the canvas pushed far toward one edge instead of
+centered — up to a **370px top-vs-bottom mismatch** on a tall phone
+viewport (430×932), squeezing the whole game into a thin, off-center
+sliver. Root cause: two things were centering the canvas at once.
+`main.ts`'s Phaser config already centers it (`scale.mode: FIT`,
+`autoCenter: Phaser.Scale.CENTER_BOTH`) by computing its own `margin-top`/
+`margin-left` inline styles against its parent (`#app`) — but `index.html`
+*also* centered `#app`'s content via CSS flexbox
+(`display:flex; align-items:center; justify-content:center`), a leftover
+from before Phaser's own centering was wired up. Flexbox centers an
+element's full *margin box*, so it took the canvas — already offset by
+Phaser's `margin-top`/`margin-left` — and centered *that whole offset
+shape* again, adding a second, symmetric gap on top of the first,
+already-asymmetric one (a top/left-only margin with nothing matching on
+the bottom/right). The two passes compounded into one large gap on
+whichever side already had Phaser's margin, and a small one on the
+opposite side. Fixed by deleting the flex properties from `#app` entirely
+— a plain `100vw`/`100dvh` block container — so Phaser's own centering is
+the only one that runs. Re-verified with the same viewport sweep
+afterward: every size now centers within **2px** (float rounding) on both
+axes, confirmed against both the dev server and the actual production
+build (`vite preview`).
+
+Two related fixes landed alongside it, from the same "review across
+screen sizes" pass:
+- **`100vh` → `100dvh`** for `#app`'s height (with a `100vh` fallback for
+  browsers that don't support the dynamic-viewport-height unit). Plain
+  `100vh` is fixed to the *largest possible* viewport and doesn't shrink
+  when a mobile browser's own address bar/toolbar is currently showing,
+  so the bottom of the canvas can end up sitting underneath that browser
+  chrome — visually present on screen but not actually tappable, since
+  the browser (not the page) owns input there. This is the likely
+  explanation for the "not clickable down below" report being
+  intermittent rather than constant — it would only bite when the toolbar
+  happened to be showing. `100dvh` tracks whatever's actually visible
+  right now instead.
+- **Pinch-zoom re-enabled.** `index.html`'s viewport meta previously set
+  `maximum-scale=1.0, user-scalable=no`, and every relevant element
+  (`html`, `body`, `#app`, `canvas`) set `touch-action: none` — both
+  layers blocking zoom outright, originally to stop a tap on an on-screen
+  game button from also triggering a scroll/pinch/double-tap-zoom
+  gesture. That trade-off stopped being worth it once the centering fix
+  above made it obvious how *short* the letterboxed game can get on a
+  tall, narrow phone (down to ~167px tall on a 375×667 screen, in the
+  sweep above) — every button/label shrinks along with it, with no way
+  for the user to compensate. Fixed by raising `maximum-scale` to `5.0`
+  and removing `user-scalable=no` from the viewport meta, and changing
+  every `touch-action: none` to `touch-action: pinch-zoom` — a value that
+  still blocks single-finger panning and double-tap-zoom (so on-screen
+  buttons behave exactly as before) while explicitly allowing a two-finger
+  pinch through to the browser's own zoom. `touch-action` only governs
+  the *browser's own default* gesture handling on top of a touch; Phaser
+  still receives every pointer event underneath it either way, so this
+  doesn't change how taps/drags reach the game itself.
 
 The multi-scene parallax system below is still **dormant, not deleted**
 — every asset and every file it depends on (`ParallaxBackground.ts`,
