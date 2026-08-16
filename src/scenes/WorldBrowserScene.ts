@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
-import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
-import { LocalWorldStorageAdapter } from "../persistence/LocalWorldStorageAdapter";
+import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { WorldSummary } from "../world/WorldSchema";
@@ -13,8 +12,8 @@ const ROW_HEIGHT = 44;
  * LevelBrowserScene, same layout on purpose so the two screens feel like
  * one family rather than two different UIs. */
 export class WorldBrowserScene extends Phaser.Scene {
-  private worldStorage: WorldStorageAdapter = new LocalWorldStorageAdapter();
-  private levelStorage: StorageAdapter = new LocalStorageAdapter();
+  private worldStorage: WorldStorageAdapter = getWorldStorage();
+  private levelStorage: StorageAdapter = getLevelStorage();
   private listContainer!: Phaser.GameObjects.Container;
   private statusText!: Phaser.GameObjects.Text;
 

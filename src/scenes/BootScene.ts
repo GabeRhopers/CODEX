@@ -98,6 +98,6 @@ export class BootScene extends Phaser.Scene {
     // plays, means every later scene (Menu's theme, PlayScene's level
     // music) just inherits it rather than re-reading localStorage itself.
     applyAudioPrefs(this.sound);
-    this.scene.start("Menu");
+    this.scene.start("ProfileGate");
   }
 }

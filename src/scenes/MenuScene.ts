@@ -2,8 +2,8 @@ import Phaser from "phaser";
 import { VolumeControl } from "../audio/VolumeControl";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { TEMPLATE_LEVELS } from "../level/templateLevels";
-import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
-import { LocalWorldStorageAdapter } from "../persistence/LocalWorldStorageAdapter";
+import { clearActiveProfile, loadActiveProfile } from "../profile/Profile";
+import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 
@@ -21,8 +21,8 @@ const GRID_TOP = 112;
  * whole picture (how much you've built) is visible without navigating in.
  */
 export class MenuScene extends Phaser.Scene {
-  private levelStorage: StorageAdapter = new LocalStorageAdapter();
-  private worldStorage: WorldStorageAdapter = new LocalWorldStorageAdapter();
+  private levelStorage: StorageAdapter = getLevelStorage();
+  private worldStorage: WorldStorageAdapter = getWorldStorage();
   private theme?: Phaser.Sound.BaseSound;
 
   constructor() {
@@ -35,6 +35,21 @@ export class MenuScene extends Phaser.Scene {
     this.add.image(50, 34, "wizard-idle").setScale(1.1);
     this.add.image(GAME_WIDTH - 66, 34, "enemy-ghost-pillow").setScale(0.9);
     this.add.image(GAME_WIDTH - 34, 34, "goal-portal").setScale(0.75);
+
+    // Not a real account switch — see Profile.ts's docstring — just clears
+    // the name-tag and sends whoever's at the device back through
+    // ProfileGateScene to pick a different one; the Drive connection
+    // itself (one shared sign-in behind all three profiles) is untouched.
+    const activeProfile = loadActiveProfile();
+    const profileText = this.add
+      .text(8, 6, `${activeProfile ?? "?"} · Switch profile`, { fontSize: "11px", color: "#8888aa" })
+      .setInteractive({ useHandCursor: true });
+    profileText.on("pointerover", () => profileText.setColor("#ffffff"));
+    profileText.on("pointerout", () => profileText.setColor("#8888aa"));
+    profileText.on("pointerdown", () => {
+      clearActiveProfile();
+      this.scene.start("ProfileGate");
+    });
 
     this.add
       .text(cx, 26, "Mario Maker–Style Level Editor", {

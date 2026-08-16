@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
-import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
-import { LocalWorldStorageAdapter } from "../persistence/LocalWorldStorageAdapter";
+import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { SAVE_STATE_DISPLAY } from "../persistence/saveState";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
@@ -27,8 +26,8 @@ const AUTOSAVE_DEBOUNCE_MS = 2000;
  * of this project makes elsewhere (levels don't get an in-app rename UI
  * either); reordering can be layered on later without touching WorldData. */
 export class WorldMakerScene extends Phaser.Scene {
-  private levelStorage: StorageAdapter = new LocalStorageAdapter();
-  private worldStorage: WorldStorageAdapter = new LocalWorldStorageAdapter();
+  private levelStorage: StorageAdapter = getLevelStorage();
+  private worldStorage: WorldStorageAdapter = getWorldStorage();
   private world!: WorldData;
   private availableContainer!: Phaser.GameObjects.Container;
   private worldContainer!: Phaser.GameObjects.Container;

@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { LevelSummary } from "../level/LevelSchema";
-import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
+import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
 const ROW_START_Y = 90;
@@ -11,7 +11,7 @@ const ROW_HEIGHT = 44;
  * single-slot Save/Load never had. Persistence already supported this
  * (StorageAdapter.list/remove); this scene is purely the missing UI. */
 export class LevelBrowserScene extends Phaser.Scene {
-  private storage: StorageAdapter = new LocalStorageAdapter();
+  private storage: StorageAdapter = getLevelStorage();
   private listContainer!: Phaser.GameObjects.Container;
 
   constructor() {

@@ -39,7 +39,11 @@ caged sheep — see "Goal art" under Art) to reach. As of 2026-08-15,
 Enemies/Items/Decor can be placed any number of times per level (no longer
 one-per-type), and every entity category has its own Erase brush for
 removing a single placed instance — see "Entity eraser & multiple
-instances" under Art. See the plan doc §9.1
+instances" under Art. As of 2026-08-16, persistence moved off
+`localStorage` (whose ~5-10MB per-origin quota was routinely getting
+exceeded by custom background/music uploads) onto Google Drive, gated
+behind a lightweight "Who's playing?" profile picker (Mike/Gabriel/
+Andressa) — see "Google Drive storage & profiles" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -146,9 +150,10 @@ Open the dev server URL in a browser. Controls:
   "Mobile/touch" below) do the same three things and the win/lose screen
   grows tappable **Restart**/**Next Level** buttons next to its
   keyboard-only hint text, since there's no R/N/Esc key to press.
-- **Save**: persists the current level to `localStorage` under its own
-  id — every level you save is kept (see My Levels), not just the most
-  recent one. As of 2026-08-14 you rarely need to click it: a persistent
+- **Save**: persists the current level to Google Drive under its own id
+  (as of 2026-08-16 — see "Google Drive storage & profiles" under Art for
+  why this replaced `localStorage`) — every level you save is kept (see My
+  Levels), not just the most recent one. You rarely need to click it: a persistent
   **● Saved / ● Unsaved changes / ● Saving… / ● Save failed** indicator
   below the Background button in the right "Actions" panel (see "Autosave &
   save-state tracking" under Art) tracks
@@ -424,12 +429,30 @@ Three triggers actually write to storage, all funneled through one
 3. **Leave flushes** — clicking Menu (or World Maker's ← Back) awaits one
    final save first if dirty, so navigating away can't drop an edit still
    sitting inside the debounce window; a `"pagehide"` window listener
-   does the same for tab close/refresh/back, relying on
-   `LocalStorageAdapter.save`'s `localStorage.setItem` calls actually
-   completing synchronously before its `async` function's first (and
-   only) `await` — `pagehide` gives no guarantee an awaited continuation
-   *after* that point ever runs, so the write has to already be done by
-   the time the call returns control, not merely scheduled.
+   attempts the same for tab close/refresh/back.
+
+   **Known gap since the 2026-08-16 move to Google Drive:** the
+   `"pagehide"` flush (`if (this.dirty) void this.persistLevel();` —
+   deliberately not awaited, since `pagehide` itself can't be blocked
+   on) used to be reliable specifically because `LocalStorageAdapter.save`'s
+   `localStorage.setItem` call completed synchronously before that async
+   function's first `await` — the write was already done by the time
+   control returned, `pagehide` guarantees nothing about code *after*
+   that. `GoogleDriveStorageAdapter.save` has no such synchronous
+   fast path: every step (`getAccessToken`, `ensureAppFolder`,
+   `findFileByName`, the actual upload) is a real network round trip, so
+   a tab closed/refreshed within the ~2s autosave debounce window can now
+   genuinely lose that last edit if the browser tears the page down before
+   those requests land — something the old adapter's synchronous write
+   made close to a non-issue. The explicit **Save** button and **Menu**
+   (both properly `await` the write before doing anything else) are
+   unaffected; this gap is specifically "closed the tab itself, fast,
+   right after an edit." Worth fixing properly (`fetch(..., {keepalive:
+   true})`, threaded through as an opt-in on the pagehide path only —
+   applying it unconditionally would risk silently failing normal saves,
+   since Chrome caps a keepalive request's body around 64KB and a
+   level with a custom background/music upload routinely exceeds that)
+   if this turns out to bite in practice; not yet done.
 
 A level's id is now effectively minted on **first edit** rather than
 first explicit Save (autosave reaches `persistLevel`'s
@@ -441,14 +464,106 @@ empty, completely untouched level (or an empty World with zero levels)
 still never gets an id or a storage entry — nothing marks it dirty in
 the first place, so there's nothing for autosave to act on.
 
-Storage failures (quota exceeded, Safari private-browsing blocking
-`localStorage`) are now caught rather than becoming a silent unhandled
-promise rejection — `persistLevel`/`persistWorld` wrap the write in
+Storage failures (network unreachable, an expired Drive session needing
+reconnect, a Drive API error) are caught rather than becoming a silent
+unhandled promise rejection — `persistLevel`/`persistWorld` wrap the write in
 try/catch, leave `dirty` true on failure (nothing was actually
 persisted), and show **● Save failed** plus a status message rather than
 retrying on a timer (if storage is genuinely unavailable, retrying every
 couple seconds would just be noise — the next edit or another manual
 Save click tries again naturally).
+
+**Google Drive storage & profiles.** As of 2026-08-16, persistence moved
+off `localStorage` onto Google Drive — the trigger was `localStorage`'s
+own ~5-10MB per-origin quota (see "Custom uploaded backgrounds" and
+"Music" above) getting routinely exceeded once a handful of levels each
+carried an inline base64 background image and/or an up-to-4MB music
+upload. `StorageAdapter`/`WorldStorageAdapter` themselves didn't change —
+they were already written as interfaces specifically so the backend could
+be swapped later (see StorageAdapter.ts's own docstring, which named
+"IndexedDB, a backend" as the anticipated case) — only which
+implementation `src/persistence/storage.ts` hands out changed, from
+`LocalStorageAdapter`/`LocalWorldStorageAdapter` to
+`GoogleDriveStorageAdapter`/`GoogleDriveWorldStorageAdapter`. The Local
+adapters are still in the repo, unused — deliberately not deleted, given
+how central storage is and how much newer/less-proven the Drive path is
+by comparison.
+
+*Auth.* `src/drive/googleAuth.ts` wraps Google Identity Services' token
+client (the modern replacement for the deprecated `gapi.auth2` library) —
+a browser-only OAuth flow needing just a public Client ID (safe to commit;
+Google's own security boundary here is the Authorized JavaScript Origins
+list configured against it, `https://gaberhopers.github.io` only, not
+secrecy of the ID itself), no client secret, no backend. The access token
+lives in memory only, never `localStorage` — a live credential isn't app
+state worth persisting, and GIS's own silent-reconnect (`prompt: ''`,
+tried automatically on every boot — see `ProfileGateScene`) already covers
+"I signed in earlier, don't make me click again" for as long as the
+browser still has a live Google session and prior consent. The OAuth
+consent screen is deliberately left in **Testing** status (Google's
+sanctioned way to skip the full app-verification review for small,
+personal-use apps — up to 100 test users) with the project owner's own
+account as the sole test user; the tradeoff is that a Testing-status
+session needs re-authorizing roughly every 7 days, not once-and-forever.
+
+*Scope.* Full `https://www.googleapis.com/auth/drive` access, not the
+narrower `drive.file` scope, and deliberately so: `drive.file` only grants
+visibility into files/folders the app itself created (or that were
+individually opened via a Picker dialog) — the shared Drive folder the
+project owner pointed this at already existed before the app ever touched
+it, so `drive.file` would leave it invisible. `drive` is a "sensitive"
+scope that would normally need Google's verification review for
+production use at scale; Testing status is what makes skipping that
+legitimate here.
+
+*Data model.* Each level/world is its own `level-<id>.json` /
+`world-<id>.json` file (see `src/drive/driveClient.ts`) inside a
+dedicated **"Mario Maker Editor"** subfolder created on first connect
+inside the project owner's shared folder — a subfolder rather than using
+that folder directly, so this app's many small JSON files stay organized
+and don't clutter anything else kept there. Every file is tagged with
+Drive's private `appProperties` (visible only to the app that set them,
+distinct from Drive's `properties` which any app with access could read):
+`{kind: "level"|"world", profile, levelId/worldId, name, updatedAt}`.
+`list()` reads that metadata straight off the folder listing rather than
+downloading every file's full content just to show a name and a
+timestamp; `save()`/`load()`/`remove()` look a file up by its deterministic
+name via a server-side Drive query (`name='...' and '<folder>' in
+parents`) rather than listing-then-filtering, so those stay
+single-request operations.
+
+*Profiles.* `src/profile/Profile.ts`'s `PROFILES = ["Mike", "Gabriel",
+"Andressa"]` are exactly what the project owner asked for — "something
+super simple" — and deliberately **not** real per-person accounts: there's
+one shared Google sign-in behind all three (see "Auth" above), and picking
+a profile only sets a tiny `mario-maker:profile` `localStorage` key (unaffected
+by the quota problem that moved everything else off `localStorage` — it's
+a handful of bytes) that scopes which levels/worlds `list()` returns via
+the `profile` `appProperties` tag. Every profile's files are equally
+visible/writable by anyone who can sign into that one Google account —
+it's a filter for a shared household device, not an access-control
+boundary between the three people. `ProfileGateScene` (Boot → here → Menu,
+and re-entered from Menu's "Switch profile" link) gates the rest of the
+app behind having both a profile picked and a live Drive connection,
+trying a silent reconnect first so a returning visitor on the same
+browser mostly never sees the "Connect Google Drive" button at all.
+
+*A bug caught during development, not shipped:* `ensureAppFolder`'s
+first version cached only the *resolved* folder id, not the in-flight
+search-or-create request itself. `MenuScene` kicks off a
+`levelStorage.list()` and a `worldStorage.list()` back to back without
+awaiting either, and both adapters call `ensureAppFolder` — without
+caching the promise, both calls raced past the "does the folder exist
+yet?" check before either had an answer to cache, each independently
+concluded "no" and created their own folder. Confirmed with a Playwright
+test against a mocked Drive backend (a fake `google.accounts.oauth2`
+global plus `page.route()` intercepting the real `googleapis.com`
+endpoints — this environment has no outbound network path to Google's
+servers at all, confirmed separately via a plain `page.goto()` timeout, so
+this mock was the only way to exercise `driveClient.ts`'s actual request
+formation and `GoogleDriveStorageAdapter`'s save/list/load logic before
+shipping) before this fix; a single "Mario Maker Editor" folder gets
+created after it.
 
 **Items & hit-points.** Five collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
@@ -1057,7 +1172,8 @@ full layout. Implemented so far:
 src/
 ├── main.ts                  Phaser game config + boot
 ├── scenes/
-│   ├── BootScene.ts          loads wizard/Kenney/entity art + procedural textures, starts Menu
+│   ├── BootScene.ts          loads wizard/Kenney/entity art + procedural textures, starts ProfileGate
+│   ├── ProfileGateScene.ts   "Who's playing?" + "Connect Google Drive" gate, Boot → here → Menu — see "Google Drive storage & profiles" under Art
 │   ├── MenuScene.ts          home page: 2x2 card grid (New Level / Templates / My Levels / Worlds)
 │   ├── TemplateBrowserScene.ts lists TEMPLATE_LEVELS with Play/Use This Template
 │   ├── LevelBrowserScene.ts  lists saved levels with Edit/Delete
@@ -1105,14 +1221,23 @@ src/
 │   └── VolumeControl.ts      mute-toggle + draggable-volume-slider widget, used identically by MenuScene (home-page theme) and PlayScene (a level's music) — see "Music" under Art
 ├── persistence/
 │   ├── StorageAdapter.ts       interface (list/save/load/remove)
-│   ├── LocalStorageAdapter.ts
+│   ├── LocalStorageAdapter.ts  unused since 2026-08-16 — kept, not deleted, see "Google Drive storage & profiles" under Art
+│   ├── GoogleDriveStorageAdapter.ts current level backend — Drive-file-per-level, appProperties-tagged by profile
 │   ├── WorldStorageAdapter.ts  same interface, one level down, for Worlds
-│   ├── LocalWorldStorageAdapter.ts
+│   ├── LocalWorldStorageAdapter.ts unused since 2026-08-16, same reason as LocalStorageAdapter.ts
+│   ├── GoogleDriveWorldStorageAdapter.ts current world backend — same pattern as GoogleDriveStorageAdapter.ts
+│   ├── storage.ts              getLevelStorage()/getWorldStorage() — the one place that picks which adapter every scene gets
 │   └── saveState.ts            shared SaveState type + text/color per state, used by EditorUI and WorldMakerScene's save-state indicators
+├── drive/
+│   ├── googleAuth.ts          Google Identity Services token client wrapper — connect/getAccessToken/tryReconnectSilently/disconnect
+│   └── driveClient.ts         thin Drive REST v3 wrapper (fetch-based) — ensureAppFolder/findFileByName/createFile/updateFileContent/getFileContent/trashFile/listFiles
+├── profile/
+│   └── Profile.ts             PROFILES = [Mike, Gabriel, Andressa] + load/save/clear the active one (tiny, still in localStorage — see "Google Drive storage & profiles" under Art)
 ├── world/
 │   └── WorldSchema.ts        WorldData: an ordered list of level ids + a name
 ├── config/
-│   └── gameConfig.ts         tile size, grid dimensions, physics constants
+│   ├── gameConfig.ts         tile size, grid dimensions, physics constants
+│   └── googleDrive.ts        GOOGLE_CLIENT_ID / DRIVE_ROOT_FOLDER_ID / APP_FOLDER_NAME / DRIVE_SCOPE
 └── assets/
     └── generateTextures.ts   procedural art still in use: Castle's blocks + UI chrome
 

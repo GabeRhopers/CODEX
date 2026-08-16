@@ -35,7 +35,7 @@ import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, Wizar
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { EntityType, LevelData } from "../level/LevelSchema";
-import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
+import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
 const BOUNCE_VELOCITY_Y = -650;
@@ -101,7 +101,7 @@ export class PlayScene extends Phaser.Scene {
   private level!: LevelData;
   private world?: WorldPlayContext;
   private returnScene?: string;
-  private levelStorage: StorageAdapter = new LocalStorageAdapter();
+  private levelStorage: StorageAdapter = getLevelStorage();
   private player!: Phaser.Physics.Arcade.Sprite;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private input$!: PlayerInputKeys;

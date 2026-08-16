@@ -19,7 +19,7 @@ import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../leve
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, EntityType, LevelData } from "../level/LevelSchema";
 import { backgroundDisplayLabel, nextStaticBackgroundId, resolveStaticBackground, StaticBackgroundId } from "../level/staticBackgrounds";
-import { LocalStorageAdapter } from "../persistence/LocalStorageAdapter";
+import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 
 interface EditorSceneData {
@@ -50,7 +50,7 @@ export class EditorScene extends Phaser.Scene {
   private highlight!: Phaser.GameObjects.Image;
   private currentBrush: Brush = PALETTE[0];
   private isPointerDown = false;
-  private storage: StorageAdapter = new LocalStorageAdapter();
+  private storage: StorageAdapter = getLevelStorage();
   private brushesByType = new Map<EntityType, Brush>();
   private history = new HistoryStack();
   private dragCommands: Command[] = [];
