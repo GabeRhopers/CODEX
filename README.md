@@ -836,10 +836,13 @@ No Kenney source pack is available in this sandbox to draw a new tile
 from scratch (`prepare-kenney-assets.py` needs it as an input, and it
 isn't committed to the repo), so `scripts/add-water-depth-frame.py`
 derives the new frame procedurally instead: it samples the existing
-surface frame's own flat fill color, darkens it, and adds a few
-speckle dots (mirroring `drawGroundFill`'s own dot accents) rather than
-inventing new pixel art — a plain, darker, wave-free tile that reads as
-the same water, just deeper. `groundAutotile.ts`'s `groundFrameAt` picks
+surface frame's own flat fill color and adds a few subtle speckle dots
+(mirroring `drawGroundFill`'s own dot accents) rather than inventing new
+pixel art — a plain, wave-free tile in the *same tone* as the surface
+frame (see the 2026-08-16 follow-up below — an earlier version of this
+darkened the tone too, before a user report asked for it to match), that
+reads as the same water, just deeper rather than a different color
+entirely. `groundAutotile.ts`'s `groundFrameAt` picks
 between it and the surface frame exactly the way it already picks Ground's
 top vs. fill: by checking whether the cell directly above is empty
 (exposed) or another hazard cell (buried). Castle's procedural Lava tile
@@ -891,9 +894,27 @@ prolonged contact. A separate level with a single `LAVA_TILE` in the
 walking path still triggered an instant "You Lose" on contact, confirming
 Lava's original hazard behavior is completely unchanged. The stacked-water
 render fix was checked visually too: two Water tiles placed one above the
-other show the bright wavy-crest surface frame on top and the flat,
-speckled, darker fill frame below — the same visual language Ground
-blocks already use.
+other show the bright wavy-crest surface frame on top and a flat,
+speckled fill frame below — the same visual language Ground blocks
+already use.
+
+*Follow-up (2026-08-16, same day): matching tone.* The fill frame above
+initially darkened the surface's own color (scaled to ~50-58% brightness
+per channel) for a "deeper water" look, mirroring how a real body of
+water gets darker with depth. A user report asked for the two to read as
+the *same* water color instead, so `add-water-depth-frame.py`'s
+`DEEP_FILL_SCALE` darkening step was dropped — the fill frame's base
+color is now used exactly as sampled from the surface frame, with only
+the (now slightly gentler, 85% vs. the old 75%) speckle dots providing any
+tone variation at all. The script itself gained a small capability this
+needed: it used to skip an already-6-frame tileset outright ("already
+extended, nothing to do"), which meant retuning the fill's look at all
+required resetting the tileset back to 5 frames via
+`prepare-kenney-assets.py` first; it now regenerates frame 5 from frame 4
+in place instead, so a future retune (or this one) is just a re-run.
+Re-verified visually the same way as above — a stacked column of Water
+tiles now reads as one continuous, uniformly-toned pool from the crest
+down, with no visible seam between the surface and fill frames.
 
 **Player/enemy world bounds (2026-08-16).** Prompted by a user report: the
 player could walk straight past a level's left or right edge, off the end

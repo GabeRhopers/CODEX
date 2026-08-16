@@ -17,13 +17,18 @@ same wavy "surface" art repeated at every row, including well below the
 true surface. Ground blocks avoid exactly this by having separate top/
 fill frames (see groundAutotile.ts's GROUND_KIND_FRAMES); this gives
 water the same treatment: frame 4 (unchanged) is the surface — open air
-above — and new frame 5 is a plain, darker "fully submerged" fill with no
-wave crest, derived by darkening/desaturating the existing frame's solid
-fill color rather than inventing new pixel art from scratch (keeps the
-same hand-tuned hue family, just reads as deeper). See groundAutotile.ts
-for how a stored WATER_TILE cell picks between the two based on whether
-another water cell sits directly above it — identical mechanism to
-ground's own top/fill autotiling.
+above — and new frame 5 is a plain "fully submerged" fill with no wave
+crest, in the *same tone* as the surface frame's own solid fill color
+(sampled directly from it, not darkened) — the two frames read as the
+same water at different depths, distinguished only by the missing crest
+and a few subtle same-tone speckle dots, not by a color/mood shift. See
+groundAutotile.ts for how a stored WATER_TILE cell picks between the two
+based on whether another water cell sits directly above it — identical
+mechanism to ground's own top/fill autotiling. Idempotent: safe to re-run
+after retuning SPECKLE_SCALE/SPECKLE_SPOTS below — an already-6-frame
+tileset gets its frame 5 regenerated from its own (unchanged) frame 4
+rather than being skipped, so there's no need to reset via
+prepare-kenney-assets.py first.
 """
 
 from pathlib import Path
@@ -31,18 +36,15 @@ from pathlib import Path
 from PIL import Image
 
 TILE_SIZE = 32
-WATER_FRAME_INDEX = 4  # existing surface frame, within each 5-frame strip
+WATER_FRAME_INDEX = 4  # existing surface frame, within each 5-or-6-frame strip
 
-# How much to darken the water fill's RGB channels for the "deep" look
-# (multiplicative, applied per-channel) — tuned by eye against the
-# existing surface color so it reads as clearly deeper without looking
-# like a different substance entirely.
-DEEP_FILL_SCALE = (0.5, 0.52, 0.58)
 # A couple of subtle darker speckle dots on top of the flat fill, mirroring
 # drawGroundFill's own dot accents in generateTextures.ts (castle) so
 # water's "fill" reads consistently with every other block kind's fill
-# frame rather than as a completely flat, textureless rectangle.
-SPECKLE_SCALE = 0.75
+# frame rather than as a completely flat, textureless rectangle — kept
+# gentle (85%, not the 75% used pre-2026-08-16) since the base fill no
+# longer carries its own darkening for the speckles to compound with.
+SPECKLE_SCALE = 0.85
 SPECKLE_SPOTS = [(6, 4, 4, 4), (22, 10, 4, 4), (2, 18, 4, 4), (18, 24, 5, 4)]
 
 
@@ -61,11 +63,12 @@ def build_water_fill(source_strip: Image.Image) -> Image.Image:
     # Sample the surface frame's own solid fill color (well below the wave
     # crest, where every existing water frame is already a flat color —
     # see prepare-kenney-assets.py's water tile) rather than hand-picking
-    # a new one, so the fill frame stays a true darkened sibling of
-    # whatever the surface frame's own art actually is.
+    # a new one, so the fill frame is a true same-tone sibling of whatever
+    # the surface frame's own art actually is — used as-is, not darkened,
+    # per a follow-up request that the two read as one consistent color.
     base_color = water.getpixel((TILE_SIZE // 2, TILE_SIZE - 1))
-    fill_color = darken(base_color, DEEP_FILL_SCALE)
-    speckle_color = darken(base_color, (DEEP_FILL_SCALE[0] * SPECKLE_SCALE, DEEP_FILL_SCALE[1] * SPECKLE_SCALE, DEEP_FILL_SCALE[2] * SPECKLE_SCALE))
+    fill_color = base_color
+    speckle_color = darken(base_color, (SPECKLE_SCALE, SPECKLE_SCALE, SPECKLE_SCALE))
 
     fill = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), fill_color)
     for x, y, w, h in SPECKLE_SPOTS:
@@ -79,7 +82,14 @@ def extend_tileset(path: Path) -> None:
     im = Image.open(path).convert("RGBA")
     w, h = im.size
     if w == TILE_SIZE * 6:
-        print(f"{path} already has 6 frames, skipping")
+        # Already extended (from a previous run) — regenerate frame 5 from
+        # frame 4 in place rather than skipping, so retuning the speckle
+        # constants above just needs a re-run, not a reset back through
+        # prepare-kenney-assets.py first.
+        water_fill = build_water_fill(im)
+        im.paste(water_fill, (TILE_SIZE * 5, 0))
+        im.save(path)
+        print(f"rewrote {path}'s deep-water fill frame {im.size}")
         return
     if w != TILE_SIZE * 5:
         raise ValueError(f"{path} is {w}x{h}, expected {TILE_SIZE * 5}x{TILE_SIZE} (5 frames)")
