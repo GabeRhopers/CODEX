@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isStompFromAbove } from "./EnemyBehaviors";
+import { createGhostState, isStompFromAbove } from "./EnemyBehaviors";
 
 type FakeBody = { velocity: { y: number }; bottom: number; top: number; height: number };
 type FakeSprite = { body: FakeBody };
@@ -31,5 +31,29 @@ describe("isStompFromAbove", () => {
     const player = fakeSprite({ velocity: { y: 0 }, bottom: 140, top: 40, height: 0 });
     const ghost = fakeSprite({ velocity: { y: 0 }, bottom: 140, top: 100, height: 40 });
     expect(isStompFromAbove(player as never, ghost as never)).toBe(false);
+  });
+});
+
+describe("createGhostState", () => {
+  it("defaults to the spawn-relative patrol range when no level bounds are given", () => {
+    const ghost = { x: 500 } as never;
+    const state = createGhostState(ghost);
+    expect(state).toEqual({ minX: 500 - 64, maxX: 500 + 64, direction: 1 });
+  });
+
+  it("clamps the patrol range so it never extends past a nearby level edge", () => {
+    // Spawned 1 tile (32px) from the left edge — the un-clamped range
+    // would start 32px before the edge (500-64=436, edge at 468).
+    const ghost = { x: 500 } as never;
+    const state = createGhostState(ghost, 468, 2000);
+    expect(state.minX).toBe(468);
+    expect(state.maxX).toBe(500 + 64);
+  });
+
+  it("clamps both sides at once for an enemy spawned near a narrow level", () => {
+    const ghost = { x: 500 } as never;
+    const state = createGhostState(ghost, 480, 520);
+    expect(state.minX).toBe(480);
+    expect(state.maxX).toBe(520);
   });
 });

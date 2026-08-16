@@ -237,10 +237,22 @@ export class PlayScene extends Phaser.Scene {
     // top of the ground tile one row below the spawn marker's tile.
     const spawnY = GRID_ORIGIN_Y + (spawn ? (spawn.y + 1) * TILE_SIZE : TILE_SIZE);
 
+    // Left/right only (checkUp/checkDown false below) — the player and
+    // enemies must not walk/patrol past where the level's ground and
+    // background actually end (see StaticBackground's mask, sized to
+    // exactly this same `level.width * TILE_SIZE`), but jumping above the
+    // top or falling past the bottom are both already meaningful on their
+    // own (a normal jump arc, and the fall-off-the-level loss check below)
+    // and must stay unobstructed. y/height are irrelevant with both checks
+    // off; kept generous only so that stays true regardless.
+    const levelLeftX = GRID_ORIGIN_X;
+    const levelRightX = GRID_ORIGIN_X + this.level.width * TILE_SIZE;
+    this.physics.world.setBounds(levelLeftX, -100000, levelRightX - levelLeftX, 200000, true, true, false, false);
+
     this.player = this.physics.add.sprite(spawnX, spawnY, "wizard-idle");
     this.player.setOrigin(0.5, 1);
     applyWizardTexture(this.player, "wizard-idle");
-    this.player.setCollideWorldBounds(false);
+    this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.groundLayer, (_player, tile) => this.onGroundCollide(tile as Phaser.Tilemaps.Tile));
 
     const goal = this.level.entities.find((e) => e.type === "goal");
@@ -279,7 +291,11 @@ export class PlayScene extends Phaser.Scene {
         // differ (this feature's whole point).
         sprite.setData("enemySize", size);
         this.trackSprite(def.type, sprite);
-        const state = createGhostState(sprite);
+        // Clamped to the level's own left/right edges (not just its spawn
+        // point) — see createGhostState's docstring — so an enemy placed
+        // near an edge patrols back in, the same edge the player's own
+        // setCollideWorldBounds above is held to.
+        const state = createGhostState(sprite, levelLeftX, levelRightX);
         this.enemies.push({ sprite, state, stompable: def.stompable });
         this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable));
       }

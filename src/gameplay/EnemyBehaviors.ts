@@ -141,10 +141,22 @@ export function applyDefaultSkinSize(sprite: Phaser.GameObjects.Image | Phaser.P
   sprite.setDisplaySize(frame.width * scale, frame.height * scale);
 }
 
-export function createGhostState(ghost: Phaser.Physics.Arcade.Sprite): GhostState {
+/** `levelMinX`/`levelMaxX` (world-x of the level's left/right edges) clamp
+ * the patrol range so an enemy spawned within a couple tiles of an edge
+ * doesn't patrol past it — without this, updateGhostPatrol's own
+ * direction-flip (`ghost.x <= state.minX`/`>= state.maxX`) never fires
+ * until the enemy is already off the level, past where the background
+ * itself is even drawn (see StaticBackground's mask). Optional so
+ * existing callers/tests that don't care about edges still work; PlayScene
+ * always passes the real level bounds. */
+export function createGhostState(
+  ghost: Phaser.Physics.Arcade.Sprite,
+  levelMinX = -Infinity,
+  levelMaxX = Infinity,
+): GhostState {
   return {
-    minX: ghost.x - PATROL_RANGE_TILES * TILE_SIZE,
-    maxX: ghost.x + PATROL_RANGE_TILES * TILE_SIZE,
+    minX: Math.max(ghost.x - PATROL_RANGE_TILES * TILE_SIZE, levelMinX),
+    maxX: Math.min(ghost.x + PATROL_RANGE_TILES * TILE_SIZE, levelMaxX),
     direction: 1,
   };
 }

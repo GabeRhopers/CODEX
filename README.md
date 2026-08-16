@@ -59,7 +59,9 @@ second Test Play in one session could crash. Also as of 2026-08-16,
 Water no longer damages the player and can be swum through, with its own
 "deeper" fill frame when stacked (mirroring Ground's top/fill look) —
 Lava is unchanged and still an instant hazard — see "Water is swimmable,
-not a hazard" under Art. See the plan doc §9.1
+not a hazard" under Art. Also as of 2026-08-16, the player and every enemy
+are now confined to the level's own left/right edges — see "Player/enemy
+world bounds" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -889,6 +891,44 @@ render fix was checked visually too: two Water tiles placed one above the
 other show the bright wavy-crest surface frame on top and the flat,
 speckled, darker fill frame below — the same visual language Ground
 blocks already use.
+
+**Player/enemy world bounds (2026-08-16).** Prompted by a user report: the
+player could walk straight past a level's left or right edge, off the end
+of `StaticBackground`'s masked viewport (see its own docstring — the
+background image only ever renders across exactly `level.width * TILE_SIZE`
+pixels) into the plain canvas color beyond it, and enemies placed within a
+couple tiles of an edge could patrol out past it the same way. Both are
+symptoms of the same underlying gap: nothing ever stopped a horizontal
+position from exceeding the level's own width — the ground tilemap simply
+has no tiles out there to collide with, and `PlayScene.player` was
+constructed with `setCollideWorldBounds(false)` outright.
+
+Fixed with `this.physics.world.setBounds(...)` in `PlayScene.create()`,
+covering exactly the same horizontal span the background is masked to
+(`GRID_ORIGIN_X` to `GRID_ORIGIN_X + level.width * TILE_SIZE`) — with only
+the left/right checks enabled (`checkUp`/`checkDown` both `false`). Top and
+bottom are deliberately left alone: jumping above the top of the screen is
+an ordinary part of a normal jump arc (nothing new stops that, on purpose),
+and falling below the level is already how the existing "fell off the
+level" loss condition works. `player.setCollideWorldBounds(true)` then
+makes the player's own body respect that boundary.
+
+Enemies (all four types share `createPatrolEnemy`/`updateGhostPatrol` — see
+"Second content pass" above) don't collide with the physics world at all
+(`setAllowGravity(false)`, driven purely by `GhostState.minX`/`maxX`), so
+the same `setCollideWorldBounds` fix doesn't apply to them. Instead,
+`createGhostState` now takes the level's left/right world-x bounds and
+clamps the spawn-relative patrol range to never extend past either one —
+an enemy placed right at the edge simply gets a shorter patrol leg on that
+side instead of wandering out past it, keeping `updateGhostPatrol`'s own
+direction-flip logic (which only ever triggers once `ghost.x` reaches
+`minX`/`maxX`) from firing too late to matter. Covered by new
+`EnemyBehaviors.test.ts` cases for the clamping itself; the world-bounds
+side was verified in a mocked-Drive Playwright session — holding the move
+key toward an edge for several seconds left the player pinned exactly at
+it rather than drifting into the empty space beyond the background, and an
+enemy placed one tile from an edge patrolled a shortened, still-fully-
+visible leg instead of crossing it.
 
 **Items & hit-points.** Five collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
