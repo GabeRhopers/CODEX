@@ -50,7 +50,12 @@ restructured into a header (Level Name/Undo/Redo/Eraser/Save/Test Play/
 Menu), a left "Palette" panel and a right "Level Settings" panel flanking
 the grid, and a stats footer — replacing the earlier per-category Erase
 brushes with one universal header Eraser toggle — see "Editor layout:
-header/footer/dropdown" under Art. See the plan doc §9.1
+header/footer/dropdown" under Art. Also as of 2026-08-16, enemies can be
+placed as **Small/Medium/Large** and every enemy's hitbox now tracks its
+actual art instead of Phaser's default full-texture box — see "Enemy
+hitboxes & sizes" under Art, which also covers two real bugs that pass
+found: a skinned entity's size wasn't normalized in Test Play, and a
+second Test Play in one session could crash. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -138,6 +143,15 @@ Open the dev server URL in a browser. Controls:
   (Spawn/Goal/Chest) stay one-per-level as before: placing a second Spawn
   moves it rather than adding another, since a level can only ever start
   in one place.
+- **Enemy Size** (right "Level Settings" panel, below Clear): **Small /
+  Medium / Large** — a placement-time modifier for the next enemy you
+  place, not a property of anything currently selected, so it stays put
+  across category/brush switches the same way the palette selection
+  itself does. "Medium" is every enemy's original, unscaled look. Click an
+  already-placed enemy again with a different size selected to resize it
+  in place (erase + re-place in one step) rather than needing to erase it
+  by hand first. See "Enemy hitboxes & sizes" under Art for how this
+  interacts with hitboxes and custom skins.
 - **Eraser** (header toggle): erases whatever occupies a clicked/dragged
   tile — an entity of any category if one's there, otherwise the ground
   tile itself — regardless of which Palette category tab happens to be
@@ -708,6 +722,94 @@ isConnected() re-check needed"). Found via the same mocked-Drive
 Playwright testing used to verify skins, not in production; fixed by
 actually checking `isConnected()` and skipping straight to Menu when
 true.
+
+**Enemy hitboxes & sizes (2026-08-16).** Prompted by a user report to
+review hitboxes and add a way to resize enemies — both landed together
+since sizing an enemy and sizing its collision box turned out to be the
+same underlying problem.
+
+*Hitboxes.* Every enemy is an Arcade Physics sprite, and Arcade defaults
+an un-configured body to the sprite's *full texture frame* — for every
+built-in enemy, a 40x40 canvas. Measuring each texture's own alpha
+channel (`PIL`'s `getbbox()`, offline) showed how far that default
+strays from the actual art: the bat's wings/body only occupy a 40x20
+strip vertically centered in that 40x40 canvas, so its hitbox used to be
+roughly *twice* as tall as anything visible — touching well above or
+below the bat's own sprite still registered a hit. Ghost/spike-crawler
+had smaller but still real padding; only the golem (which fills its
+canvas edge-to-edge) had an accidentally-correct default. Only the
+player's own body was ever hand-tuned (`wizardAnimation.ts`'s
+`BODY_WIDTH`/`BODY_HEIGHT`); nothing did the equivalent for enemies until
+now. Fixed with a per-species hitbox *fraction* (`ENEMY_HITBOX_FRACTION`
+in `EnemyBehaviors.ts`, tuned from those same bbox measurements) applied
+via `body.setSize(..., true)` — the trailing `true` re-centers the body
+automatically rather than hand-computing an offset per species, a
+deliberate trade against exactly hugging an asymmetric silhouette like
+the bat's (still much closer than the old full-frame default). Verified
+visually, not just by inspection: `physics.arcade.debug: true` (Phaser's
+own hitbox overlay) turned on temporarily, screenshotted in Test Play,
+confirmed each species' magenta outline now tracks its actual art before
+being turned back off.
+
+*Sizes.* A new **Enemy Size** selector (Small/Medium/Large — see
+Controls above) stores an optional `size` on the placed `LevelEntity`
+(`LevelSchema.ts`; absent = "medium", so old saves and anyone who never
+touches the selector are pixel-identical to before). Applied via
+`setDisplaySize` rather than `setScale` specifically because it has to
+survive a skin swap correctly (see below) — `setDisplaySize` targets an
+absolute on-screen size regardless of the texture's own native
+resolution, where `setScale` would multiply whatever that resolution
+happens to be. The editor's own preview (`EntityPlacer.ts`) and
+PlayScene's actual gameplay sprite use *different* baseline numbers for
+the same three sizes (`ENEMY_EDITOR_SIZE_SCALE` vs. `ENEMY_SIZE_TARGET`)
+since they were already starting from different baselines before this
+feature existed — the editor tile-fits every marker to ≤32px
+(`fitWithinTile`), PlayScene renders enemies at native size — so "Large"
+means "1.4x the tile-fit preview" in one and "58px, the longer side" in
+the other; both agree on "Medium ≡ today's unscaled look." Re-clicking an
+already-placed enemy with a different size selected resizes it in place
+(treated as a real change, not the "same brush already here" no-op every
+other re-click is) rather than requiring erase-then-replace by hand.
+
+*A real, separate bug this surfaced while verifying skins actually work
+in Test Play, not just the editor's own preview:* PlayScene never
+normalized a skinned entity's display size at all — `sprite.setTexture()`
+swaps what's drawn but not the sprite's scale, so a skin uploaded at
+anywhere up to `skinUpload.ts`'s 128px cap would render at its own full
+uploaded resolution instead of a tile-appropriate one once the swap
+landed, regardless of enemy size or entity type. Confirmed by uploading a
+deliberately oversized (100x100) test skin and watching it render
+full-size in Test Play. Fixed for every skinnable type, not just
+enemies: enemies re-run the same `applyEnemySize` their spawn used (keyed
+off their size, stashed on the sprite via Phaser's own
+`sprite.setData`/`getData` rather than a second parallel map, since
+`spritesByBrushId` only groups by brush id and loses which *instance*
+had which size once two same-type enemies can differ); every other
+skinnable type (Goal/Chest/Items/Decor — none of which have a body of
+their own to worry about, since they're all collected via a separate,
+always-tile-sized overlap zone, or in Decor's case have no physics at
+all) gets a new, simpler `applyDefaultSkinSize` targeting roughly their
+own built-in size (36px) instead.
+
+*A second real, pre-existing bug found via the exact same testing —
+present before this pass, not introduced by it:* `PlayScene.spritesByBrushId`
+was never reset in `init()`. Phaser reuses the same scene *instance*
+across every Play/Test Play/World run rather than constructing a fresh
+one each time — `create()` reruns, but a plain class-field initializer
+like `= new Map()` only ever runs once, at the object's first
+construction. Without clearing it, a second Test Play in the same
+session appended its freshly-spawned sprites onto the *previous* run's
+list instead of starting clean, and since leaving a level (Esc/win/lose)
+destroys every sprite from that run, the stale list ended up mixing live
+sprites with already-destroyed ones. Silent until something actually
+iterated that list and called a method on a destroyed sprite — which the
+skin-resolve pass does on every Test Play — so it surfaced as a real,
+reproducible crash (`TypeError: Cannot read properties of undefined
+(reading 'sys')` inside `setTexture`) on a *second* Test Play of any
+level with a skinned enemy, silently discarding the level's enemies from
+that point on if it happened not to throw. Fixed by resetting
+`spritesByBrushId` in `init()`, alongside every other per-run field
+already reset there.
 
 **Items & hit-points.** Five collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
@@ -1433,7 +1535,7 @@ src/
 │       ├── CompositeCommand.ts batches a whole drag (or an entity move/replace — see "Entity eraser & multiple instances" under Art) into one undo step
 │       └── HistoryStack.ts    undo/redo stacks (+ unit tests)
 ├── level/
-│   ├── LevelSchema.ts        LevelData / LevelEntity types (customBackgroundData/customMusicData/customMusicName included)
+│   ├── LevelSchema.ts        LevelData / LevelEntity types (customBackgroundData/customMusicData/customMusicName, EnemySize included)
 │   ├── LevelSerializer.ts    serialize/deserialize/clone (+ unit tests)
 │   ├── groundAutotile.ts     stored tile value → render frame in the combined multi-skin tileset (+ unit tests)
 │   ├── groundSkins.ts         per-skin color palettes + skin-keyed texture-key naming
@@ -1448,7 +1550,7 @@ src/
 │   ├── musicLoader.ts        resolves a level's uploaded music to a Phaser audio cache key, or null for silence — async scene.load.audio registration, same pattern as backgroundLoader.ts (see "Music" under Art)
 │   ├── ParallaxBackground.ts dormant two-layer fake-parallax background (zoomed Image, clamped pan by player X, masked to level width), keyed by the dormant BackgroundSceneId — see "Static background (current)" under Art
 │   ├── wizardAnimation.ts    pose/texture swapping + physics-body re-centering
-│   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests)
+│   └── EnemyBehaviors.ts     shared patrol/bob + stomp-vs-hit rule for ghost/bat/spike crawler (+ unit tests), plus per-species hitbox fractions and Small/Medium/Large sizing (applyEnemySize/applyDefaultSkinSize) — see "Enemy hitboxes & sizes" under Art
 ├── audio/
 │   ├── audioPrefs.ts         {volume, muted} — load/save to localStorage, applied once to scene.sound (the game-wide SoundManager) at boot
 │   └── VolumeControl.ts      mute-toggle + draggable-volume-slider widget, used identically by MenuScene (home-page theme) and PlayScene (a level's music) — see "Music" under Art

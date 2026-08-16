@@ -9,6 +9,7 @@ import {
   RIGHT_PANEL_WIDTH,
   TILE_SIZE,
 } from "../config/gameConfig";
+import { EnemySize } from "../level/LevelSchema";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { FileInputOverlay } from "./FileInputOverlay";
 import { LevelNameInput } from "./LevelNameInput";
@@ -31,7 +32,14 @@ export interface EditorUICallbacks {
   onUploadSkin: (file: File) => void;
   onClearSkin: () => void;
   onToggleEraser: () => void;
+  onSelectSize: (size: EnemySize) => void;
 }
+
+const ENEMY_SIZES: { id: EnemySize; label: string }[] = [
+  { id: "small", label: "Small" },
+  { id: "medium", label: "Medium" },
+  { id: "large", label: "Large" },
+];
 
 const PANEL_DEPTH = 20;
 const CONTENT_DEPTH = 21;
@@ -147,6 +155,8 @@ export class EditorUI {
   private uploadSkinButton!: PanelButton;
   private eraserButton!: PanelButton;
   private clearButton!: PanelButton;
+  private sizeButtons = new Map<EnemySize, PanelButton>();
+  private currentSize: EnemySize = "medium";
   private iconGrid: Phaser.GameObjects.Container;
   private chipButton!: PanelButton;
   private dropdownContainer: Phaser.GameObjects.Container;
@@ -360,6 +370,30 @@ export class EditorUI {
     );
     this.clearButton.bg.on("pointerover", () => this.clearButton.bg.setFillStyle(this.clearArmed ? CLEAR_ARMED_HOVER_COLOR : BUTTON_HOVER_COLOR));
     this.clearButton.bg.on("pointerout", () => this.clearButton.bg.setFillStyle(this.clearArmed ? CLEAR_ARMED_COLOR : BUTTON_COLOR));
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
+    // Enemy Size: a placement-time preference (like the palette selection
+    // itself), not a property of anything currently selected — it applies
+    // whenever an enemy brush is next placed, regardless of which brush
+    // happens to be active right now, so unlike Skin there's no "N/A"
+    // state to show; all 3 stay clickable and "Medium" starts highlighted
+    // to match every enemy's unscaled, pre-this-feature look.
+    rowY += 8;
+    scene.add
+      .text(RIGHT_PANEL_X + PANEL_PADDING, rowY, "Enemy Size", { fontSize: "13px", color: "#8b8bb0", fontStyle: "bold" })
+      .setOrigin(0, 0)
+      .setDepth(CONTENT_DEPTH);
+    rowY += 24;
+    const sizeButtonGap = 6;
+    const sizeButtonWidth = (RIGHT_BUTTON_WIDTH - sizeButtonGap * 2) / 3;
+    ENEMY_SIZES.forEach(({ id, label }, i) => {
+      const x = RIGHT_PANEL_X + PANEL_PADDING + i * (sizeButtonWidth + sizeButtonGap);
+      const button = this.makeFixedWidthButton(x, rowY, sizeButtonWidth, RIGHT_BUTTON_HEIGHT, label, () => this.selectSize(id));
+      button.bg.on("pointerover", () => button.bg.setFillStyle(BUTTON_HOVER_COLOR));
+      button.bg.on("pointerout", () => this.refreshSizeStyles());
+      this.sizeButtons.set(id, button);
+    });
+    this.refreshSizeStyles();
 
     // --- Footer: read-only stats ---
     scene.add
@@ -591,6 +625,22 @@ export class EditorUI {
     this.clearArmed = false;
     this.clearButton.label.setText("Clear");
     this.clearButton.bg.setFillStyle(BUTTON_COLOR);
+  }
+
+  private selectSize(size: EnemySize): void {
+    this.currentSize = size;
+    this.refreshSizeStyles();
+    this.callbacks.onSelectSize(size);
+  }
+
+  /** Same "restyle on both selection and hover-out" treatment as the old
+   * category tabs used (see the 2026-08-14 layout pass) — a size is a
+   * persistent choice, not a momentary hover, so it needs to stay
+   * highlighted after the pointer leaves it. */
+  private refreshSizeStyles(): void {
+    for (const [id, button] of this.sizeButtons) {
+      button.bg.setFillStyle(id === this.currentSize ? BUTTON_HOVER_COLOR : BUTTON_COLOR);
+    }
   }
 
   private backgroundLabelText(label: string): string {

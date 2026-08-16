@@ -12,12 +12,13 @@ import { EntityPlacer } from "../editor/EntityPlacer";
 import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
+import { isEnemyType } from "../gameplay/EnemyBehaviors";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
-import { createEmptyLevel, EMPTY_TILE, EntityType, LevelData } from "../level/LevelSchema";
+import { createEmptyLevel, DEFAULT_ENEMY_SIZE, EMPTY_TILE, EnemySize, EntityType, LevelData } from "../level/LevelSchema";
 import { backgroundDisplayLabel, nextStaticBackgroundId, resolveStaticBackground, StaticBackgroundId } from "../level/staticBackgrounds";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
@@ -57,6 +58,12 @@ export class EditorScene extends Phaser.Scene {
   // Header-level toggle, independent of currentBrush — see applyEraseAt's
   // docstring for why erasing stopped being a per-category brush.
   private eraserActive = false;
+  // The right panel's "Enemy Size" selector — meaningful only when the
+  // brush being placed is an enemy (see applyEntityBrushAt); persists
+  // across brush/category switches like currentBrush itself does, rather
+  // than resetting to "medium" every time, so picking Large once and then
+  // browsing other categories doesn't lose the choice.
+  private currentSize: EnemySize = DEFAULT_ENEMY_SIZE;
   private storage: StorageAdapter = getLevelStorage();
   private brushesByType = new Map<EntityType, Brush>();
   private history = new HistoryStack();
@@ -139,6 +146,7 @@ export class EditorScene extends Phaser.Scene {
         onUploadSkin: (file) => this.uploadSkin(file),
         onClearSkin: () => this.clearSkin(),
         onToggleEraser: () => this.toggleEraser(),
+        onSelectSize: (size) => (this.currentSize = size),
       },
     );
 
@@ -295,11 +303,20 @@ export class EditorScene extends Phaser.Scene {
    * EraseEntityCommand rather than PlaceEntityCommand's old
    * move-in-place trick, so undo can restore each displaced entity
    * independently — see CompositeCommand for why running them in one
-   * array undoes correctly in reverse order. */
+   * array undoes correctly in reverse order.
+   *
+   * For an enemy brush, `this.currentSize` (the header's Enemy Size
+   * selector) rides along on the new AddEntityCommand — and, since
+   * clicking an already-placed *same-type* enemy would otherwise be a
+   * silent no-op, re-clicking it with a *different* size selected is
+   * treated as a real change (erase the old instance, add the new-sized
+   * one) rather than doing nothing, so resizing an existing enemy doesn't
+   * require erasing it by hand first. */
   private applyEntityBrushAt(tileX: number, tileY: number): void {
     const type = this.currentBrush.entityType;
     if (!type) return;
     if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
+    const size = isEnemyType(type) ? this.currentSize : undefined;
 
     const commands: Command[] = [];
 
@@ -311,11 +328,13 @@ export class EditorScene extends Phaser.Scene {
 
     const occupant = this.entityPlacer.entityAt(tileX, tileY);
     if (occupant) {
-      if (occupant.type === type) return; // no-op, this exact entity is already here
+      const sameType = occupant.type === type;
+      const sameSize = (occupant.size ?? DEFAULT_ENEMY_SIZE) === (size ?? DEFAULT_ENEMY_SIZE);
+      if (sameType && sameSize) return; // no-op, this exact entity (type + size) is already here
       commands.push(new EraseEntityCommand(this.entityPlacer, this.brushesByType, occupant));
     }
 
-    commands.push(new AddEntityCommand(this.entityPlacer, this.currentBrush, tileX, tileY));
+    commands.push(new AddEntityCommand(this.entityPlacer, this.currentBrush, tileX, tileY, size));
     const command = commands.length === 1 ? commands[0] : new CompositeCommand(commands);
     command.execute();
     this.history.push(command);

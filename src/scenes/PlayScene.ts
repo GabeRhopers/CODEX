@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { VolumeControl } from "../audio/VolumeControl";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y, TILE_SIZE } from "../config/gameConfig";
 import {
+  applyDefaultSkinSize,
+  applyEnemySize,
   applyStompBounce,
   createGhostState,
   createPatrolEnemy,
@@ -34,7 +36,7 @@ import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
-import { EntityType, LevelData } from "../level/LevelSchema";
+import { DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelData } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { resolveSkinTextureKeys } from "../skins/skinLoader";
@@ -152,6 +154,20 @@ export class PlayScene extends Phaser.Scene {
     this.enemies = [];
     this.stats = createPlayerStats();
     this.jumpWasDown = false;
+    // Phaser reuses this same PlayScene instance across every Test Play/
+    // World/Template run rather than constructing a fresh one each time —
+    // create() reruns, but a plain class-field initializer like
+    // `= new Map()` only ever runs once, at the very first construction.
+    // Without clearing it here, a second Play session would append this
+    // run's freshly-created sprites onto the *previous* run's list rather
+    // than starting clean — and since scene.stop() (leaving via Esc/win/
+    // lose) destroys every sprite from the run before it, that stale list
+    // ends up mixing live sprites with already-destroyed ones. Found via
+    // exactly that: a real crash ("Cannot read properties of undefined
+    // (reading 'sys')" inside setTexture) on a *second* Test Play of a
+    // level with a skinned enemy — the skin-resolve pass below iterated
+    // the first run's now-destroyed sprite right alongside the new one.
+    this.spritesByBrushId = new Map();
   }
 
   create(): void {
@@ -237,7 +253,16 @@ export class PlayScene extends Phaser.Scene {
     // keeps singleton and so are looked up with `.find`.
     for (const def of ENEMY_DEFS) {
       for (const entity of this.level.entities.filter((e) => e.type === def.type)) {
+        const size = entity.size ?? DEFAULT_ENEMY_SIZE;
         const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
+        applyEnemySize(sprite, def.type, size);
+        // Stashed on the sprite itself (Phaser's own GameObject data store)
+        // rather than a parallel map — the skin-resolve pass below needs
+        // to know each individual sprite's own size again after a skin
+        // swap, and spritesByBrushId only groups by brush id/type, losing
+        // which instance had which size once two same-type enemies could
+        // differ (this feature's whole point).
+        sprite.setData("enemySize", size);
         this.trackSprite(def.type, sprite);
         const state = createGhostState(sprite);
         this.enemies.push({ sprite, state, stompable: def.stompable });
@@ -284,13 +309,25 @@ export class PlayScene extends Phaser.Scene {
     // Custom skins (see "Custom skins" under Art) apply to gameplay too,
     // not just the editor — same async "pop in a moment later" tolerance
     // as the background/music resolves above; every sprite tracked via
-    // trackSprite above just has its texture swapped in place once this
-    // resolves, no scale/physics-body changes.
+    // trackSprite above has its texture swapped in place once this
+    // resolves. Also re-normalizes display size (and, for enemies, the
+    // physics body) after the swap — a skin can be uploaded at any
+    // resolution up to skinUpload.ts's 128px cap, and setTexture alone
+    // doesn't touch a sprite's current scale, so without this a skinned
+    // enemy/item/decor/goal would render at its *uploaded* image's own
+    // native size instead of a tile-appropriate one (a real bug: found
+    // while verifying skins actually apply correctly in Test Play, not
+    // just in the editor's own palette/grid preview).
     void resolveSkinTextureKeys(this).then((skinTextureKeys) => {
       for (const [brushId, sprites] of this.spritesByBrushId) {
         const key = skinTextureKeys.get(brushId);
         if (!key) continue;
-        for (const sprite of sprites) sprite.setTexture(key);
+        for (const sprite of sprites) {
+          sprite.setTexture(key);
+          const enemySize = sprite.getData("enemySize") as EnemySize | undefined;
+          if (enemySize) applyEnemySize(sprite as Phaser.Physics.Arcade.Sprite, brushId as EntityType, enemySize);
+          else applyDefaultSkinSize(sprite);
+        }
       }
     });
 

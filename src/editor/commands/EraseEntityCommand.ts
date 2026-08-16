@@ -23,6 +23,6 @@ export class EraseEntityCommand implements Command {
   undo(): void {
     const brush = this.brushesByType.get(this.entity.type);
     if (!brush) return;
-    this.placer.add(brush, this.entity.x, this.entity.y);
+    this.placer.add(brush, this.entity.x, this.entity.y, this.entity.size);
   }
 }

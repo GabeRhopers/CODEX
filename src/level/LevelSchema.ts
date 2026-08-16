@@ -54,10 +54,21 @@ export type EntityType =
   | "decor-rocks"
   | "decor-bat";
 
+/** Placement-time size modifier for enemies only (see EnemyBehaviors.ts
+ * for the actual scale factors/hitboxes) — chosen via EditorUI's "Enemy
+ * Size" selector at the moment an enemy is placed, not editable in place
+ * afterward (erase and re-place to change one). Absent on every non-enemy
+ * entity, and absent on enemies placed before this feature existed —
+ * both cases mean "medium," the original, unscaled look, so old saves
+ * render identically to before with zero migration needed. */
+export type EnemySize = "small" | "medium" | "large";
+export const DEFAULT_ENEMY_SIZE: EnemySize = "medium";
+
 export interface LevelEntity {
   type: EntityType;
   x: number;
   y: number;
+  size?: EnemySize;
 }
 
 export interface LevelData {

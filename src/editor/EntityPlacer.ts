@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y } from "../config/gameConfig";
-import { EntityType, LevelData, LevelEntity } from "../level/LevelSchema";
+import { ENEMY_EDITOR_SIZE_SCALE, isEnemyType } from "../gameplay/EnemyBehaviors";
+import { EnemySize, EntityType, LevelData, LevelEntity } from "../level/LevelSchema";
 import { Brush } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -65,18 +66,33 @@ export class EntityPlacer {
 
   /** Unconditionally adds a new entity at (tileX, tileY) — callers are
    * responsible for having already cleared that tile first (via removeAt)
-   * if the invariant above requires it. */
-  add(brush: Brush, tileX: number, tileY: number): void {
+   * if the invariant above requires it. `size` is meaningful only for
+   * enemy brushes (see EnemyBehaviors.ts's ENEMY_TYPES/isEnemyType) —
+   * passed for every other brush it's simply ignored and never stored, so
+   * their JSON stays exactly as it was before this feature existed. */
+  add(brush: Brush, tileX: number, tileY: number, size?: EnemySize): void {
     const type = brush.entityType;
     if (!type) return;
     const worldX = GRID_ORIGIN_X + tileX * this.tileSize + this.tileSize / 2;
     const worldY = GRID_ORIGIN_Y + tileY * this.tileSize + this.tileSize / 2;
+    const storedSize = isEnemyType(type) ? size : undefined;
 
-    this.level.entities.push({ type, x: tileX, y: tileY });
+    this.level.entities.push({ type, x: tileX, y: tileY, ...(storedSize ? { size: storedSize } : {}) });
     const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
     marker.setDepth(10);
-    fitWithinTile(marker);
+    this.applyMarkerDisplaySize(marker, storedSize);
     this.markers.set(tileKey(tileX, tileY), marker);
+  }
+
+  /** Tile-fits every marker (unchanged from before this feature), then
+   * layers the editor-preview size multiplier on top for enemies — see
+   * ENEMY_EDITOR_SIZE_SCALE's docstring for why this uses different
+   * numbers than PlayScene's own size handling. */
+  private applyMarkerDisplaySize(marker: Phaser.GameObjects.Image, size: EnemySize | undefined): void {
+    fitWithinTile(marker);
+    if (!size) return;
+    const scale = ENEMY_EDITOR_SIZE_SCALE[size];
+    marker.setDisplaySize(marker.displayWidth * scale, marker.displayHeight * scale);
   }
 
   /** Removes and returns whatever entity occupies this exact tile (any
@@ -107,7 +123,7 @@ export class EntityPlacer {
       const worldY = GRID_ORIGIN_Y + entity.y * this.tileSize + this.tileSize / 2;
       const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
       marker.setDepth(10);
-      fitWithinTile(marker);
+      this.applyMarkerDisplaySize(marker, isEnemyType(entity.type) ? entity.size : undefined);
       this.markers.set(tileKey(entity.x, entity.y), marker);
     }
   }
