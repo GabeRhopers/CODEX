@@ -140,7 +140,7 @@ export class SkinEditorScene extends Phaser.Scene {
     this.add
       .text(GAME_WIDTH / 2, 50, "Pixel-art skins for Markers/Enemies/Items/Decor.", {
         fontSize: "12px",
-        color: "#8888aa",
+        color: "#a6a6c8",
       })
       .setOrigin(0.5, 0);
 
@@ -150,7 +150,7 @@ export class SkinEditorScene extends Phaser.Scene {
     );
 
     const loadingText = this.add
-      .text(GAME_WIDTH / 2, ROW_START_Y + 20, "Loading…", { fontSize: "14px", color: "#8888aa" })
+      .text(GAME_WIDTH / 2, ROW_START_Y + 20, "Loading…", { fontSize: "14px", color: "#a6a6c8" })
       .setOrigin(0.5);
 
     void listPixelSkins().then(async (entries) => {
@@ -161,7 +161,7 @@ export class SkinEditorScene extends Phaser.Scene {
         this.add
           .text(GAME_WIDTH / 2, ROW_START_Y + 20, "No pixel skins yet — tap + New Skin to paint one.", {
             fontSize: "14px",
-            color: "#8888aa",
+            color: "#a6a6c8",
           })
           .setOrigin(0.5);
         return;

@@ -35,7 +35,7 @@ export class TemplateBrowserScene extends Phaser.Scene {
     this.add
       .text(GAME_WIDTH / 2, 50, "Pre-built levels — play one, or use it as a starting point in the editor.", {
         fontSize: "12px",
-        color: "#8888aa",
+        color: "#a6a6c8",
       })
       .setOrigin(0.5, 0);
 

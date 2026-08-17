@@ -42,10 +42,10 @@ export class MenuScene extends Phaser.Scene {
     // itself (one shared sign-in behind all three profiles) is untouched.
     const activeProfile = loadActiveProfile();
     const profileText = this.add
-      .text(8, 6, `${activeProfile ?? "?"} · Switch profile`, { fontSize: "11px", color: "#8888aa" })
+      .text(8, 6, `${activeProfile ?? "?"} · Switch profile`, { fontSize: "11px", color: "#a6a6c8" })
       .setInteractive({ useHandCursor: true });
     profileText.on("pointerover", () => profileText.setColor("#ffffff"));
-    profileText.on("pointerout", () => profileText.setColor("#8888aa"));
+    profileText.on("pointerout", () => profileText.setColor("#a6a6c8"));
     profileText.on("pointerdown", () => {
       clearActiveProfile();
       this.scene.start("ProfileGate");
@@ -156,11 +156,11 @@ export class MenuScene extends Phaser.Scene {
     // other four (no "how much you've built" status line worth surfacing
     // here), so a link fits its actual weight better anyway.
     const skinCreatorLink = this.add
-      .text(cx, row2Y + CARD_HEIGHT + 80, "Skin Creator", { fontSize: "13px", color: "#8888aa" })
+      .text(cx, row2Y + CARD_HEIGHT + 80, "Skin Creator", { fontSize: "13px", color: "#a6a6c8" })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     skinCreatorLink.on("pointerover", () => skinCreatorLink.setColor("#ffffff"));
-    skinCreatorLink.on("pointerout", () => skinCreatorLink.setColor("#8888aa"));
+    skinCreatorLink.on("pointerout", () => skinCreatorLink.setColor("#a6a6c8"));
     skinCreatorLink.on("pointerdown", () => this.scene.start("SkinEditor"));
   }
 

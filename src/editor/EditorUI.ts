@@ -392,7 +392,7 @@ export class EditorUI {
 
     // --- Right "Level Settings" panel ---
     scene.add
-      .text(RIGHT_PANEL_X + PANEL_PADDING, RIGHT_TITLE_Y, "Level Settings", { fontSize: "13px", color: "#8b8bb0", fontStyle: "bold" })
+      .text(RIGHT_PANEL_X + PANEL_PADDING, RIGHT_TITLE_Y, "Level Settings", { fontSize: "13px", color: "#a6a6c8", fontStyle: "bold" })
       .setOrigin(0, 0)
       .setDepth(CONTENT_DEPTH);
 
@@ -464,7 +464,7 @@ export class EditorUI {
     // to match every enemy's unscaled, pre-this-feature look.
     rowY += 8;
     scene.add
-      .text(RIGHT_PANEL_X + PANEL_PADDING, rowY, "Enemy Size", { fontSize: "13px", color: "#8b8bb0", fontStyle: "bold" })
+      .text(RIGHT_PANEL_X + PANEL_PADDING, rowY, "Enemy Size", { fontSize: "13px", color: "#a6a6c8", fontStyle: "bold" })
       .setOrigin(0, 0)
       .setDepth(CONTENT_DEPTH);
     rowY += 24;
@@ -481,15 +481,15 @@ export class EditorUI {
 
     // --- Footer: read-only stats ---
     scene.add
-      .text(FOOTER_LEVEL_SIZE_X, FOOTER_TEXT_Y, `Level: ${initialLevelWidth}×${initialLevelHeight}`, { fontSize: "11px", color: "#8b8bb0" })
+      .text(FOOTER_LEVEL_SIZE_X, FOOTER_TEXT_Y, `Level: ${initialLevelWidth}×${initialLevelHeight}`, { fontSize: "11px", color: "#a6a6c8" })
       .setOrigin(0, 0.5)
       .setDepth(CONTENT_DEPTH);
     this.footerCursorText = scene.add
-      .text(FOOTER_CURSOR_X, FOOTER_TEXT_Y, "Cursor: –", { fontSize: "11px", color: "#8b8bb0" })
+      .text(FOOTER_CURSOR_X, FOOTER_TEXT_Y, "Cursor: –", { fontSize: "11px", color: "#a6a6c8" })
       .setOrigin(0, 0.5)
       .setDepth(CONTENT_DEPTH);
     this.footerEntitiesText = scene.add
-      .text(FOOTER_ENTITIES_X, FOOTER_TEXT_Y, `Entities: ${initialEntityCount}`, { fontSize: "11px", color: "#8b8bb0" })
+      .text(FOOTER_ENTITIES_X, FOOTER_TEXT_Y, `Entities: ${initialEntityCount}`, { fontSize: "11px", color: "#a6a6c8" })
       .setOrigin(0, 0.5)
       .setDepth(CONTENT_DEPTH);
     this.saveStatusText = scene.add
@@ -616,7 +616,7 @@ export class EditorUI {
       fitWithinTile(icon);
       icon.on("pointerdown", () => this.selectBrush(brush));
       const label = this.scene.add
-        .text(x, y + TILE_SIZE / 2 + 2, brush.label, { fontSize: "9px", color: "#eeeeee" })
+        .text(x, y + TILE_SIZE / 2 + 2, brush.label, { fontSize: "10px", color: "#eeeeee" })
         .setOrigin(0.5, 0)
         .setDepth(CONTENT_DEPTH);
       this.iconGrid.add([icon, label]);

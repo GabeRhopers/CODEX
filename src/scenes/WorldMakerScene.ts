@@ -80,11 +80,11 @@ export class WorldMakerScene extends Phaser.Scene {
 
     this.add.text(GAME_WIDTH / 2, 24, "World Maker", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
 
-    this.add.text(LEFT_X, 62, "Available levels (click to add)", { fontSize: "12px", color: "#8888aa" });
-    this.add.text(RIGHT_X, 62, "This world, in order (click to remove)", { fontSize: "12px", color: "#8888aa" });
+    this.add.text(LEFT_X, 62, "Available levels (click to add)", { fontSize: "12px", color: "#a6a6c8" });
+    this.add.text(RIGHT_X, 62, "This world, in order (click to remove)", { fontSize: "12px", color: "#a6a6c8" });
 
     this.statusText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 20, "", { fontSize: "11px", color: "#8888aa" })
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 20, "", { fontSize: "11px", color: "#a6a6c8" })
       .setOrigin(0.5);
 
     this.availableContainer = this.add.container(0, 0);

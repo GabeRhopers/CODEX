@@ -46,7 +46,7 @@ export class WorldBrowserScene extends Phaser.Scene {
     this.add.text(GAME_WIDTH / 2, 24, "My Worlds", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
 
     this.statusText = this.add
-      .text(GAME_WIDTH / 2, ROW_START_Y - 24, "", { fontSize: "11px", color: "#8888aa" })
+      .text(GAME_WIDTH / 2, ROW_START_Y - 24, "", { fontSize: "11px", color: "#a6a6c8" })
       .setOrigin(0.5);
 
     this.listContainer = this.add.container(0, 0);
@@ -62,7 +62,7 @@ export class WorldBrowserScene extends Phaser.Scene {
         this.add
           .text(GAME_WIDTH / 2, ROW_START_Y + 20, "No worlds yet — chain a few levels together with New World.", {
             fontSize: "14px",
-            color: "#8888aa",
+            color: "#a6a6c8",
           })
           .setOrigin(0.5),
       );
@@ -79,8 +79,8 @@ export class WorldBrowserScene extends Phaser.Scene {
       .setOrigin(0, 0.5);
     const meta = this.add
       .text(56, y + (ROW_HEIGHT - 8) / 2 + 16, `${world.levelCount} level${world.levelCount === 1 ? "" : "s"}`, {
-        fontSize: "10px",
-        color: "#8888aa",
+        fontSize: "11px",
+        color: "#a6a6c8",
       })
       .setOrigin(0, 0.5);
 

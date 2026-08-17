@@ -50,7 +50,7 @@ const ACTIVE_OUTLINE_COLOR = 0xffeb3b;
 const DELETE_BG_COLOR = 0xaa3333;
 const DELETE_HOVER_COLOR = 0xd14f4f;
 
-const LABEL_HEIGHT = 14;
+const LABEL_HEIGHT = 18;
 const CELL_PADDING = 4;
 const PANEL_PADDING = 8;
 const UPLOAD_TILE_LABEL = "+ Upload";
@@ -206,7 +206,7 @@ export class AssetPickerMenu {
       }
 
       const label = this.scene.add
-        .text(x, y + itemSize + 2, item.label, { fontSize: "8px", color: "#cccccc", align: "center", wordWrap: { width: cellWidth - 4 } })
+        .text(x, y + itemSize + 2, item.label, { fontSize: "10px", color: "#cccccc", align: "center", wordWrap: { width: cellWidth - 4 } })
         .setOrigin(0.5, 0)
         .setDepth(dropdownDepth + 1);
       this.dropdownContainer.add(label);
@@ -241,7 +241,7 @@ export class AssetPickerMenu {
         .setOrigin(0, 0)
         .setDepth(dropdownDepth + 1);
       const uploadLabel = this.scene.add
-        .text(x, y + itemSize / 2, UPLOAD_TILE_LABEL, { fontSize: "9px", color: "#ffffff", align: "center", wordWrap: { width: cellWidth - 6 } })
+        .text(x, y + itemSize / 2, UPLOAD_TILE_LABEL, { fontSize: "10px", color: "#ffffff", align: "center", wordWrap: { width: cellWidth - 6 } })
         .setOrigin(0.5, 0.5)
         .setDepth(dropdownDepth + 2);
       this.dropdownContainer.add([uploadBg, uploadLabel]);

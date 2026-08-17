@@ -2239,6 +2239,71 @@ unaffected — that scene has no footer band to move it into, so it stays
 in its original header-style corner (top-right, below its own Save World
 button).
 
+**Text legibility pass (2026-08-17).** A step-by-step audit of why the
+UI's text felt hard to read turned up three compounding causes, only one
+of which was about font size:
+
+1. *Every Text object was nearest-neighbor upscaled.* `main.ts` sets
+   `pixelArt: true` so the hand-drawn sprites/tiles stay crisp, which sets
+   `antialias: false`/`antialiasGL: false` globally (confirmed in Phaser's
+   own `Config.js`) — but that setting applies to *every* WebGL texture,
+   including the canvas-rendered bitmap behind a `Text` object. Combined
+   with `resolution` defaulting to `1` on every Text object (Phaser's
+   `Text.js`), and `Scale.FIT` stretching the fixed 1050x468 canvas to
+   whatever the actual browser window is (almost always >1x on desktop —
+   confirmed 1.333x in a 1400px-wide Playwright viewport), every letter on
+   every screen was being blown up with blocky, non-antialiased scaling —
+   independent of font choice or size. This was the single biggest,
+   least-obvious contributor, and the only one that couldn't be fixed by
+   touching individual scenes.
+2. *No font family was ever set,* so every `Text` object fell back to
+   Phaser's own unstyled default, `"Courier"` (confirmed in
+   `TextStyle.js`) — a monospace font, a poor fit for dense UI chrome next
+   to this game's hand-drawn art.
+3. *Some real UI text was just very small* — AssetPickerMenu thumbnail
+   labels at 8px, palette brush captions and the Upload-tile label at 9px,
+   list-row sub-captions at 10px — with no shared type scale across the 13
+   scene/editor files that render text.
+
+Fix, in the same priority order: `src/ui/textDefaults.ts`'s
+`installTextDefaults()` patches Phaser's own `GameObjectFactory.prototype.text`
+once, called from `main.ts` before the `Game` is constructed, to inject a
+default `fontFamily` (`"Trebuchet MS", "Segoe UI", Verdana, Arial,
+sans-serif` — a widely-available stack rather than a single named font, so
+it degrades gracefully without needing to self-host/CORS-load a web font)
+and `resolution: 2` (supersamples the glyph bitmap so the nearest-neighbor
+upscaling above has far less visible blockiness to magnify) into every
+existing and future `scene.add.text(...)` call, everywhere, without
+threading either property through dozens of call sites by hand — including
+the many already hidden behind shared helpers like `EditorUI.makeFixedWidthButton`.
+Only fills in whichever of the two a caller's own style didn't already
+set, and never touches sprite/tile textures, so the pixel-art rendering
+those rely on is completely unaffected. The handful of sub-11px sizes
+identified in point 3 were raised individually (8px/9px → 10px, 10px →
+11px), and `AssetPickerMenu`'s `LABEL_HEIGHT` constant grew 14 → 18 to
+keep a wrapped 2-line thumbnail label (e.g. "Frozen Volcano") from
+crowding whatever's below it — `cellHeight`/`panelHeight` are already
+derived from that one constant, so the whole dropdown's row spacing
+adjusted automatically rather than needing a second, separate fix.
+
+Also folded in while touching these files anyway: the muted/secondary
+label color used throughout the UI existed as two near-identical, mildly
+inconsistent grays (`#8b8bb0` in the editor, `#8888aa` everywhere else) —
+both computed to a borderline ~4.86:1 contrast ratio against the panel/
+header backgrounds (WCAG AA requires 4.5:1 for normal text, so this had
+no headroom to spare). Consolidated to one shared, lighter value,
+`#a6a6c8` (~6.75:1 against the same backgrounds), across every scene —
+one fewer inconsistency and comfortable contrast margin, not just a
+bare pass.
+
+Verified in a mocked-Drive Playwright session at a deliberately >1x
+canvas scale (1400px-wide viewport, confirmed 1.333x): the Menu's title/
+card text, the editor's full header/footer/palette (including "Basket
+(Down)"/"Basket (Up)", the longest palette captions, still fitting
+comfortably within their columns at the new size), and the Background
+picker's dropdown (exercising the worst-case 2-line-wrap label) all
+render crisp and correctly laid out with zero overflow or row collisions.
+
 ## Project layout
 
 See `docs/spellbound-editor-implementation-plan.md` §4 for the intended
@@ -2247,6 +2312,8 @@ full layout. Implemented so far:
 ```
 src/
 ├── main.ts                  Phaser game config + boot
+├── ui/
+│   └── textDefaults.ts       patches Phaser's text factory with a default fontFamily/resolution — see "Text legibility pass" under Art
 ├── scenes/
 │   ├── BootScene.ts          loads wizard/Kenney/entity art + procedural textures, starts ProfileGate
 │   ├── ProfileGateScene.ts   "Who's playing?" + "Connect Google Drive" gate, Boot → here → Menu — see "Google Drive storage & profiles" under Art

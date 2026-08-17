@@ -53,7 +53,7 @@ export class LevelBrowserScene extends Phaser.Scene {
     if (levels.length === 0) {
       this.listContainer.add(
         this.add
-          .text(GAME_WIDTH / 2, ROW_START_Y + 20, "No saved levels yet.", { fontSize: "14px", color: "#8888aa" })
+          .text(GAME_WIDTH / 2, ROW_START_Y + 20, "No saved levels yet.", { fontSize: "14px", color: "#a6a6c8" })
           .setOrigin(0.5),
       );
       return;
@@ -69,8 +69,8 @@ export class LevelBrowserScene extends Phaser.Scene {
       .setOrigin(0, 0.5);
     const updated = this.add
       .text(56, y + (ROW_HEIGHT - 8) / 2 + 16, `Updated ${this.formatDate(level.updatedAt)}`, {
-        fontSize: "10px",
-        color: "#8888aa",
+        fontSize: "11px",
+        color: "#a6a6c8",
       })
       .setOrigin(0, 0.5);
 

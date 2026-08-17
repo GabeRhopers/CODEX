@@ -10,6 +10,11 @@ import { SkinEditorScene } from "./scenes/SkinEditorScene";
 import { TemplateBrowserScene } from "./scenes/TemplateBrowserScene";
 import { WorldBrowserScene } from "./scenes/WorldBrowserScene";
 import { WorldMakerScene } from "./scenes/WorldMakerScene";
+import { installTextDefaults } from "./ui/textDefaults";
+
+// Must run before any scene's create() can call scene.add.text(...) — see
+// textDefaults.ts's docstring for what this fixes and why.
+installTextDefaults();
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
