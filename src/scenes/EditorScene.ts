@@ -84,10 +84,17 @@ export class EditorScene extends Phaser.Scene {
   // endGrab. Independent of currentBrush, same as eraserActive.
   private handActive = false;
   // Set for the duration of a Hand-tool drag (pointerdown on an occupied
-  // tile through pointerup) — the tile the grabbed entity started on, so
-  // endGrab/onPointerMove know which marker sprite EntityPlacer's preview/
-  // cancel/commit calls are about. `null` whenever no drag is in progress.
+  // tile through pointerup) — the tile the grab started on, so endGrab/
+  // onPointerMove know what EntityPlacer/TilePainter's preview/cancel/
+  // commit calls are about. `null` whenever no drag is in progress.
   private grabbedFromTile: TileCoord | null = null;
+  // Non-null exactly when the current grab picked up a ground block rather
+  // than an entity — the block's own tile value, so endGrab knows what to
+  // paint back in if the drop is invalid, or at the destination if it's
+  // not. `null` for an entity grab (entities carry their own identity via
+  // EntityPlacer, so no separate value needs threading through) and
+  // whenever no drag is in progress.
+  private grabbedTileValue: number | null = null;
   // The right panel's "Enemy Size" selector — meaningful only when the
   // brush being placed is an enemy (see applyEntityBrushAt); persists
   // across brush/category switches like currentBrush itself does, rather
@@ -343,6 +350,7 @@ export class EditorScene extends Phaser.Scene {
     this.dragLastX = -1;
     this.dragLastY = -1;
     this.grabbedFromTile = null; // any in-progress Hand-tool drag refers to the area being left; nothing to reconcile it against in the new one
+    this.grabbedTileValue = null;
 
     const area = this.area();
     this.backgroundId = resolveStaticBackground(area);
@@ -415,12 +423,15 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
-    // A Hand-tool drag in progress: the grabbed marker just follows the raw
-    // pointer (not snapped to a tile) for a natural "holding it" feel,
+    // A Hand-tool entity drag in progress: the grabbed marker follows the
+    // raw pointer (not snapped to a tile) for a natural "holding it" feel,
     // regardless of whether the pointer is currently over the grid — the
     // highlight/cursor-text logic below still runs afterward so the
-    // destination tile stays visible while dragging.
-    if (this.grabbedFromTile) {
+    // destination tile stays visible while dragging. A block drag has no
+    // sprite of its own to move (see beginGrab) — the already-cleared
+    // source cell plus the ordinary hover highlight below are its only
+    // visual feedback, so there's nothing to do here for that case.
+    if (this.grabbedFromTile && this.grabbedTileValue === null) {
       this.entityPlacer.previewDragTo(this.grabbedFromTile.x, this.grabbedFromTile.y, pointer.x, pointer.y);
     }
     if (!this.isOverGrid(pointer)) {
@@ -547,42 +558,71 @@ export class EditorScene extends Phaser.Scene {
     this.ui.setEraserActive(this.eraserActive);
   }
 
-  /** Starts a Hand-tool drag: grabs whatever entity occupies (tileX, tileY),
-   * if any — a no-op with a status message on an empty tile or a
-   * ground-only one, since the Hand tool only moves entities (Markers/
-   * Enemies/Items/Decor), never ground blocks — see endGrab's docstring.
-   * Just records which tile the drag started from; the actual visual
-   * follow happens in onPointerMove, and the data mutation only happens
-   * once endGrab commits it — nothing about the level changes here, so an
-   * aborted drag (e.g. pointer released off-screen) needs no cleanup beyond
-   * the sprite snapping back via cancelDrag. */
+  /** Starts a Hand-tool drag: grabs whatever occupies (tileX, tileY) — an
+   * entity first (any category, same "entity before ground" priority the
+   * universal Eraser already uses in applyEraseAt), falling back to the
+   * ground block itself if there's no entity there. A no-op with a status
+   * message on a genuinely empty tile. Just records which tile the drag
+   * started from (and, for a block grab, the block's own tile value — see
+   * grabbedTileValue); the actual visual feedback happens in
+   * onPointerMove, and the data mutation only commits once endGrab
+   * resolves the drop — nothing about the level's *final* state changes
+   * here, so an aborted drag needs no cleanup beyond snapping/painting
+   * back to how it started.
+   *
+   * A block grab is the one exception to "nothing changes here": unlike
+   * an entity (a real sprite that can just be repositioned mid-drag via
+   * EntityPlacer.previewDragTo), a ground block has no sprite of its own
+   * — it's one cell's value in `layers.ground`, rendered by the shared
+   * tilemap layer. The only way to show "you're holding this" is to
+   * actually clear the source cell immediately (`this.painter.paint(...,
+   * EMPTY_TILE)`), live, before the drag resolves — endGrab either paints
+   * the same value back at the source (canceled) or at the destination
+   * (committed), so from the undo history's perspective this in-between
+   * state never happened either way. */
   private beginGrab(tileX: number, tileY: number): void {
     const area = this.area();
     if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height) return;
-    if (!this.entityPlacer.entityAt(tileX, tileY)) {
+
+    if (this.entityPlacer.entityAt(tileX, tileY)) {
+      this.grabbedFromTile = { x: tileX, y: tileY };
+      this.grabbedTileValue = null;
+      return;
+    }
+
+    const tileValue = area.layers.ground[tileY][tileX];
+    if (tileValue === EMPTY_TILE) {
       this.ui.setStatus("Nothing to grab there");
       return;
     }
     this.grabbedFromTile = { x: tileX, y: tileY };
+    this.grabbedTileValue = tileValue;
+    this.painter.paint(tileX, tileY, EMPTY_TILE);
   }
 
   /** Ends a Hand-tool drag, committing the move if the drop is valid or
-   * snapping the marker back to its origin tile otherwise. A drop is
-   * invalid — reverted via EntityPlacer.cancelDrag rather than moved — when
-   * it lands outside the grid, back on its own origin tile (nothing to do),
-   * or on a tile something else already occupies (blocked rather than
-   * swapped or displaced, the same "very simple first" cut this project
-   * takes elsewhere — see WorldMakerScene's own no-drag-reorder choice).
-   * Ground tiles are out of scope for the Hand tool entirely: it only ever
-   * looks up/moves entities (Markers/Enemies/Items/Decor), never touches
-   * `layers.ground`, matching "grab elements and move them" rather than
-   * "grab paint." A valid move becomes one MoveEntityCommand, undoable like
-   * any other edit. */
+   * reverting it (snapping an entity marker back, or repainting a block
+   * back at its origin) otherwise. A drop is invalid when it lands outside
+   * the grid, back on its own origin tile (nothing to do), or on a tile
+   * something else already occupies (blocked rather than swapped or
+   * displaced, the same "very simple first" cut this project takes
+   * elsewhere — see WorldMakerScene's own no-drag-reorder choice) —
+   * "something else" means an entity for an entity grab, and any non-empty
+   * ground cell for a block grab; the two never check against each other,
+   * since an entity sitting on a block and a block underneath an entity
+   * are both completely normal, independent states. */
   private endGrab(pointer: Phaser.Input.Pointer): void {
     const from = this.grabbedFromTile;
     if (!from) return;
+    const tileValue = this.grabbedTileValue;
     this.grabbedFromTile = null;
+    this.grabbedTileValue = null;
 
+    if (tileValue !== null) this.endTileGrab(from, tileValue, pointer);
+    else this.endEntityGrab(from, pointer);
+  }
+
+  private endEntityGrab(from: TileCoord, pointer: Phaser.Input.Pointer): void {
     if (!this.isOverGrid(pointer)) {
       this.entityPlacer.cancelDrag(from.x, from.y);
       return;
@@ -602,6 +642,46 @@ export class EditorScene extends Phaser.Scene {
 
     const command = new MoveEntityCommand(this.entityPlacer, from, { x: tileX, y: tileY });
     command.execute();
+    this.history.push(command);
+    this.markDirty();
+  }
+
+  /** Commits or reverts a block grab. The source cell is already
+   * (visually and in `layers.ground`) cleared by beginGrab — a revert just
+   * repaints `tileValue` back there; a commit paints it at the destination
+   * instead and records the whole move as one undo step, composed from two
+   * ordinary PaintTileCommands (source: tileValue → empty, destination:
+   * empty → tileValue) rather than a new Command class — `CompositeCommand`
+   * already undoes in reverse order, which for these two unwinds exactly
+   * right (destination back to empty, then source back to tileValue). Both
+   * paints are applied directly first, same "already applied, then
+   * recorded" convention every other drag/placement command in this file
+   * follows — see flushDragCommands. */
+  private endTileGrab(from: TileCoord, tileValue: number, pointer: Phaser.Input.Pointer): void {
+    const area = this.area();
+    const revert = () => this.painter.paint(from.x, from.y, tileValue);
+
+    if (!this.isOverGrid(pointer)) {
+      revert();
+      return;
+    }
+    const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
+    const tileY = Math.floor((pointer.y - GRID_ORIGIN_Y) / TILE_SIZE);
+    if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height || (tileX === from.x && tileY === from.y)) {
+      revert();
+      return;
+    }
+    if (area.layers.ground[tileY][tileX] !== EMPTY_TILE) {
+      revert();
+      this.ui.setStatus("Tile occupied");
+      return;
+    }
+
+    this.painter.paint(tileX, tileY, tileValue);
+    const command = new CompositeCommand([
+      new PaintTileCommand(this.painter, from.x, from.y, tileValue, EMPTY_TILE),
+      new PaintTileCommand(this.painter, tileX, tileY, EMPTY_TILE, tileValue),
+    ]);
     this.history.push(command);
     this.markDirty();
   }

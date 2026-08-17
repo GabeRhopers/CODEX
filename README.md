@@ -186,17 +186,21 @@ Open the dev server URL in a browser. Controls:
   level can have any number of them, same as Enemies/Items/Decor — see
   "Checkpoints" under Art. **Basket (Down)** and **Basket (Up)** are two
   more exceptions — see the Area switcher bullet below.
-- **Hand** (header toggle, right of Eraser): grabs whatever entity occupies
-  a clicked tile and lets you drag it to a new one, instead of erasing and
-  re-placing to move something — press down on an entity, drag (the marker
-  follows your pointer), release over an empty tile to drop it there.
-  Releasing outside the grid, back on its own tile, or onto a tile
-  something else already occupies snaps it back to where it started (a
-  status toast says "Tile occupied" for the last case); a valid move is one
-  undo step, same as any other edit. Mutually exclusive with Eraser — only
-  one can be the active tool, so turning one on turns the other off. Only
-  moves entities (Markers/Enemies/Items/Decor); ground blocks aren't
-  grabbable — see "Hand tool" under Art.
+- **Hand** (header toggle, right of Eraser): grabs whatever occupies a
+  clicked tile — an entity first, or the ground block itself if there's no
+  entity there (2026-08-17: blocks were left out of the first version of
+  this tool, then added the same day — see "Hand tool" under Art) — and
+  lets you drag it to a new tile, instead of erasing and re-placing to
+  move something. Press down to grab, drag (an entity's own marker follows
+  your pointer; a block has no sprite of its own, so it just visibly
+  disappears from its tile the moment you grab it — the ordinary hover
+  highlight shows where it'll land), release over an empty tile to drop
+  it. Releasing outside the grid, back on its own tile, or onto a tile
+  something else already occupies snaps/paints it back to where it
+  started (a status toast says "Tile occupied" for the last case); a
+  valid move is one undo step, same as any other edit. Mutually exclusive
+  with Eraser — only one can be the active tool, so turning one on turns
+  the other off.
 - **Area switcher** (header, right of Hand): **Main** / **+Sub** /
   **+Up** buttons switch which of the level's up-to-three grids you're
   editing — clicking **+Sub** or **+Up** the first time creates a blank
@@ -2186,12 +2190,18 @@ clear the other's flag before handing both states to
 active tool, and a distinct color (`HAND_ACTIVE_COLOR`, purple, vs.
 Eraser's red) makes which one at a glance.
 
-Scoped to entities only (Markers/Enemies/Items/Decor) — "grab elements and
-move them," not "grab paint" — so ground blocks aren't grabbable at all;
-`EntityPlacer.entityAt` is the only lookup `beginGrab` makes, with no
-fallback to the ground layer the way the universal Eraser has one. Three
-new `EntityPlacer` methods carry the whole gesture, all keyed by tile
-position like `entityAt`/`removeAt` already were:
+The first version scoped this to entities only (Markers/Enemies/Items/
+Decor), reasoning "grab elements and move them" meant entities, not
+ground paint — `beginGrab` called only `EntityPlacer.entityAt`, with no
+fallback to the ground layer the way the universal Eraser has one. User
+feedback after shipping said otherwise: clicking a placed Brick with Hand
+active did nothing, and that read as a bug, not a deliberate scope limit
+— "elements" evidently meant anything visibly placed on the grid, blocks
+included. Extended the same day (see "Block support" below) rather than
+left as a documented limitation.
+
+Three new `EntityPlacer` methods carry the entity half of the gesture,
+all keyed by tile position like `entityAt`/`removeAt` already were:
 
 - `previewDragTo(fromX, fromY, worldX, worldY)` — a pure visual
   reposition of the marker sprite still filed under its origin tile,
@@ -2224,6 +2234,38 @@ Ctrl+Z reverting it and Ctrl+Shift+Z re-applying it, dragging it onto a
 tile an already-placed Goal occupied (blocked, "Tile occupied" toast,
 snapped back to its pre-drag position, entity count unchanged), and
 toggling Eraser while Hand was active correctly turning Hand back off.
+
+*Block support.* `beginGrab` now checks for an entity first (unchanged),
+then falls back to the ground block at that tile — same "entity before
+ground" priority the universal Eraser's `applyEraseAt` already uses, so
+Hand and Eraser read consistently: whichever one you're using, an entity
+sitting on a block always takes precedence over the block underneath it.
+A ground block has no sprite of its own to reposition mid-drag the way an
+entity marker does — it's one cell's value in `layers.ground`, rendered
+by the shared tilemap layer, not a separate GameObject — so
+`previewDragTo` doesn't apply here. Instead, `beginGrab` clears the
+source cell immediately and live (`TilePainter.paint(x, y, EMPTY_TILE)`)
+the moment a block is grabbed, which is itself the drag's visual
+feedback (the block visibly vanishes from its tile) alongside the
+ordinary hover highlight tracking the pointer as the destination
+indicator. This is a genuine, if brief, live mutation to the grid outside
+the undo system — not a problem, because `endTileGrab` always resolves
+it one of two ways before the gesture ends: paint `tileValue` back at the
+source (canceled — dropped off-grid, back on its own tile, or onto an
+already-occupied one, blocked with the same "Tile occupied" toast the
+entity path uses) or at the destination (committed). Needed no new
+`Command` class: a commit becomes one `CompositeCommand` of two ordinary
+`PaintTileCommand`s (source: `tileValue → EMPTY_TILE`, destination:
+`EMPTY_TILE → tileValue`) — `CompositeCommand`'s existing reverse-order
+undo already unwinds a two-step move exactly right (destination back to
+empty, then source back to `tileValue`), the same infrastructure ordinary
+tile painting has used since undo/redo first existed. Verified with the
+same Playwright session: grab-drag-dropping a placed Brick to an empty
+tile, confirming the source tile empty and the destination showing the
+Brick immediately mid-drag (before release) at the source, Ctrl+Z/
+Ctrl+Shift+Z correctly reverting/reapplying the move, and dragging it
+onto a tile a second block already occupied (blocked, snapped back to
+its pre-drag tile, no duplication).
 
 **Save-state readout moved to the footer (2026-08-17).** Freeing up room
 in the header for the Hand tool button (see above) was the immediate
@@ -2303,6 +2345,47 @@ card text, the editor's full header/footer/palette (including "Basket
 comfortably within their columns at the new size), and the Background
 picker's dropdown (exercising the worst-case 2-line-wrap label) all
 render crisp and correctly laid out with zero overflow or row collisions.
+
+*Follow-up: the fix above wasn't actually complete.* User feedback after
+shipping said text still looked hard to read. Re-reading Phaser's own
+`Text.js`/`WebGLRenderer.js` turned up the real crux the first pass
+missed: `resolution: 2` only supersamples the *source* bitmap — it never
+touches which WebGL filter mode the texture is sampled with, and every
+*new* texture defaults to NEAREST because of `pixelArt: true`. Worse,
+that default isn't just a one-time construction-time thing a single
+post-creation override could fix: `Text.updateText()` — the one method
+every content or style change funnels through, `setText`/`setStyle`/
+`setFont`/construction itself, all of it — calls
+`renderer.canvasToTexture(canvas, existingGlTexture, true)` on *every*
+call, and that function recomputes NEAREST/NEAREST from the game's global
+`antialias` config and reapplies it to the texture every single time,
+silently overwriting any filter override from before. A one-time
+`.setFilter(LINEAR)` tried first (right after `scene.add.text(...)`
+returns) held only for text that's never updated again — most button
+captions, but not the footer's live cursor tile/entity count, the
+save-state readout, dropdown trigger labels, or any status toast, all of
+which call `.setText(...)` continuously and silently reverted to blocky
+NEAREST filtering on their very next update. This mattered more than it
+sounds: those are exactly the pieces of text a player's eye is drawn to
+most, since they're the ones actively changing.
+
+The real fix needed a second patch point, not a bigger `resolution`:
+`installTextDefaults()` also now wraps `Phaser.GameObjects.Text.prototype
+.updateText` itself — calls the original (unchanged), then re-asserts
+`texture.setFilter(Phaser.Textures.FilterMode.LINEAR)` immediately after,
+every time. Since `updateText()` is the one choke point every text/style
+change funnels through, this survives every future `.setText()` call
+rather than just the first render — no gaps, no need to hunt down and
+patch every individual mutator method. `resolution: 2` stays alongside
+it (extra source detail for LINEAR to interpolate from, still worth
+having), but the filter override is what actually made blocky/aliased
+text go away for good. Verified the same way the original bug was found
+here — a Playwright session that moves the pointer continuously (driving
+dozens of real `.setText()` calls on the footer's cursor-tile readout,
+the same class of element that silently regressed before) and then
+screenshots a tight crop of that exact text afterward, confirming smooth,
+anti-aliased edges rather than the blocky look a reverted-to-NEAREST
+texture would show.
 
 ## Project layout
 
