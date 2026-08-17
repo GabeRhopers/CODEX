@@ -1,6 +1,6 @@
 import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFileContent } from "../drive/driveClient";
 import { getAccessToken } from "../drive/googleAuth";
-import { CustomSkinsFile, SkinAsset, SkinLibraryEntry } from "./CustomSkins";
+import { CustomSkinsFile, PixelSkinData, SkinAsset, SkinLibraryEntry } from "./CustomSkins";
 
 const SKINS_FILE_NAME = "skins.json";
 
@@ -114,6 +114,62 @@ export async function setActiveSkin(brushId: string, skinId: string | null): Pro
   const resolved = skinId !== null && entry.items.some((item) => item.id === skinId) ? skinId : null;
   skins[brushId] = { ...entry, activeId: resolved };
   await writeCustomSkins(skins);
+}
+
+/** Every pixel-editor-made skin across every brush, flattened into one
+ * list — the Skin Creator's "select a skin to edit" browse screen (see
+ * SkinEditorScene) needs to show these across all brushes at once, unlike
+ * every other skin-library reader here (resolveSkinThumbnails,
+ * onSkinPickerOpen) which is always scoped to one already-selected brush.
+ * Ordinary uploaded-photo skins (no `pixelData`) are omitted — see
+ * PixelSkinData's own docstring for why those aren't re-editable here. */
+export async function listPixelSkins(): Promise<{ brushId: string; asset: SkinAsset }[]> {
+  const skins = await loadCustomSkins();
+  const result: { brushId: string; asset: SkinAsset }[] = [];
+  for (const [brushId, entry] of Object.entries(skins)) {
+    for (const asset of entry.items) {
+      if (asset.pixelData) result.push({ brushId, asset });
+    }
+  }
+  return result;
+}
+
+/** Creates or overwrites one pixel-drawn skin and makes it the brush's
+ * active skin — the Skin Creator's Save button. `existingId` re-saves in
+ * place (same id, brush unchanged) when re-editing an existing pixel
+ * skin; omitted (or no longer present — removed by someone else in the
+ * meantime) falls through to adding a brand new library entry, mirroring
+ * addCustomSkin's own "always becomes active" behavior. Deliberately
+ * reuses loadCustomSkins/writeCustomSkins/entryFor exactly as every other
+ * mutator here does, rather than a separate pixel-skins file — one skin
+ * is one skin regardless of how its PNG was produced; see PixelSkinData's
+ * own docstring for what actually distinguishes a pixel-drawn one. */
+export async function savePixelSkin(
+  brushId: string,
+  existingId: string | undefined,
+  imageData: string,
+  pixelData: PixelSkinData,
+  uploadedBy: string,
+): Promise<string> {
+  const skins = await loadCustomSkins();
+  const entry = entryFor(skins, brushId);
+  const now = new Date().toISOString();
+  const targetId = existingId && entry.items.some((item) => item.id === existingId) ? existingId : undefined;
+
+  if (targetId) {
+    const items = entry.items.map((item) =>
+      item.id === targetId ? { ...item, imageData, pixelData, uploadedBy, updatedAt: now } : item,
+    );
+    skins[brushId] = { activeId: targetId, items };
+    await writeCustomSkins(skins);
+    return targetId;
+  }
+
+  const id = crypto.randomUUID();
+  const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: now, pixelData };
+  skins[brushId] = { activeId: id, items: [...entry.items, asset] };
+  await writeCustomSkins(skins);
+  return id;
 }
 
 /** Removes one skin from a brush's library — if it was the active one,

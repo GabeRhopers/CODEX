@@ -147,6 +147,21 @@ export class MenuScene extends Phaser.Scene {
     });
 
     new VolumeControl(this, cx - 90, row2Y + CARD_HEIGHT + 48, 180);
+
+    // A text link, not a 5th card — the 2x2 grid above is laid out with
+    // hardcoded pixel positions (leftX/rightX/row1Y/row2Y), sized so
+    // GAME_HEIGHT barely clears it; a real 5th card would mean a new row,
+    // cascading into gameConfig.ts constants every other scene also reads.
+    // Skin Creator is also a much lighter-weight destination than the
+    // other four (no "how much you've built" status line worth surfacing
+    // here), so a link fits its actual weight better anyway.
+    const skinCreatorLink = this.add
+      .text(cx, row2Y + CARD_HEIGHT + 80, "Skin Creator", { fontSize: "13px", color: "#8888aa" })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    skinCreatorLink.on("pointerover", () => skinCreatorLink.setColor("#ffffff"));
+    skinCreatorLink.on("pointerout", () => skinCreatorLink.setColor("#8888aa"));
+    skinCreatorLink.on("pointerdown", () => this.scene.start("SkinEditor"));
   }
 
   /** Returns the subtitle Text object so callers can swap in a live status

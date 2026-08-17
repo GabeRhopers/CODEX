@@ -6,6 +6,7 @@ import { LevelBrowserScene } from "./scenes/LevelBrowserScene";
 import { MenuScene } from "./scenes/MenuScene";
 import { PlayScene } from "./scenes/PlayScene";
 import { ProfileGateScene } from "./scenes/ProfileGateScene";
+import { SkinEditorScene } from "./scenes/SkinEditorScene";
 import { TemplateBrowserScene } from "./scenes/TemplateBrowserScene";
 import { WorldBrowserScene } from "./scenes/WorldBrowserScene";
 import { WorldMakerScene } from "./scenes/WorldMakerScene";
@@ -51,6 +52,7 @@ const config: Phaser.Types.Core.GameConfig = {
     WorldBrowserScene,
     WorldMakerScene,
     TemplateBrowserScene,
+    SkinEditorScene,
   ],
 };
 

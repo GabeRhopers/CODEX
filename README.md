@@ -81,7 +81,13 @@ area, each with the exact same block/marker/enemy/item/decor palette and
 its own independent Background/Music as Main — connected via a **Magic
 Basket** marker that teleports the player between them, landing exactly
 on the paired basket, with score/hearts/buffs/active checkpoint carried
-through — see "Sub/Up areas" under Art. See the plan doc §9.1
+through — see "Sub/Up areas" under Art. Also as of 2026-08-17, a
+standalone **Skin Creator** (a "Skin Creator" link on the Menu, not
+nested in the level Editor) lets you paint a 32x32 pixel-art skin from
+scratch — pick one of 5 preset color palettes, paint on a checkerboard
+canvas, save — for any of the ~26 skinnable Marker/Enemy/Item/Decor
+brushes, feeding straight into the same shared skin library the ordinary
+upload path already used — see "Skin Creator" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -156,6 +162,12 @@ Open the dev server URL in a browser. Controls:
   advance to the next level, or **R** to replay the current one; winning
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
+- **Skin Creator** (a text link below the home page's card grid, not a
+  5th card — see "Skin Creator" under Art for why): pick an existing
+  pixel-drawn skin to re-edit, or **+ New Skin** and choose which of the
+  ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
+  skin library and makes it active immediately, same as an ordinary
+  upload — see the Custom skins bullet below.
 - **Palette** (left panel): a **category chip** at the top (e.g. "Blocks
   ▾") expands into the 5 categories — Blocks, Markers, Enemies, Items,
   Decor — on tap; picking one collapses it back and shows that category's
@@ -2047,6 +2059,98 @@ Main's Spawn), a Goal placed only in an Up area reached and won via
 basket-up from a different level, the editor's Area switcher creating/
 switching/two-tap-deleting a Sub area, and a plain level with no Sub/Up
 areas at all still playing and winning exactly as before.
+
+**Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
+from a plain text link under the Menu's card grid rather than a fifth
+card or a mode nested inside the level Editor — it's a much lighter
+destination than New Level/World Maker/Templates/Continue (pick a brush,
+paint, save; no level state involved), and the card grid's layout
+constants are all hardcoded around exactly four cards, so a link fits
+both its actual weight and the existing code better than forcing a new
+row. `SkinEditorScene` is a new self-contained Phaser scene with three
+internal modes (`browse` → `pick-brush` → `canvas`) rather than three
+separate scenes, since all three share the same header/back-button shell
+and none needs its own physics or camera setup.
+
+*Storage: pixel-drawn skins are ordinary skins.* A painted skin is saved
+through the exact same `SkinAsset`/shared-skin-library plumbing an
+uploaded photo skin already used (`skinStorage.ts`'s
+`loadCustomSkins`/`writeCustomSkins`, one `skins.json` per project on
+Drive, keyed by brush id) — `SkinAsset` just grew one new optional field,
+`pixelData: { paletteId, cells }`, where `cells` is a flat 32x32 array of
+hex colors (or `null` for transparent). The canvas is still exported to
+an ordinary `imageData` PNG on save, so every existing consumer
+(`resolveSkinTextureKeys`, `resolveSkinThumbnails`, `EntityPlacer`,
+`PlayScene`) needed zero changes — a pixel-drawn skin becomes active and
+renders in-game exactly like an uploaded one. Colors are stored as literal
+hex strings per cell rather than palette indices, so re-editing an old
+skin later is unaffected by any future change to the built-in palettes'
+own color values. A skin's brush is locked in at creation (chosen once in
+`pick-brush` mode) — re-editing only ever repaints an existing skin's
+cells, it can't be retargeted to a different brush, which matches how the
+ordinary upload flow already scopes one skin to one brush.
+
+*Five preset palettes,* inspired by well-known freely-usable retro
+palettes (PICO-8, Sweetie 16, DawnBringer 16, a Game Boy 4-shade green
+ramp) plus one exact 8-color "Bright 8" palette of pure on/off RGB
+combinations, `findPalette`/`PIXEL_PALETTES` in `pixelPalettes.ts`.
+Switching palettes mid-edit re-captures the canvas's current cells first
+(`this.pixelCanvas.getCells()`) rather than discarding them, so painting
+partway through with one palette and then switching to browse a different
+one's swatches doesn't wipe unsaved strokes — only an explicit two-tap
+**Clear** (matching `EditorUI`'s existing Clear/Delete-Area confirm
+pattern, 3-second auto-disarm) actually erases the canvas. Undo/redo was
+deliberately scoped out of v1 for effort reasons.
+
+*Pixel-perfect by construction.* `PixelCanvasOverlay` is a real DOM
+`<canvas>` (positioned over the Phaser canvas the same way
+`FileInputOverlay`/`LevelNameInput` already overlay real `<input>`
+elements) whose backing buffer is exactly 32x32 — matching `TILE_SIZE` —
+CSS-stretched to a larger on-screen editing size with
+`image-rendering: pixelated`. Because the buffer is already tile-resolution,
+`canvas.toDataURL()` needs zero resampling, unlike the ordinary upload
+path's `readAndDownscaleSkinImage` (bilinear-resampled down to a 128px
+cap). A pure-CSS checkerboard `background-image` shows through
+`ctx.clearRect()`'d cells while editing but is never part of the canvas's
+own bitmap, so erased cells still export as true alpha-0 pixels. Painting
+uses Pointer Events (`pointerdown`/`pointermove`/`pointerup`) with
+`touch-action: none`, so mouse-drag and real finger-drag both paint
+without separate code paths, matching the same debounced
+"once-per-cell-per-stroke" approach `EditorScene`'s own drag-paint uses.
+
+*A real bug found and fixed: stale Back-button listeners from every prior
+mode.* Each mode switch called `this.children.removeAll(true)` before
+rebuilding, assuming the `true` argument destroyed the previous mode's
+GameObjects — that's true for `Phaser.GameObjects.Container.removeAll`,
+which `WorldMakerScene` already relies on correctly, but a Scene's own
+`this.children` is a `DisplayList` (`Phaser.Structs.List` directly, per
+Phaser's `InjectionMap`), and `List.removeAll` takes a *skip-callback*
+flag, not a destroy flag — it never calls `.destroy()`. Every previous
+mode's old GameObjects, including their Back buttons, stayed fully alive
+with active input listeners, just detached from rendering — so after a
+few mode transitions, clicking "← Back" from `canvas` mode fired *every*
+stale Back handler stacked at that same screen position at once,
+including an old `browse`-mode handler that called `scene.start("Menu")`,
+sending the player straight to the actual Menu scene instead of
+`SkinEditorScene`'s own `browse` list. Confirmed by reading Phaser's own
+`List.js`/`Container.js`/`InjectionMap.js` source rather than guessing.
+Fixed by explicitly destroying every child instead of trusting
+`removeAll`'s flag:
+`for (const child of [...this.children.list]) child.destroy();` (spread
+into a new array first, since `.destroy()` mutates the live list during
+iteration). Verified fixed via a targeted Playwright repro
+(browse → + New Skin → pick a brush → canvas → Back now correctly returns
+to `SkinEditorScene`'s own browse list, not Menu).
+
+Verified end-to-end in a mocked-Drive Playwright session: painting and
+saving a new pixel skin for the Coin brush (Bright 8 palette, filled red
+block) then confirming it renders correctly both in the ordinary Editor's
+Items palette icon and in actual Test Play gameplay with correct
+collision/scoring; a full browse → pick-brush → canvas → Save → Back →
+Edit → switch palette mid-edit (strokes survive) → paint more → Save
+again → Back round trip, confirming exactly one browse-list entry (an
+overwrite, not a duplicate) after the second save; and Delete correctly
+returning the browse list to its empty state.
 
 ## Project layout
 
