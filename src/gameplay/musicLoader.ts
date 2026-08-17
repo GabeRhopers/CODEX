@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { LevelData } from "../level/LevelSchema";
+import { loadMusicLibrary } from "../music/musicLibraryStorage";
 
 /** Every scene that might play a level's uploaded music reuses this one
  * cache key — only one level's music is ever playing at a time, and
@@ -13,24 +14,10 @@ const CUSTOM_MUSIC_KEY = "level-custom-music";
 
 let loadedMusicDataUrl: string | null = null;
 
-/**
- * Resolves to the Phaser audio cache key holding this level's uploaded
- * music, or `null` if the level has none (silence is the correct default
- * — there's no built-in fallback track the way there is for backgrounds).
- * Registers the track into the shared audio cache at runtime, since it
- * can't be preloaded by BootScene like a built-in sound — it doesn't
- * exist until a level that has one is actually opened. Skips re-loading
- * when the exact same data is already cached (repeated Test Plays of the
- * same level shouldn't re-decode the same file every time).
- */
-export function resolveLevelMusicKey(scene: Phaser.Scene, level: Pick<LevelData, "customMusicData">): Promise<string | null> {
-  if (!level.customMusicData) return Promise.resolve(null);
-  const dataUrl = level.customMusicData;
-
+function loadCustomAudio(scene: Phaser.Scene, dataUrl: string): Promise<string | null> {
   if (loadedMusicDataUrl === dataUrl && scene.cache.audio.exists(CUSTOM_MUSIC_KEY)) {
     return Promise.resolve(CUSTOM_MUSIC_KEY);
   }
-
   return new Promise((resolve) => {
     if (scene.cache.audio.exists(CUSTOM_MUSIC_KEY)) {
       scene.cache.audio.remove(CUSTOM_MUSIC_KEY);
@@ -45,4 +32,34 @@ export function resolveLevelMusicKey(scene: Phaser.Scene, level: Pick<LevelData,
     scene.load.audio(CUSTOM_MUSIC_KEY, dataUrl);
     scene.load.start();
   });
+}
+
+/**
+ * Resolves to the Phaser audio cache key holding this level's uploaded
+ * music, or `null` if the level has none (silence is the correct default
+ * — there's no built-in fallback track the way there is for backgrounds).
+ * Registers the track into the shared audio cache at runtime, since it
+ * can't be preloaded by BootScene like a built-in sound — it doesn't
+ * exist until a level that has one is actually opened.
+ *
+ * As of 2026-08-16, primarily resolves via `customMusicId` — a reference
+ * into the shared music library (see music/musicLibraryStorage.ts) rather
+ * than audio embedded in the level itself. `customMusicData` (the old,
+ * pre-library embedded copy) is still checked as a fallback so a level
+ * saved before this migration keeps playing its own track without needing
+ * to be re-uploaded. Skips re-loading when the exact same data is already
+ * cached (repeated Test Plays of the same level shouldn't re-decode the
+ * same file every time).
+ */
+export async function resolveLevelMusicKey(
+  scene: Phaser.Scene,
+  level: Pick<LevelData, "customMusicId" | "customMusicData">,
+): Promise<string | null> {
+  if (level.customMusicId) {
+    const library = await loadMusicLibrary();
+    const asset = library.find((item) => item.id === level.customMusicId);
+    if (asset) return loadCustomAudio(scene, asset.audioData);
+  }
+  if (level.customMusicData) return loadCustomAudio(scene, level.customMusicData);
+  return null;
 }

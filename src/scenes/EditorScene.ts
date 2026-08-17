@@ -1,17 +1,20 @@
 import Phaser from "phaser";
 import { GAME_WIDTH, GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_ROWS, RIGHT_PANEL_WIDTH, TILE_SIZE } from "../config/gameConfig";
+import { AssetPickerItem } from "../editor/AssetPickerMenu";
 import { AddEntityCommand } from "../editor/commands/AddEntityCommand";
 import { Command } from "../editor/commands/Command";
 import { CompositeCommand } from "../editor/commands/CompositeCommand";
 import { EraseEntityCommand } from "../editor/commands/EraseEntityCommand";
 import { HistoryStack } from "../editor/commands/HistoryStack";
 import { PaintTileCommand } from "../editor/commands/PaintTileCommand";
-import { EditorUI } from "../editor/EditorUI";
 import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
+import { DEFAULT_SKIN_ID, EditorUI, NO_MUSIC_ID } from "../editor/EditorUI";
 import { EntityPlacer } from "../editor/EntityPlacer";
 import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
+import { BackgroundThumbnail, resolveBackgroundThumbnails } from "../backgrounds/backgroundLibraryLoader";
+import { addBackgroundAsset, loadBackgroundLibrary, removeBackgroundAsset } from "../backgrounds/backgroundLibraryStorage";
 import { isEnemyType } from "../gameplay/EnemyBehaviors";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
@@ -19,12 +22,14 @@ import { groundFrameAt } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
 import { createEmptyLevel, DEFAULT_ENEMY_SIZE, EMPTY_TILE, EnemySize, EntityType, LevelData } from "../level/LevelSchema";
-import { backgroundDisplayLabel, nextStaticBackgroundId, resolveStaticBackground, StaticBackgroundId } from "../level/staticBackgrounds";
+import { backgroundDisplayLabel, resolveStaticBackground, STATIC_BACKGROUNDS, StaticBackgroundId } from "../level/staticBackgrounds";
+import { MusicAsset } from "../music/MusicLibrary";
+import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musicLibraryStorage";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { loadActiveProfile } from "../profile/Profile";
-import { resolveSkinTextureKeys } from "../skins/skinLoader";
-import { removeCustomSkin, saveCustomSkin } from "../skins/skinStorage";
+import { loadActiveSkinId, resolveSkinTextureKeys, resolveSkinThumbnails } from "../skins/skinLoader";
+import { addCustomSkin, removeCustomSkin, setActiveSkin } from "../skins/skinStorage";
 import { readAndDownscaleSkinImage } from "../skins/skinUpload";
 
 interface EditorSceneData {
@@ -85,6 +90,13 @@ export class EditorScene extends Phaser.Scene {
   // handed to the UI/EntityPlacer; rebuildVisualsFromLevel re-applies it
   // to whatever fresh EntityPlacer it creates so Clear/Load never lose it.
   private skinTextureKeys = new Map<string, string>();
+  // Last-resolved contents of the shared background/music libraries — kept
+  // around purely so onSelectBackground/onSelectMusic (given only the
+  // picked item's id, per AssetPickerMenu's callback shape) can look up its
+  // display name without a redundant Drive read; refreshed every time
+  // onBackgroundPickerOpen/onMusicPickerOpen runs.
+  private backgroundLibrary: BackgroundThumbnail[] = [];
+  private musicLibrary: MusicAsset[] = [];
   // A stable bound reference so it can be removed on shutdown — an inline
   // arrow passed straight to addEventListener can never be un-registered.
   private readonly handlePageHide = (): void => {
@@ -125,7 +137,13 @@ export class EditorScene extends Phaser.Scene {
     this.ui = new EditorUI(
       this,
       backgroundDisplayLabel(this.backgroundId),
-      this.level.customMusicName ?? null,
+      // A library-backed track's real name lives in music.json, not on the
+      // level — leave the initial label blank and let it pop in a moment
+      // later (see the loadMusicLibrary resolve below), same tolerance as
+      // every other Drive-backed value here. A level with only the legacy
+      // embedded field (no customMusicId) still has its name on hand
+      // already, so shows it immediately.
+      this.level.customMusicId ? null : this.level.customMusicName ?? null,
       this.level.name,
       this.level.width,
       this.level.height,
@@ -138,17 +156,44 @@ export class EditorScene extends Phaser.Scene {
         onClear: () => this.clearLevel(),
         onUndo: () => this.undo(),
         onRedo: () => this.redo(),
-        onCycleBackground: () => this.cycleBackground(),
-        onUploadBackground: (file) => this.uploadBackground(file),
-        onUploadMusic: (file) => this.uploadMusic(file),
-        onClearMusic: () => this.clearMusic(),
         onRenameLevel: (name) => this.renameLevel(name),
-        onUploadSkin: (file) => this.uploadSkin(file),
-        onClearSkin: () => this.clearSkin(),
         onToggleEraser: () => this.toggleEraser(),
         onSelectSize: (size) => (this.currentSize = size),
+        onSkinPickerOpen: () => this.onSkinPickerOpen(),
+        onSelectSkin: (skinId) => this.onSelectSkin(skinId),
+        onUploadSkin: (file) => this.uploadSkin(file),
+        onDeleteSkin: (skinId) => this.onDeleteSkin(skinId),
+        onBackgroundPickerOpen: () => this.onBackgroundPickerOpen(),
+        onSelectBackground: (id) => this.onSelectBackground(id),
+        onUploadBackground: (file) => this.uploadBackground(file),
+        onDeleteBackground: (id) => this.onDeleteBackground(id),
+        onMusicPickerOpen: () => this.onMusicPickerOpen(),
+        onSelectMusic: (id) => this.onSelectMusic(id),
+        onUploadMusic: (file) => this.uploadMusic(file),
+        onDeleteMusic: (id) => this.onDeleteMusic(id),
       },
     );
+
+    // A library-backed background/track's real display name lives in
+    // backgrounds.json/music.json, not on the level itself (only its id
+    // does) — resolve it once up front so the trigger label reads the
+    // actual name instead of a generic "Custom" the whole time it's open.
+    // A level with only the legacy embedded field has nothing to resolve
+    // here (its name, if any, is already showing).
+    if (this.backgroundId === "custom" && this.level.customBackgroundId) {
+      const wantedId = this.level.customBackgroundId;
+      void loadBackgroundLibrary().then((library) => {
+        const asset = library.find((item) => item.id === wantedId);
+        if (asset) this.ui.setBackgroundLabel(asset.name);
+      });
+    }
+    if (this.level.customMusicId) {
+      const wantedId = this.level.customMusicId;
+      void loadMusicLibrary().then((library) => {
+        const asset = library.find((item) => item.id === wantedId);
+        if (asset) this.ui.setMusicLabel(asset.name);
+      });
+    }
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
 
@@ -413,63 +458,165 @@ export class EditorScene extends Phaser.Scene {
     else this.ui.setStatus("Nothing to redo");
   }
 
-  /** Cycles through the built-in pool only — see nextStaticBackgroundId's
-   * docstring for why a currently-custom background isn't part of that
-   * cycle. */
-  private cycleBackground(): void {
-    this.applyBackground(nextStaticBackgroundId(this.backgroundId));
-  }
-
-  /** Called by EditorUI once its Upload BG file input has a file (see
-   * FileInputOverlay) — downscales/re-encodes it, stores the result on
-   * the level, and swaps to it as a "custom" background. */
+  /** Called by EditorUI once its background picker's "Upload" tile has a
+   * file (see FileInputOverlay) — downscales/re-encodes it, adds it to the
+   * shared library (see backgrounds/backgroundLibraryStorage.ts — visible
+   * to every profile and every level from now on, not just this one), and
+   * points this level at the new entry. */
   private uploadBackground(file: File): void {
-    readAndDownscaleImage(file).then(
-      (dataUrl) => {
-        this.level.customBackgroundData = dataUrl;
-        this.applyBackground("custom");
-        this.ui.setStatus("Background updated");
+    const uploadedBy = loadActiveProfile() ?? "unknown";
+    readAndDownscaleImage(file)
+      .then((dataUrl) => addBackgroundAsset(file.name, dataUrl, uploadedBy))
+      .then(
+        (id) => {
+          this.level.customBackgroundId = id;
+          this.applyBackground("custom", file.name);
+          this.ui.setStatus("Background uploaded");
+        },
+        (err: unknown) => {
+          console.error("Background upload failed:", err);
+          this.ui.setStatus("Couldn't load that image");
+        },
+      );
+  }
+
+  /** Called by EditorUI when the background picker opens — resolves the
+   * shared library's thumbnails (a Drive read) and combines them with the
+   * 4 built-ins into one item list, right when the user is about to see
+   * it rather than on every level load/brush switch. */
+  private onBackgroundPickerOpen(): void {
+    void resolveBackgroundThumbnails(this).then((thumbnails) => {
+      this.backgroundLibrary = thumbnails;
+      const items: AssetPickerItem[] = [
+        ...STATIC_BACKGROUNDS.map((bg) => ({ id: bg.id, label: bg.label, textureKey: bg.textureKey })),
+        ...thumbnails.map((t) => ({ id: t.id, label: t.name, textureKey: t.textureKey, deletable: true })),
+      ];
+      const activeId = this.backgroundId === "custom" ? this.level.customBackgroundId ?? "" : this.backgroundId;
+      this.ui.setBackgroundPickerItems(items, activeId);
+    });
+  }
+
+  /** Called by EditorUI once a background picker item is picked — `id` is
+   * either one of the 4 built-in ids or a library uuid; `backgroundLibrary`
+   * (refreshed on every onBackgroundPickerOpen) tells the two apart and
+   * supplies the chosen entry's display name. */
+  private onSelectBackground(id: string): void {
+    const builtin = STATIC_BACKGROUNDS.find((bg) => bg.id === id);
+    if (builtin) {
+      this.applyBackground(builtin.id);
+      return;
+    }
+    const asset = this.backgroundLibrary.find((item) => item.id === id);
+    this.level.customBackgroundId = id;
+    this.applyBackground("custom", asset?.name);
+  }
+
+  /** Called by EditorUI's background picker delete badge — removes a
+   * background from the shared library and refreshes the open picker's
+   * item list so the deleted thumbnail disappears immediately. Doesn't
+   * touch this (or any other) level's own `customBackgroundId` even if it
+   * was the one just deleted — backgroundLoader.ts already falls back to
+   * the default built-in the next time such a level is opened, matching
+   * removeBackgroundAsset's own documented behavior. */
+  private onDeleteBackground(id: string): void {
+    removeBackgroundAsset(id).then(
+      () => {
+        this.ui.setStatus("Background removed");
+        this.onBackgroundPickerOpen();
       },
       (err: unknown) => {
-        console.error("Background upload failed:", err);
-        this.ui.setStatus("Couldn't load that image");
+        console.error("Background removal failed:", err);
+        this.ui.setStatus("Couldn't remove that background");
       },
     );
   }
 
-  /** Called by EditorUI once its Upload Music file input has a file — no
-   * re-encoding is possible for audio the way there is for images, so
-   * this just validates size (see musicUpload.ts's MusicTooLargeError)
-   * and stores the file as-is. */
+  /** Called by EditorUI once its music picker's "Upload" tile has a file
+   * — no re-encoding is possible for audio the way there is for images
+   * (see musicUpload.ts's MusicTooLargeError for the one check that does
+   * apply), adds it to the shared library, and points this level at it. */
   private uploadMusic(file: File): void {
-    readAudioAsDataUrl(file).then(
-      (dataUrl) => {
-        this.level.customMusicData = dataUrl;
-        this.level.customMusicName = file.name;
-        this.ui.setMusicLabel(file.name);
-        this.markDirty();
-        this.ui.setStatus("Music updated");
-      },
-      (err: unknown) => {
-        if (err instanceof MusicTooLargeError) {
-          this.ui.setStatus(err.message);
-        } else {
-          console.error("Music upload failed:", err);
-          this.ui.setStatus("Couldn't load that file");
-        }
-      },
-    );
+    const uploadedBy = loadActiveProfile() ?? "unknown";
+    readAudioAsDataUrl(file)
+      .then((dataUrl) => addMusicAsset(file.name, dataUrl, uploadedBy))
+      .then(
+        (id) => {
+          this.level.customMusicId = id;
+          this.ui.setMusicLabel(file.name);
+          this.markDirty();
+          this.ui.setStatus("Music uploaded");
+        },
+        (err: unknown) => {
+          if (err instanceof MusicTooLargeError) {
+            this.ui.setStatus(err.message);
+          } else {
+            console.error("Music upload failed:", err);
+            this.ui.setStatus("Couldn't load that file");
+          }
+        },
+      );
   }
 
-  /** Called by the Music button itself — a no-op (not even a status
-   * toast) when the level has no music, since there's nothing to remove. */
-  private clearMusic(): void {
-    if (!this.level.customMusicData) return;
-    this.level.customMusicData = undefined;
-    this.level.customMusicName = undefined;
-    this.ui.setMusicLabel(null);
+  /** Called by EditorUI when the music picker opens — resolves the shared
+   * library (a Drive read) and prepends the "None" option, right when the
+   * user is about to see it. */
+  private onMusicPickerOpen(): void {
+    void loadMusicLibrary().then((tracks) => {
+      this.musicLibrary = tracks;
+      const items: AssetPickerItem[] = [
+        { id: NO_MUSIC_ID, label: "None", textureKey: "music-note-muted" },
+        ...tracks.map((t) => ({ id: t.id, label: t.name, textureKey: "music-note", deletable: true })),
+      ];
+      const activeId = this.level.customMusicId ?? NO_MUSIC_ID;
+      this.ui.setMusicPickerItems(items, activeId);
+    });
+  }
+
+  /** Called by EditorUI once a music picker item is picked — `null` (from
+   * the "None" option, see EditorUI's own NO_MUSIC_ID -> null mapping)
+   * clears every music field on the level (there's no built-in fallback
+   * track the way backgrounds have, so "None" is a real, explicit state,
+   * not just "point at nothing and fall back"); otherwise points the level
+   * at the chosen library entry. */
+  private onSelectMusic(id: string | null): void {
+    if (id === null) {
+      this.level.customMusicId = undefined;
+      this.level.customMusicData = undefined;
+      this.level.customMusicName = undefined;
+      this.ui.setMusicLabel(null);
+      this.markDirty();
+      this.ui.setStatus("Music removed");
+      return;
+    }
+    const asset = this.musicLibrary.find((track) => track.id === id);
+    this.level.customMusicId = id;
+    this.ui.setMusicLabel(asset?.name ?? "Custom");
     this.markDirty();
-    this.ui.setStatus("Music removed");
+  }
+
+  /** Called by EditorUI's music picker delete badge — removes a track from
+   * the shared library and refreshes the open picker's item list. Unlike
+   * background deletion, explicitly clears this level's own reference too
+   * when it was the deleted track — there's no built-in fallback track for
+   * musicLoader.ts to silently land on, so leaving a dangling
+   * `customMusicId` would otherwise leave the trigger showing a name for a
+   * track that no longer exists anywhere. */
+  private onDeleteMusic(id: string): void {
+    removeMusicAsset(id).then(
+      () => {
+        this.ui.setStatus("Track removed");
+        if (this.level.customMusicId === id) {
+          this.level.customMusicId = undefined;
+          this.ui.setMusicLabel(null);
+          this.markDirty();
+        }
+        this.onMusicPickerOpen();
+      },
+      (err: unknown) => {
+        console.error("Music removal failed:", err);
+        this.ui.setStatus("Couldn't remove that track");
+      },
+    );
   }
 
   /** Shared by the initial resolve pass and every upload/clear — hands the
@@ -484,14 +631,14 @@ export class EditorScene extends Phaser.Scene {
     this.entityPlacer.syncFromLevel(this.brushesByType);
   }
 
-  /** Called by EditorUI once its Upload Skin file input has a file —
-   * reskins whichever brush is currently selected (see EditorUI's Skin/
-   * Upload Skin buttons; the palette selection doubles as "which type",
-   * no separate picker). Downscales to a small PNG (see skinUpload.ts),
-   * saves it to the shared, non-profile-scoped skins.json (see
+  /** Called by EditorUI once its skin picker's "Upload" tile has a file —
+   * reskins whichever brush is currently selected (the palette selection
+   * doubles as "which type", so there's no separate type-picker UI).
+   * Downscales to a small PNG (see skinUpload.ts), adds it to the brush's
+   * library in the shared, non-profile-scoped skins.json (see
    * skinStorage.ts — every one of the 3 profiles sees this immediately,
-   * not just the one who uploaded it), then re-resolves so this and every
-   * other open level picks it up. */
+   * not just the one who uploaded it) as the new active skin, then
+   * re-resolves so this and every other open level picks it up. */
   private uploadSkin(file: File): void {
     const brush = this.currentBrush;
     if (!brush.entityType) {
@@ -500,7 +647,7 @@ export class EditorScene extends Phaser.Scene {
     }
     const uploadedBy = loadActiveProfile() ?? "unknown";
     readAndDownscaleSkinImage(file)
-      .then((dataUrl) => saveCustomSkin(brush.id, dataUrl, uploadedBy))
+      .then((dataUrl) => addCustomSkin(brush.id, dataUrl, uploadedBy))
       .then(() => resolveSkinTextureKeys(this))
       .then(
         (skinTextureKeys) => {
@@ -514,18 +661,62 @@ export class EditorScene extends Phaser.Scene {
       );
   }
 
-  /** Called by the Skin status button — clears whichever brush is
-   * currently selected, a no-op (matching clearMusic's own guard) if it
-   * isn't skinnable or has no custom skin uploaded. */
-  private clearSkin(): void {
+  /** Called by EditorUI when the skin picker opens — scoped to whichever
+   * brush is currently selected (canOpen already blocked this for a
+   * non-skinnable one), resolves that brush's own library of uploaded
+   * skins (a Drive read) plus its active id, right when the user is about
+   * to see them. A "Default" entry (see DEFAULT_SKIN_ID) always leads the
+   * list, showing the brush's own built-in art. */
+  private onSkinPickerOpen(): void {
     const brush = this.currentBrush;
-    if (!brush.entityType || !this.skinTextureKeys.has(brush.id)) return;
-    removeCustomSkin(brush.id)
+    if (!brush.entityType) return; // EditorUI's canOpen already guards this; defensive no-op
+    void Promise.all([resolveSkinThumbnails(this, brush.id), loadActiveSkinId(brush.id)]).then(([thumbnails, activeId]) => {
+      const items: AssetPickerItem[] = [
+        { id: DEFAULT_SKIN_ID, label: "Default", textureKey: brush.textureKey },
+        ...thumbnails.map((t, i) => ({ id: t.id, label: `Skin ${i + 1}`, textureKey: t.textureKey, deletable: true })),
+      ];
+      this.ui.setSkinPickerItems(items, activeId ?? DEFAULT_SKIN_ID);
+    });
+  }
+
+  /** Called by EditorUI once a skin picker item is picked — `null` (from
+   * the "Default" option, see EditorUI's own DEFAULT_SKIN_ID -> null
+   * mapping) reverts the brush to its built-in art; otherwise activates
+   * the chosen library entry. Applies to whichever brush is currently
+   * selected, same as uploadSkin. */
+  private onSelectSkin(skinId: string | null): void {
+    const brush = this.currentBrush;
+    if (!brush.entityType) return;
+    void setActiveSkin(brush.id, skinId)
+      .then(() => resolveSkinTextureKeys(this))
+      .then(
+        (skinTextureKeys) => this.applySkinTextureKeys(skinTextureKeys),
+        (err: unknown) => {
+          console.error("Skin selection failed:", err);
+          this.ui.setStatus("Couldn't switch that skin");
+        },
+      );
+  }
+
+  /** Called by EditorUI's skin picker delete badge — removes one skin from
+   * the currently-selected brush's library. If it was the active one,
+   * skinStorage.ts already reverts the brush to its built-in art
+   * (activeId -> null) as part of the removal, so re-resolving here picks
+   * that up immediately everywhere (palette icons, placed entities), not
+   * just the next time the picker happens to reopen — unlike background/
+   * music deletion, which have no such per-brush "active" concept to
+   * revert. Also refreshes the open picker's own item list so the deleted
+   * thumbnail disappears right away. */
+  private onDeleteSkin(skinId: string): void {
+    const brush = this.currentBrush;
+    if (!brush.entityType) return;
+    removeCustomSkin(brush.id, skinId)
       .then(() => resolveSkinTextureKeys(this))
       .then(
         (skinTextureKeys) => {
           this.applySkinTextureKeys(skinTextureKeys);
           this.ui.setStatus(`${brush.label} skin removed`);
+          this.onSkinPickerOpen();
         },
         (err: unknown) => {
           console.error("Skin removal failed:", err);
@@ -558,8 +749,13 @@ export class EditorScene extends Phaser.Scene {
    * `remove()`s the previous custom texture first (same shared key, see
    * backgroundLoader.ts), which would leave the still-alive old Image
    * pointing at a just-destroyed GPU texture for however long the new
-   * image takes to decode if that destroy happened afterward instead. */
-  private applyBackground(id: StaticBackgroundId): void {
+   * image takes to decode if that destroy happened afterward instead.
+   *
+   * `customLabel` is the library entry's own name — used only when `id`
+   * is "custom" (built-ins get their label from backgroundDisplayLabel
+   * instead, which has nothing else to go on); omitted falls back to the
+   * generic "Custom" for the rare case a caller doesn't have a name handy. */
+  private applyBackground(id: StaticBackgroundId, customLabel?: string): void {
     this.backgroundId = id;
     this.level.background = id;
     this.background?.destroy();
@@ -567,7 +763,7 @@ export class EditorScene extends Phaser.Scene {
     void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
       this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
     });
-    this.ui.setBackgroundLabel(backgroundDisplayLabel(id));
+    this.ui.setBackgroundLabel(id === "custom" ? customLabel ?? "Custom" : backgroundDisplayLabel(id));
     this.markDirty();
   }
 

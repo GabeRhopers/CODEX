@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { loadBackgroundLibrary } from "../backgrounds/backgroundLibraryStorage";
 import { LevelData } from "../level/LevelSchema";
 import { DEFAULT_STATIC_BACKGROUND, resolveStaticBackground, staticBackgroundDef } from "../level/staticBackgrounds";
 
@@ -47,19 +48,33 @@ function loadCustomTexture(scene: Phaser.Scene, dataUrl: string): Promise<string
  * texture registration for a user-uploaded "custom" one, which doesn't
  * exist until the moment a level that references it is actually opened
  * (EditorScene.create / PlayScene.create), unlike everything BootScene
- * preloads up front. Falls back to the default built-in if the level
- * claims "custom" but has no usable image data (an old save from before
- * this existed, or a corrupted/cleared bit of storage) — same spirit as
+ * preloads up front.
+ *
+ * As of 2026-08-16, a "custom" level primarily resolves via
+ * `customBackgroundId` — a reference into the shared background library
+ * (see backgrounds/backgroundLibraryStorage.ts) rather than image data
+ * embedded in the level itself. `customBackgroundData` (the old, pre-
+ * library embedded copy) is still checked as a fallback so a level saved
+ * before this migration keeps rendering its own background without
+ * needing to be re-uploaded. Falls back to the default built-in if the
+ * level claims "custom" but has neither a valid library id nor legacy
+ * inline data (an old save from before either existed, a since-removed
+ * library entry, or corrupted/cleared storage) — same spirit as
  * `resolveStaticBackground`'s own fallback for an unknown built-in id.
  */
-export function resolveBackgroundTextureKey(
+export async function resolveBackgroundTextureKey(
   scene: Phaser.Scene,
-  level: Pick<LevelData, "background" | "customBackgroundData">,
+  level: Pick<LevelData, "background" | "customBackgroundId" | "customBackgroundData">,
 ): Promise<string> {
   const id = resolveStaticBackground(level);
   if (id === "custom") {
+    if (level.customBackgroundId) {
+      const library = await loadBackgroundLibrary();
+      const asset = library.find((item) => item.id === level.customBackgroundId);
+      if (asset) return loadCustomTexture(scene, asset.imageData);
+    }
     if (level.customBackgroundData) return loadCustomTexture(scene, level.customBackgroundData);
-    return Promise.resolve(staticBackgroundDef(DEFAULT_STATIC_BACKGROUND).textureKey);
+    return staticBackgroundDef(DEFAULT_STATIC_BACKGROUND).textureKey;
   }
-  return Promise.resolve(staticBackgroundDef(id).textureKey);
+  return staticBackgroundDef(id).textureKey;
 }

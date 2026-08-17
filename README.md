@@ -66,7 +66,13 @@ gets stuck at a stale size on mobile when the browser's own address bar
 shows/hides — see "Cross-device layout, part 2: the stale-canvas-size bug"
 under Art. Also as of 2026-08-16, the app was renamed from "Spellbound
 Level Editor" to **Rhopers Game Maker** — see "Rebrand" under Art for how
-existing users' saved levels/worlds carry over. See the plan doc §9.1
+existing users' saved levels/worlds carry over. Also as of 2026-08-16,
+custom skins became a real multi-item library per brush (not just one
+active upload) with a thumbnail-submenu picker, and backgrounds/music
+uploads got that exact same shared-library-plus-picker treatment for the
+first time (previously a one-off copy embedded in a single level) — see
+"Skin/background/music libraries" under Art, which also covers a real
+WebGL crash that pass found and fixed. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -78,12 +84,14 @@ header (Level Name/Undo/Redo/Eraser/Save/Test Play/Menu) above, a stats
 footer (level size/cursor tile/entity count) below, and two docked
 vertical panels flanking the grid in between — a left **Palette** panel
 (a category chip that expands into Blocks/Markers/Enemies/Items/Decor,
-that category's 2-column icon grid, then Skin/Upload Skin) and a right
-**Level Settings** panel (Background/Upload BG/Music/Upload Music/Clear)
-— replacing the earlier 5-tab "Tools" panel and single-purpose "Actions"
-panel, and replacing the old 5 per-category Erase brushes with one
-universal Eraser toggle in the header (see "Editor layout: header/footer/
-dropdown" under Art).
+that category's 2-column icon grid, then a **Skin** picker trigger) and a
+right **Level Settings** panel (**Background**/**Music** picker triggers,
+then Clear) — replacing the earlier 5-tab "Tools" panel and single-purpose
+"Actions" panel, and replacing the old 5 per-category Erase brushes with
+one universal Eraser toggle in the header (see "Editor layout: header/
+footer/dropdown" under Art). Each picker trigger opens a thumbnail submenu
+rather than a single upload/clear button — see "Skin/background/music
+libraries" under Art.
 
 *Engineering note:* undo/redo keyboard shortcuts are guarded against a
 real, reproducible quirk found while testing in this project's headless
@@ -172,12 +180,15 @@ Open the dev server URL in a browser. Controls:
   click turns it back off. Undo/redo cover erases exactly like any other
   edit.
 - **Custom skins**: select any Marker/Enemy/Item/Decor brush in the left
-  panel, then **Upload Skin** to reskin it with your own image — applies
-  to that brush's palette icon, every already-placed instance, and
-  gameplay, shared instantly across all 3 profiles (not just the current
-  level). The **Skin** button above it shows whether the selected brush
-  has one and clears it on click. Blocks aren't reskinnable yet. See
-  "Custom skins" under Art.
+  panel, then click the **Skin** trigger below the icon grid to open a
+  submenu of small thumbnails — every skin ever uploaded for that brush,
+  plus a non-deletable "Default" (its built-in art) — and pick one to
+  make it active, or use the submenu's own **+ Upload** tile to add a new
+  one. Applies to that brush's palette icon, every already-placed
+  instance, and gameplay, shared instantly across all 3 profiles (not
+  just the current level). Blocks aren't reskinnable yet. Backgrounds and
+  music share this exact same trigger-and-thumbnail-submenu shape — see
+  "Skin/background/music libraries" under Art.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first; enemies and items are optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
@@ -225,25 +236,25 @@ Open the dev server URL in a browser. Controls:
   Snow's ground tile, for instance, used to only be reachable via the
   Frozen Cavern template or that cycle button, one skin at a time; now
   every skin is just an icon away, on every level, always.
-- **BG: ▶**: cycles the level's background through a small pool of plain,
-  non-parallax images (**Meadow**, the default, **Sunny Valley**,
-  **Frozen Volcano**, **Pirate Cove**) — unrelated to ground-block skin,
-  previewing live; persists on Save/autosave same as any other edit (see
-  "Static background (current)" under Art for why there's no pan/zoom, and
-  for the dormant multi-scene parallax picker this temporarily replaces).
-- **Upload BG**: picks your own image as the level's background instead of
-  one from the built-in pool — a one-way action, not part of the BG cycle
-  (picking it again just re-opens the file picker; cycling BG afterward
-  goes back to the built-in pool, starting from Meadow). See "Custom
-  uploaded backgrounds" under Art for the size/format handling and why the
-  button is a real, invisible file input rather than a Phaser-driven click.
-- **Music: \<name/None\>** / **Upload Music**: a level can have its own
-  uploaded soundtrack, played during Test Play and actual Play (not while
-  painting) — **Upload Music** picks the file, **Music: \<name\>** removes
-  it (clicking it does nothing when none is set). See "Music" under Art
-  for the size cap, why audio can't be downscaled the way a background
-  image is, and the shared mute/volume control (also on the home page)
-  that affects whichever one is currently playing.
+- **BG: \<name\> ▾**: click to open a submenu of small thumbnails — the 4
+  built-in, plain non-parallax images (**Meadow**, the default, **Sunny
+  Valley**, **Frozen Volcano**, **Pirate Cove**) plus every background any
+  of the 3 profiles has ever uploaded, shared across every level (not just
+  the one you uploaded it into) — pick one to use it, or use the
+  submenu's own **+ Upload** tile to add a new image to the shared pool.
+  Persists on Save/autosave same as any other edit (see "Static background
+  (current)" under Art for why there's no pan/zoom, and
+  "Skin/background/music libraries" under Art for the shared-library
+  picker itself).
+- **Music: \<name/None\> ▾**: same picker shape as Background — a level
+  can have its own uploaded soundtrack, played during Test Play and actual
+  Play (not while painting); the submenu's **None** entry is always first
+  (there's no built-in track pool the way there is for backgrounds), then
+  every uploaded track, plus a **+ Upload** tile to add one. See "Music"
+  under Art for the size cap and why audio can't be downscaled the way a
+  background image is, and "Skin/background/music libraries" under Art
+  for the shared library itself, plus the shared mute/volume control (also
+  on the home page) that affects whichever one is currently playing.
 - **Level Name** (below the grid): edit the level's own name — commits on
   blur/Enter, Escape reverts without committing. See "Level name" under
   Art for why this needed to be a real HTML text input and two bugs that
@@ -656,9 +667,15 @@ created after it.
 **Custom skins.** As of 2026-08-16, any Marker/Enemy/Item/Decor brush can
 be reskinned with a user-uploaded image — click the brush in the palette
 (the selection doubles as "which type," so there's no separate type
-picker), then **Upload Skin** — in the left Palette panel, below the icon
-grid, as of the 2026-08-16 header/footer layout pass; originally in the
-right Actions panel. The image is
+picker), then the **Skin** trigger below the icon grid — in the left
+Palette panel, as of the 2026-08-16 header/footer layout pass; originally
+in the right Actions panel. As of the same-day "Skin/background/music
+libraries" pass (see below), that trigger opens a submenu of every skin
+ever uploaded for the brush rather than holding just one — the paragraphs
+below describe the underlying upload/storage/rendering pieces, which that
+later pass extended into a real multi-item library rather than replacing;
+see that section for the current picker UI, the library file shape, and
+a real WebGL crash it fixed along the way. The image is
 downscaled to a small PNG (`src/skins/skinUpload.ts`, `MAX_DIMENSION =
 128` — much smaller than a background's 1600px, since these render at
 roughly one tile; PNG rather than JPEG, since JPEG has no alpha channel
@@ -667,15 +684,14 @@ Skins apply everywhere that brush is used — the palette icon, every
 already-placed instance in the current level, and actual gameplay — not
 just future placements.
 
-Blocks aren't reskinnable (the **Skin** button reads "Skin: N/A" for
-them, and Upload Skin is a no-op if clicked anyway): all block rendering
-goes through Phaser's tilemap system, drawing from one shared, GID-
-indexed spritesheet per ground skin (`groundAutotile.ts`), not one
-swappable image per brush the way every entity (a plain
-`scene.add.image`) works. Reskinning a block would mean patching a
-specific frame inside that shared spritesheet texture rather than
-swapping a texture key — a meaningfully bigger change than "upload an
-image," and not part of this pass.
+Blocks aren't reskinnable (the **Skin** trigger reads "Skin: N/A" for
+them and can't be opened): all block rendering goes through Phaser's
+tilemap system, drawing from one shared, GID-indexed spritesheet per
+ground skin (`groundAutotile.ts`), not one swappable image per brush the
+way every entity (a plain `scene.add.image`) works. Reskinning a block
+would mean patching a specific frame inside that shared spritesheet
+texture rather than swapping a texture key — a meaningfully bigger change
+than "upload an image," and not part of this pass.
 
 *Shared across all 3 profiles, not per-level.* Unlike a level's own
 custom background/music (inline in that level's own JSON, private to
@@ -697,21 +713,18 @@ a snapshot that doesn't yet include the first) — not worth real
 optimistic-concurrency handling for a 3-person household's occasional
 skin uploads.
 
-*Rendering.* `src/skins/skinLoader.ts`'s `resolveSkinTextureKeys` mirrors
-`backgroundLoader.ts`'s exact pattern (see "Autosave & save-state
-tracking" above and `backgroundLoader.ts` itself): each skin registers as
-its own `skin-<brushId>` Phaser texture (via `scene.textures.addBase64`),
-cached by which data URL is currently loaded so an unchanged skin skips
-the destructive remove-and-recreate path — the same "don't destroy a GPU
-texture a still-alive GameObject is rendering" concern that pattern was
-built to solve in the first place, and just as real here since
-EditorScene/PlayScene can both be alive during Test Play. Deliberately a
-*separate* texture key per skin rather than overwriting a brush's
-built-in key in place: several built-in textures (e.g.
-`"enemy-ghost-pillow"`) are also reused as pure decoration elsewhere
-(MenuScene's home-page icons) that has nothing to do with level content
-and shouldn't silently change just because someone reskinned the Ghost
-enemy for gameplay.
+*Rendering.* `src/skins/skinLoader.ts`'s `resolveSkinTextureKeys` registers
+each brush's *active* skin as its own `skin-active-<brushId>-<skinId>`
+Phaser texture (via `scene.textures.addBase64`) — permanent and never
+reused for different image data, since a skin's uploaded image never
+changes once it exists (see "Skin/background/music libraries" under Art
+for why that key scheme replaced an earlier one keyed by brush id alone,
+and the WebGL crash doing so fixed). Deliberately a *separate* texture key
+per skin rather than overwriting a brush's built-in key in place: several
+built-in textures (e.g. `"enemy-ghost-pillow"`) are also reused as pure
+decoration elsewhere (MenuScene's home-page icons) that has nothing to do
+with level content and shouldn't silently change just because someone
+reskinned the Ghost enemy for gameplay.
 
 Resolution is async (a Drive read) but never blocks anything from
 appearing — `EditorScene`/`PlayScene` build the palette/level with
@@ -1730,6 +1743,104 @@ deliberately left alone — the former is pinned by this project's own
 development instructions, the latter would break any existing link to it
 for no user-facing benefit; the document's own title/prose inside it were
 still updated.
+
+**Skin/background/music libraries (2026-08-16).** Prompted by a user
+request to make custom skins "properly work across all users" with "a
+sub menu with a little image of each [one] saved for selection," and to
+give backgrounds and music uploads that exact same workflow. Custom
+skins were already shared across all 3 profiles (see `skins.json` above),
+but only ever held one active skin per brush — no way to keep more than
+one upload around or switch back to an earlier one. Backgrounds and music
+were the opposite problem: each upload was a one-off copy embedded
+straight into the single level it was uploaded into
+(`LevelData.customBackgroundData`/`customMusicData`), invisible to every
+other level and profile and gone for good if that level's upload was ever
+overwritten.
+
+Both problems got the same fix: a shared, flat library per asset type —
+`skins.json` (existing, upgraded in place), plus two new files,
+`backgrounds.json` and `music.json`, all living in the same app folder
+alongside every level/world file. A level now stores which library entry
+it's using as a small id reference (`customBackgroundId`/`customMusicId`)
+rather than the asset data itself; `src/backgrounds/` and `src/music/`
+mirror `src/skins/`'s existing `*Storage.ts` (Drive read-modify-write) /
+`*Loader.ts` (registers a data URL as a Phaser texture/audio-cache entry)
+split. `skins.json`'s own shape changed from one `{imageData, uploadedBy,
+updatedAt}` record per brush to `{activeId, items: SkinAsset[]}` — a real
+library, not just a single slot — with `skinStorage.ts`'s
+`normalizeSkinsFile` upgrading an old-shape file to the new one in memory
+on every read (never written back just for having been read; the next
+real upload/select/remove persists it), so an existing upload keeps
+showing up as that brush's active skin with zero action needed. A level
+saved before any of this — with only the legacy embedded
+`customBackgroundData`/`customMusicData` fields and no id — still renders/
+plays its own asset unchanged: `backgroundLoader.ts`/`musicLoader.ts`
+check the new id-based field first and fall back to the legacy embedded
+one if it's absent (or the id it names has since been removed from the
+library), same "old saves keep working, nothing forces a re-upload"
+guarantee the rebrand's own folder migration above made a point of.
+
+The picker itself — a trigger button ("Skin: Custom ▾", "BG: Meadow ▾",
+"Music: menu-theme.mp3 ▾") that expands into a small thumbnail grid below
+it, with a "+ Upload" tile and a delete "×" badge on every uploaded item —
+is one reusable component, `src/editor/AssetPickerMenu.ts`, instantiated
+three times in `EditorUI.ts` rather than three separately-built widgets.
+It replaced what used to be Skin/Upload Skin (click-to-clear), a
+Background cycle-button + Upload BG, and a click-to-clear Music label +
+Upload Music — six differently-behaved controls collapsed into one shape
+everyone already had to learn from the category chip dropdown. Opening a
+picker is what triggers its Drive read (`EditorUI`'s `on*PickerOpen`
+callbacks → `EditorScene`'s `resolveSkinThumbnails`/
+`resolveBackgroundThumbnails`/`loadMusicLibrary`), not level load or brush
+switch, so browsing the palette doesn't pay for a library fetch nobody's
+about to look at. The skin picker is scoped to whichever brush is
+currently selected (its "Default" entry, `EditorUI.DEFAULT_SKIN_ID`,
+means "use the brush's own built-in art"); the music picker's "None"
+entry (`NO_MUSIC_ID`) is a first-class choice rather than a separate
+clear button, since there's no built-in fallback track the way there is
+for backgrounds. Music tracks have no visual thumbnail the way images do,
+so every row in that picker reuses one of two small procedurally-drawn
+icons (`generateTextures.ts`'s `drawMusicNoteIcon`, muted variant for
+"None") and tells tracks apart by filename label alone.
+
+Reused, not reinvented: `AssetPickerMenu`'s "+ Upload" tile is the same
+real, invisible `FileInputOverlay` `<input type="file">`-over-the-canvas
+trick the old Upload BG/Upload Music buttons already used (see "The DOM
+overlay trick" below) — including, since a picker's dropdown can close
+and reopen (or re-render mid-upload once a library refresh lands) far
+more often than the old single-shot buttons ever did, explicitly
+destroying and recreating that overlay on every open/close/re-render so
+its real DOM element never lingers, invisible but still the actual click
+target, over whatever the editor shows once the picker's gone.
+
+One real bug this surfaced (and fixed) rather than just a design
+decision: switching a brush's *active* skin used to reuse one Phaser
+texture key (`skin-<brushId>`) across every skin ever uploaded for that
+brush, `remove()`-ing the old image's texture before the new one finished
+decoding — a still-visible palette icon or placed entity pointing at that
+just-freed GPU texture on the very next rendered frame crashed the whole
+WebGL render loop (`Cannot read properties of null (reading
+'glTexture')`), not just that one icon, confirmed while browser-testing
+this feature. Fixed the same way `resolveSkinThumbnails`'s own thumbnail
+keys already avoided the problem: give every (brush, skin) pair its own
+permanent texture key (`skin-active-<brushId>-<skinId>`, see
+`skinLoader.ts`) instead of fighting over one shared slot, since a skin's
+uploaded image never changes once it exists. `backgroundLoader.ts`'s
+single reused custom-background key didn't need the same fix — it was
+already safe, since `EditorScene.applyBackground` destroys the old
+preview `Image` *before* resolving a new texture, so nothing is ever left
+rendering with a freed one.
+
+Known, accepted limitations, same shape as `skins.json`'s own pre-existing
+one: uploading to the same library from two tabs/profiles at the exact
+same moment could lose one upload (a read-modify-write race, not worth
+real optimistic concurrency for a household's occasional uploads);
+deleting a background or track currently in use by a level doesn't touch
+that level's own `customBackgroundId`/`customMusicId` — it simply falls
+back to the default built-in (backgrounds) or silence (music, via an
+explicit clear rather than a silent fallback, since there's no built-in
+to land on) the next time that level is opened, matching `removeCustomSkin`'s
+own "revert to default, don't guess a replacement" behavior.
 
 ## Project layout
 

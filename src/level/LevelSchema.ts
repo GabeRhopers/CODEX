@@ -85,22 +85,33 @@ export interface LevelData {
    * default via `resolveStaticBackground`, rather than needing a
    * migration. */
   background?: StaticBackgroundId;
-  /** The level's own uploaded background image (a downscaled JPEG data
-   * URL — see editor/customBackgroundUpload.ts), present only when
-   * `background === "custom"`. Lives inline in the level's own JSON
-   * (rather than, say, a separate asset store) since localStorage is the
-   * only persistence this project has — see backgroundLoader.ts for how
-   * it becomes a Phaser texture at runtime. */
+  /** Which entry of the shared background library (backgrounds.json — see
+   * backgrounds/backgroundLibraryStorage.ts) this level uses, present only
+   * when `background === "custom"`. As of 2026-08-16, uploading a
+   * background adds it to a library shared across every profile and every
+   * level (the same "upload once, reuse everywhere, pick from a submenu
+   * of thumbnails" workflow custom skins already had) instead of
+   * embedding a one-off copy in just this level — see
+   * backgroundLoader.ts for how an id resolves to a Phaser texture. */
+  customBackgroundId?: string;
+  /** Legacy per-level embedded background image (a downscaled JPEG data
+   * URL), from before backgrounds moved into the shared library above.
+   * Kept only as a fallback so a level saved before that migration still
+   * renders its own uploaded background without needing to be re-uploaded
+   * — see backgroundLoader.ts. Every new upload sets customBackgroundId
+   * instead; nothing writes this field anymore. */
   customBackgroundData?: string;
-  /** The level's own uploaded background music, as a data URL — present
-   * only when the level has one (there's no built-in music pool the way
-   * there is for backgrounds; a level with neither field just plays
-   * silently). Lives inline in the level's own JSON for the same
-   * localStorage-is-the-only-persistence reason as customBackgroundData —
-   * see gameplay/musicLoader.ts for how it becomes a playable Phaser sound
-   * at runtime. `customMusicName` is the original filename, shown on
-   * EditorUI's music button so the level author can tell what's uploaded
-   * without re-opening the file picker. */
+  /** Which entry of the shared music library (music.json — see
+   * music/musicLibraryStorage.ts) this level plays, present only when the
+   * level has music (there's no built-in pool the way there is for
+   * backgrounds; a level with none of these fields just plays silently).
+   * Same shared-library treatment as customBackgroundId above, replacing
+   * the old per-level embedded copy — see musicLoader.ts. */
+  customMusicId?: string;
+  /** Legacy per-level embedded music (a data URL) and its original
+   * filename, from before music moved into the shared library above.
+   * Kept only as a fallback for a level saved before that migration —
+   * see musicLoader.ts. Nothing writes these fields anymore. */
   customMusicData?: string;
   customMusicName?: string;
   createdAt: string;

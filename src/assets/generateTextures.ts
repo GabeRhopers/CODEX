@@ -144,6 +144,28 @@ function drawFeatherIcon(g: Phaser.GameObjects.Graphics): void {
   g.strokePath();
 }
 
+/** A simple double eighth-note glyph, for the music picker submenu's
+ * per-track rows (see EditorUI's AssetPickerMenu / "Skin/background/music
+ * libraries" under Art) — audio has no visual thumbnail the way an
+ * uploaded image does, so every track row shows this same icon and relies
+ * on its label (the uploaded filename) to tell tracks apart, same as a
+ * plain file-list UI would. `muted` draws it desaturated/greyed out, used
+ * for the picker's "None" row so it doesn't read as "a track named
+ * None." */
+function drawMusicNoteIcon(g: Phaser.GameObjects.Graphics, muted: boolean): void {
+  const noteColor = muted ? 0x666680 : 0xffd166;
+  g.fillStyle(noteColor, 1);
+  g.fillCircle(11, 24, 5);
+  g.fillCircle(21, 21, 5);
+  g.fillRect(14, 8, 3, 16);
+  g.fillRect(24, 6, 3, 15);
+  g.fillRect(14, 8, 13, 4);
+  if (muted) {
+    g.lineStyle(3, 0xd32f2f, 0.9);
+    g.lineBetween(6, 27, 26, 5);
+  }
+}
+
 const STAR_COLOR = 0xffffff;
 // Matches the painted scenes' baked-background format (see
 // ParallaxBackground.ts) — large and fixed rather than a small tile, so the
@@ -267,6 +289,17 @@ export function generateTextures(scene: Phaser.Scene): void {
   g.lineStyle(3, 0xffeb3b, 1);
   g.strokeRect(1, 1, TILE_SIZE - 2, TILE_SIZE - 2);
   g.generateTexture("selected-outline", TILE_SIZE, TILE_SIZE);
+
+  // Music picker icons (see drawMusicNoteIcon) — every uploaded track's
+  // row uses "music-note", the picker's own "None" row uses the muted
+  // variant.
+  g.clear();
+  drawMusicNoteIcon(g, false);
+  g.generateTexture("music-note", TILE_SIZE, TILE_SIZE);
+
+  g.clear();
+  drawMusicNoteIcon(g, true);
+  g.generateTexture("music-note-muted", TILE_SIZE, TILE_SIZE);
 
   g.destroy();
 }

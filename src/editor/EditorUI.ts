@@ -11,7 +11,7 @@ import {
 } from "../config/gameConfig";
 import { EnemySize } from "../level/LevelSchema";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
-import { FileInputOverlay } from "./FileInputOverlay";
+import { AssetPickerItem, AssetPickerMenu } from "./AssetPickerMenu";
 import { LevelNameInput } from "./LevelNameInput";
 import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
@@ -24,16 +24,42 @@ export interface EditorUICallbacks {
   onClear: () => void;
   onUndo: () => void;
   onRedo: () => void;
-  onCycleBackground: () => void;
-  onUploadBackground: (file: File) => void;
-  onUploadMusic: (file: File) => void;
-  onClearMusic: () => void;
   onRenameLevel: (name: string) => void;
-  onUploadSkin: (file: File) => void;
-  onClearSkin: () => void;
   onToggleEraser: () => void;
   onSelectSize: (size: EnemySize) => void;
+
+  // Skin/background/music each follow the same shape now — see
+  // AssetPickerMenu: an "open" hook that resolves and pushes the
+  // relevant library's items (async, a Drive read), a "select" hook for
+  // picking one, an "upload" hook that adds to the shared library, and a
+  // "delete" hook for removing a library entry. Skin's picker always
+  // targets whichever brush is currently selected (see selectBrush), so
+  // its callbacks don't need a brush id parameter.
+  onSkinPickerOpen: () => void;
+  onSelectSkin: (skinId: string | null) => void;
+  onUploadSkin: (file: File) => void;
+  onDeleteSkin: (skinId: string) => void;
+
+  onBackgroundPickerOpen: () => void;
+  onSelectBackground: (id: string) => void;
+  onUploadBackground: (file: File) => void;
+  onDeleteBackground: (id: string) => void;
+
+  onMusicPickerOpen: () => void;
+  onSelectMusic: (id: string | null) => void;
+  onUploadMusic: (file: File) => void;
+  onDeleteMusic: (id: string) => void;
 }
+
+// Sentinel ids for a picker's non-deletable "use the built-in look"
+// option — never a real skin/track id (those are crypto.randomUUID()),
+// so there's no risk of an actual upload colliding with either. The skin
+// picker's callback maps this back to `null` (skinStorage.ts's own
+// "no active skin" value) before calling onSelectSkin; the music picker
+// does the same for `null` (musicLoader.ts's "no music" value) via
+// NO_MUSIC_ID.
+export const DEFAULT_SKIN_ID = "__default__";
+export const NO_MUSIC_ID = "__none__";
 
 const ENEMY_SIZES: { id: EnemySize; label: string }[] = [
   { id: "small", label: "Small" },
@@ -67,9 +93,9 @@ const NAME_INPUT_HEIGHT = 28;
 const NAME_INPUT_Y = (HEADER_HEIGHT - NAME_INPUT_HEIGHT) / 2;
 
 // --- Left "Palette" panel: a chip that expands into the 5 categories, a
-// 2-column icon grid for whichever one is active, and the Skin/Upload Skin
-// buttons pinned to a fixed spot below the grid (not "wherever the grid
-// happens to end") so they don't jump up and down as the active category's
+// 2-column icon grid for whichever one is active, and the skin picker
+// trigger pinned to a fixed spot below the grid (not "wherever the grid
+// happens to end") so it doesn't jump up and down as the active category's
 // row count changes between categories.
 const CHIP_Y = PANEL_TOP + 10;
 const CHIP_HEIGHT = 30;
@@ -84,18 +110,28 @@ const ICON_GRID_START_Y = CHIP_Y + CHIP_HEIGHT + 10;
 
 // Fixed regardless of the active category's row count — sized for the
 // worst case (Blocks/Decor, 5 rows) so switching categories never moves
-// these buttons. See gameConfig.ts's vertical-budget comment for the math.
-const SKIN_BUTTON_HEIGHT = 26;
+// this trigger. See gameConfig.ts's vertical-budget comment for the math.
+const SKIN_TRIGGER_HEIGHT = 26;
 const SKIN_SECTION_Y = PANEL_TOP + 328;
-const SKIN_BUTTON_GAP = 4;
+const SKIN_PICKER_COLUMNS = 3;
+const SKIN_PICKER_ITEM_SIZE = 26;
 
 // --- Right "Level Settings" panel: a title, then one fixed-width button
-// per row (Background/Upload BG/Music/Upload Music/Clear).
+// per row (Background/Music/Clear).
 const RIGHT_BUTTON_WIDTH = RIGHT_PANEL_WIDTH - PANEL_PADDING * 2;
 const RIGHT_BUTTON_HEIGHT = 32;
 const RIGHT_BUTTON_GAP = 8;
 const RIGHT_TITLE_Y = PANEL_TOP + 12;
 const RIGHT_ROWS_START_Y = RIGHT_TITLE_Y + 24;
+// Backgrounds have real image thumbnails (built-ins' own textures, or a
+// custom upload's) that read fine small, so 3 narrow columns fit; music
+// tracks are told apart by filename label alone (see AssetPickerItem's
+// docstring), which needs more per-row width to avoid heavy wrapping, so
+// 2 wider columns instead.
+const BACKGROUND_PICKER_COLUMNS = 3;
+const BACKGROUND_PICKER_ITEM_SIZE = 30;
+const MUSIC_PICKER_COLUMNS = 2;
+const MUSIC_PICKER_ITEM_SIZE = 24;
 
 // --- Footer: read-only stats, left-aligned in fixed-width slots (nothing
 // here is interactive, so unlike the header's buttons a slot's exact width
@@ -149,10 +185,9 @@ export class EditorUI {
   // EditorScene's `dirty` flag/autosave for what drives it. Anchored to the
   // header's right-hand cluster, just left of the Save button.
   private saveStatusText: Phaser.GameObjects.Text;
-  private backgroundButton!: PanelButton;
-  private musicButton!: PanelButton;
-  private skinButton!: PanelButton;
-  private uploadSkinButton!: PanelButton;
+  private backgroundPicker!: AssetPickerMenu;
+  private musicPicker!: AssetPickerMenu;
+  private skinPicker!: AssetPickerMenu;
   private eraserButton!: PanelButton;
   private clearButton!: PanelButton;
   private sizeButtons = new Map<EnemySize, PanelButton>();
@@ -265,30 +300,38 @@ export class EditorUI {
     this.selectedOutline = scene.add.image(-100, -100, "selected-outline").setDepth(OUTLINE_DEPTH);
     this.renderIconGrid();
 
-    // Skin/Upload Skin: fixed position below the grid (see SKIN_SECTION_Y)
+    // Skin picker: fixed position below the grid (see SKIN_SECTION_Y)
     // regardless of the active category's row count — reskins whichever
-    // brush is currently selected (see "Custom skins" under Art); the
-    // palette selection doubles as "which type", so there's no separate
-    // type-picker UI.
-    this.skinButton = this.makeFixedWidthButton(
-      PANEL_PADDING,
-      SKIN_SECTION_Y,
-      CHIP_WIDTH,
-      SKIN_BUTTON_HEIGHT,
-      this.skinStatusLabel(),
-      () => this.callbacks.onClearSkin(),
-    );
-    this.wireHoverStyles(this.skinButton.bg);
-
-    const uploadSkinY = SKIN_SECTION_Y + SKIN_BUTTON_HEIGHT + SKIN_BUTTON_GAP;
-    this.uploadSkinButton = this.makeFixedWidthButton(PANEL_PADDING, uploadSkinY, CHIP_WIDTH, SKIN_BUTTON_HEIGHT, this.uploadSkinLabel(), () => {});
-    new FileInputOverlay(
+    // brush is currently selected (see "Skin/background/music libraries"
+    // under Art); the palette selection doubles as "which type", so
+    // there's no separate type-picker UI. Opening it resolves (a Drive
+    // read) and pushes that brush's own skin library via
+    // setSkinPickerItems — see onSkinPickerOpen below.
+    this.skinPicker = new AssetPickerMenu({
       scene,
-      { x: PANEL_PADDING, y: uploadSkinY, width: CHIP_WIDTH, height: SKIN_BUTTON_HEIGHT },
-      "image/*",
-      (file) => this.callbacks.onUploadSkin(file),
-      (hovering) => this.uploadSkinButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
-    );
+      trigger: { x: PANEL_PADDING, y: SKIN_SECTION_Y, width: CHIP_WIDTH, height: SKIN_TRIGGER_HEIGHT },
+      columns: SKIN_PICKER_COLUMNS,
+      itemSize: SKIN_PICKER_ITEM_SIZE,
+      uploadAccept: "image/*",
+      triggerDepth: CONTENT_DEPTH,
+      dropdownDepth: DROPDOWN_DEPTH,
+      canOpen: () => {
+        const brush = this.selectedBrush();
+        if (brush && this.isSkinnable(brush)) return true;
+        this.setStatus("Only Markers/Enemies/Items/Decor can be reskinned");
+        return false;
+      },
+      onToggleOpen: (isOpen) => {
+        if (!isOpen) return;
+        this.backgroundPicker.close();
+        this.musicPicker.close();
+        this.callbacks.onSkinPickerOpen();
+      },
+      onSelect: (id) => this.callbacks.onSelectSkin(id === DEFAULT_SKIN_ID ? null : id),
+      onDelete: (id) => this.callbacks.onDeleteSkin(id),
+      onUploadFile: (file) => this.callbacks.onUploadSkin(file),
+    });
+    this.setSkinPickerLabel();
 
     // --- Right "Level Settings" panel ---
     scene.add
@@ -298,68 +341,52 @@ export class EditorUI {
 
     let rowY = RIGHT_ROWS_START_Y;
 
-    // Clicking cycles to the next background in the small static pool,
-    // wrapping around; the label always names whichever one is currently
-    // showing.
-    this.backgroundButton = this.makeFixedWidthButton(
-      RIGHT_PANEL_X + PANEL_PADDING,
-      rowY,
-      RIGHT_BUTTON_WIDTH,
-      RIGHT_BUTTON_HEIGHT,
-      this.backgroundLabelText(initialBackgroundLabel),
-      () => this.callbacks.onCycleBackground(),
-    );
-    this.wireHoverStyles(this.backgroundButton.bg);
-    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
-
-    // Upload BG: rendered like every other panel button, but a real,
-    // invisible HTML file input sits on top of it (see FileInputOverlay
-    // for why) rather than this button opening a picker itself — a
-    // one-way action, not part of the "BG: ▶" cycle. The button's own
-    // pointerdown never actually fires from a real click (the overlay
-    // catches it first); FileInputOverlay's hover callback drives this
-    // button's highlight instead.
-    const uploadBgButton = this.makeFixedWidthButton(RIGHT_PANEL_X + PANEL_PADDING, rowY, RIGHT_BUTTON_WIDTH, RIGHT_BUTTON_HEIGHT, "Upload BG", () => {});
-    new FileInputOverlay(
+    // Background picker: built-ins and every uploaded background share one
+    // submenu (see AssetPickerMenu) — opening it resolves the shared
+    // library's thumbnails via onBackgroundPickerOpen below.
+    this.backgroundPicker = new AssetPickerMenu({
       scene,
-      { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
-      "image/*",
-      (file) => this.callbacks.onUploadBackground(file),
-      (hovering) => uploadBgButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
-    );
+      trigger: { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
+      columns: BACKGROUND_PICKER_COLUMNS,
+      itemSize: BACKGROUND_PICKER_ITEM_SIZE,
+      uploadAccept: "image/*",
+      triggerDepth: CONTENT_DEPTH,
+      dropdownDepth: DROPDOWN_DEPTH,
+      onToggleOpen: (isOpen) => {
+        if (!isOpen) return;
+        this.skinPicker.close();
+        this.musicPicker.close();
+        this.callbacks.onBackgroundPickerOpen();
+      },
+      onSelect: (id) => this.callbacks.onSelectBackground(id),
+      onDelete: (id) => this.callbacks.onDeleteBackground(id),
+      onUploadFile: (file) => this.callbacks.onUploadBackground(file),
+    });
+    this.backgroundPicker.setTriggerLabel(this.backgroundLabelText(initialBackgroundLabel));
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
-    // Music: <name/None> — clicking it clears the level's music if one is
-    // set (a no-op, via EditorScene's own guard, if none is); there's no
-    // pool to cycle through the way there is for backgrounds, just "has
-    // one" or "doesn't".
-    this.musicButton = this.makeFixedWidthButton(
-      RIGHT_PANEL_X + PANEL_PADDING,
-      rowY,
-      RIGHT_BUTTON_WIDTH,
-      RIGHT_BUTTON_HEIGHT,
-      this.musicLabelText(initialMusicLabel),
-      () => this.callbacks.onClearMusic(),
-    );
-    this.wireHoverStyles(this.musicButton.bg);
-    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
-
-    // Upload Music: same real-file-input-overlay trick as Upload BG.
-    const uploadMusicButton = this.makeFixedWidthButton(
-      RIGHT_PANEL_X + PANEL_PADDING,
-      rowY,
-      RIGHT_BUTTON_WIDTH,
-      RIGHT_BUTTON_HEIGHT,
-      "Upload Music",
-      () => {},
-    );
-    new FileInputOverlay(
+    // Music picker: "None" plus every uploaded track share one submenu,
+    // same shape as the background picker above — see
+    // onMusicPickerOpen below.
+    this.musicPicker = new AssetPickerMenu({
       scene,
-      { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
-      "audio/*",
-      (file) => this.callbacks.onUploadMusic(file),
-      (hovering) => uploadMusicButton.bg.setFillStyle(hovering ? BUTTON_HOVER_COLOR : BUTTON_COLOR),
-    );
+      trigger: { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
+      columns: MUSIC_PICKER_COLUMNS,
+      itemSize: MUSIC_PICKER_ITEM_SIZE,
+      uploadAccept: "audio/*",
+      triggerDepth: CONTENT_DEPTH,
+      dropdownDepth: DROPDOWN_DEPTH,
+      onToggleOpen: (isOpen) => {
+        if (!isOpen) return;
+        this.skinPicker.close();
+        this.backgroundPicker.close();
+        this.callbacks.onMusicPickerOpen();
+      },
+      onSelect: (id) => this.callbacks.onSelectMusic(id === NO_MUSIC_ID ? null : id),
+      onDelete: (id) => this.callbacks.onDeleteMusic(id),
+      onUploadFile: (file) => this.callbacks.onUploadMusic(file),
+    });
+    this.musicPicker.setTriggerLabel(this.musicLabelText(initialMusicLabel));
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
     // Clear: two-tap arm/confirm rather than a native confirm() popup, to
@@ -555,7 +582,13 @@ export class EditorUI {
   selectBrush(brush: Brush): void {
     this.selectedBrushId = brush.id;
     this.updateSelectedOutlinePosition();
-    this.refreshSkinButtons();
+    // The skin picker's dropdown sits well below the icon grid (see
+    // SKIN_SECTION_Y), not overlaying it, so it's reachable to switch
+    // brushes while the picker is still open showing the *previous*
+    // brush's skins — close it rather than leave a stale, wrong-brush
+    // list (and wrong active highlight) on screen.
+    this.skinPicker.close();
+    this.setSkinPickerLabel();
     this.callbacks.onSelectBrush(brush);
   }
 
@@ -644,25 +677,42 @@ export class EditorUI {
   }
 
   private backgroundLabelText(label: string): string {
-    return `BG: ${label} ▶`;
+    return `BG: ${label} ▾`;
   }
 
-  /** Called by EditorScene right after cycling — the button's own text is
-   * the only place the current background is displayed. Fixed-width, so
-   * this never needs to reposition anything else on the panel. */
+  /** Called by EditorScene after a background is picked (or an upload
+   * lands) — the trigger's own text is the only place the current
+   * background is displayed. Fixed-width, so this never needs to
+   * reposition anything else on the panel. */
   setBackgroundLabel(label: string): void {
-    this.backgroundButton.label.setText(this.backgroundLabelText(label));
+    this.backgroundPicker.setTriggerLabel(this.backgroundLabelText(label));
+  }
+
+  /** Called by EditorScene once onBackgroundPickerOpen's async resolve
+   * (a Drive read of the shared library) finishes — `items` already
+   * includes the 4 built-ins alongside any uploaded ones; `activeId`
+   * matches whichever built-in id or library uuid the level currently
+   * uses. */
+  setBackgroundPickerItems(items: AssetPickerItem[], activeId: string): void {
+    this.backgroundPicker.setItems(items, activeId);
   }
 
   private musicLabelText(name: string | null): string {
-    return `Music: ${name ?? "None"}`;
+    return `Music: ${name ?? "None"} ▾`;
   }
 
-  /** Called by EditorScene after an upload or a clear — `name` is the
-   * uploaded file's own name (LevelData.customMusicName), or `null` when
-   * the level has no music. */
+  /** Called by EditorScene after a track is picked (or an upload lands)
+   * — `name` is the track's own library name (LevelData.customMusicId
+   * resolved against music.json), or `null` when the level has none. */
   setMusicLabel(name: string | null): void {
-    this.musicButton.label.setText(this.musicLabelText(name));
+    this.musicPicker.setTriggerLabel(this.musicLabelText(name));
+  }
+
+  /** Called by EditorScene once onMusicPickerOpen's async resolve
+   * finishes — `items` is "None" plus every uploaded track; `activeId`
+   * is NO_MUSIC_ID when the level has none. */
+  setMusicPickerItems(items: AssetPickerItem[], activeId: string): void {
+    this.musicPicker.setItems(items, activeId);
   }
 
   private selectedBrush(): Brush | undefined {
@@ -679,30 +729,33 @@ export class EditorUI {
     return brush.entityType !== undefined;
   }
 
-  private skinStatusLabel(): string {
+  private skinTriggerLabel(): string {
     const brush = this.selectedBrush();
     if (!brush || !this.isSkinnable(brush)) return "Skin: N/A";
-    return this.skinTextureKeys.has(brush.id) ? "Skin: Custom (tap to clear)" : "Skin: Default";
+    return `Skin: ${this.skinTextureKeys.has(brush.id) ? "Custom" : "Default"} ▾`;
   }
 
-  private uploadSkinLabel(): string {
-    const brush = this.selectedBrush();
-    if (!brush || !this.isSkinnable(brush)) return "Upload Skin";
-    return `Upload Skin: ${brush.label}`;
+  private setSkinPickerLabel(): void {
+    this.skinPicker.setTriggerLabel(this.skinTriggerLabel());
   }
 
-  private refreshSkinButtons(): void {
-    this.skinButton.label.setText(this.skinStatusLabel());
-    this.uploadSkinButton.label.setText(this.uploadSkinLabel());
+  /** Called by EditorScene once onSkinPickerOpen's async resolve (a Drive
+   * read scoped to just the currently-selected brush — see
+   * skinLoader.ts's resolveSkinThumbnails) finishes — `items` is the
+   * brush's own "Default" option plus every skin uploaded for it;
+   * `activeId` is DEFAULT_SKIN_ID when none is active. */
+  setSkinPickerItems(items: AssetPickerItem[], activeId: string): void {
+    this.skinPicker.setItems(items, activeId);
   }
 
-  /** Called by EditorScene once its async skin-resolution pass (see
-   * skinLoader.ts) finishes — re-renders the icon grid so every skinned
-   * brush's icon picks up its custom texture, and refreshes the Skin/
-   * Upload Skin button labels for whichever brush is currently selected. */
+  /** Called by EditorScene once its async active-skin-resolution pass
+   * (see skinLoader.ts's resolveSkinTextureKeys) finishes — re-renders
+   * the icon grid so every skinned brush's icon picks up its active
+   * texture, and refreshes the skin trigger's label for whichever brush
+   * is currently selected. */
   applySkins(skinTextureKeys: Map<string, string>): void {
     this.skinTextureKeys = skinTextureKeys;
     this.renderIconGrid();
-    this.refreshSkinButtons();
+    this.setSkinPickerLabel();
   }
 }
