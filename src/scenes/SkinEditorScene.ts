@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
-import { Brush, PALETTE } from "../editor/Palette";
+import { Brush, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
 import { PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { fitWithinTile } from "../editor/spriteFit";
 import { loadActiveProfile } from "../profile/Profile";
@@ -290,6 +290,11 @@ export class SkinEditorScene extends Phaser.Scene {
 
       const icon = this.add.image(cx, cy + 22, brush.textureKey).setInteractive({ useHandCursor: true });
       fitWithinTile(icon, 36);
+      // Always the brush's own built-in art here (this grid is "which
+      // brush is a *new* skin for," never a skin-resolved render), so
+      // unlike EntityPlacer/EditorUI's own basket-up tint this needs no
+      // custom-skin guard — see UP_BASKET_TINT_COLOR's docstring.
+      if (brush.id === "basket-up") icon.setTint(UP_BASKET_TINT_COLOR);
       const label = this.add.text(cx, cy + 46, brush.label, { fontSize: "11px", color: "#c8c8e0" }).setOrigin(0.5, 0);
 
       const onClick = () => {

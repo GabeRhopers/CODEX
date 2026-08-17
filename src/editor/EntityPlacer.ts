@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y } from "../config/gameConfig";
 import { ENEMY_EDITOR_SIZE_SCALE, isEnemyType } from "../gameplay/EnemyBehaviors";
 import { EnemySize, EntityType, LevelArea, LevelEntity } from "../level/LevelSchema";
-import { Brush } from "./Palette";
+import { Brush, UP_BASKET_TINT_COLOR } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
 export interface TileCoord {
@@ -85,7 +85,16 @@ export class EntityPlacer {
     const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
     marker.setDepth(10);
     this.applyMarkerDisplaySize(marker, storedSize);
+    this.applyUpBasketTint(marker, brush);
     this.markers.set(tileKey(tileX, tileY), marker);
+  }
+
+  /** See UP_BASKET_TINT_COLOR's own docstring — only tints when the
+   * brush's *default* art is actually what's rendering (i.e. no custom
+   * skin override for it), so a user's own uploaded basket-up art is
+   * never involuntarily recolored. */
+  private applyUpBasketTint(marker: Phaser.GameObjects.Image, brush: Brush): void {
+    if (brush.id === "basket-up" && !this.skinTextureKeys.has(brush.id)) marker.setTint(UP_BASKET_TINT_COLOR);
   }
 
   /** Tile-fits every marker (unchanged from before this feature), then
@@ -189,6 +198,7 @@ export class EntityPlacer {
       const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
       marker.setDepth(10);
       this.applyMarkerDisplaySize(marker, isEnemyType(entity.type) ? entity.size : undefined);
+      this.applyUpBasketTint(marker, brush);
       this.markers.set(tileKey(entity.x, entity.y), marker);
     }
   }

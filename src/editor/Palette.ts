@@ -126,6 +126,9 @@ export const PALETTE: Brush[] = [
   { id: "goal", category: "markers", kind: "entity", label: "Goal", textureKey: "goal-portal", entityType: "goal" },
   { id: "chest", category: "markers", kind: "entity", label: "Chest", textureKey: "chest", entityType: "chest" },
   { id: "checkpoint", category: "markers", kind: "entity", label: "Checkpoint", textureKey: "checkpoint-bell", entityType: "checkpoint" },
+  // Basket (Down) and Basket (Up) intentionally share one texture — see
+  // UP_BASKET_TINT_COLOR below for how "Up" stays visually distinguishable
+  // anyway, everywhere either one renders.
   { id: "basket-sub", category: "markers", kind: "entity", label: "Basket (Down)", textureKey: "magic-basket", entityType: "basket-sub" },
   { id: "basket-up", category: "markers", kind: "entity", label: "Basket (Up)", textureKey: "magic-basket", entityType: "basket-up" },
   { id: "enemy-ghost", category: "enemies", kind: "entity", label: "Ghost", textureKey: "enemy-ghost-pillow", entityType: "enemy-ghost" },
@@ -149,3 +152,22 @@ export const PALETTE: Brush[] = [
   { id: "decor-rocks", category: "decor", kind: "entity", label: "Rocks", textureKey: "decor-rocks", entityType: "decor-rocks" },
   { id: "decor-bat", category: "decor", kind: "entity", label: "Sleep Bat", textureKey: "decor-bat", entityType: "decor-bat" },
 ];
+
+// Basket (Down) and Basket (Up) render with the exact same "magic-basket"
+// texture (see the PALETTE entries above) — only their pairing (which
+// area they teleport to/from, see PlayScene's basketDestination) differs.
+// Applied via GameObject.setTint wherever the *default* art renders for
+// basket-up specifically — the palette icon, a placed editor marker, and
+// the in-game sprite — so "Down" and "Up" read as visually distinct
+// without needing a second baked art asset, the same setTint-over-a-
+// second-texture choice Checkpoint's own active/inactive bell tint
+// already made (see PlayScene's CHECKPOINT_ACTIVE_TINT). A warm gold
+// multiply tint rather than a full color replacement (setTintFill) so
+// the source art's own shading/depth still reads through, just shifted
+// warmer — "Down" (the cooler, unmodified original) stays visually
+// paired with descending, "Up" with a golden, ascending/sunlit feel.
+// Every call site is responsible for skipping this when a *custom*
+// skin is active for basket-up instead (see EntityPlacer.add's own
+// check) — a user's own uploaded art shouldn't get an involuntary tint
+// forced onto it.
+export const UP_BASKET_TINT_COLOR = 0xffc266;

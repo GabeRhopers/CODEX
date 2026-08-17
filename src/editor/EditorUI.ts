@@ -13,7 +13,7 @@ import { AreaKey, EnemySize } from "../level/LevelSchema";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { AssetPickerItem, AssetPickerMenu } from "./AssetPickerMenu";
 import { LevelNameInput } from "./LevelNameInput";
-import { Brush, BrushCategory, CATEGORIES, PALETTE } from "./Palette";
+import { Brush, BrushCategory, CATEGORIES, PALETTE, UP_BASKET_TINT_COLOR } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
 export interface EditorUICallbacks {
@@ -614,6 +614,9 @@ export class EditorUI {
       const { x, y } = positions[i];
       const icon = this.scene.add.image(x, y, this.textureKeyFor(brush)).setDepth(CONTENT_DEPTH).setInteractive({ useHandCursor: true });
       fitWithinTile(icon);
+      // See UP_BASKET_TINT_COLOR's own docstring — only while the default
+      // art (not a custom skin override) is what's actually showing.
+      if (brush.id === "basket-up" && !this.skinTextureKeys.has(brush.id)) icon.setTint(UP_BASKET_TINT_COLOR);
       icon.on("pointerdown", () => this.selectBrush(brush));
       const label = this.scene.add
         .text(x, y + TILE_SIZE / 2 + 2, brush.label, { fontSize: "10px", color: "#eeeeee" })

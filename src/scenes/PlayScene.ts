@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { VolumeControl } from "../audio/VolumeControl";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y, TILE_SIZE } from "../config/gameConfig";
+import { UP_BASKET_TINT_COLOR } from "../editor/Palette";
 import {
   applyDefaultSkinSize,
   applyEnemySize,
@@ -60,10 +61,14 @@ const SWIM_SPEED_MULTIPLIER = 0.6;
 // skin of any color scheme instead of needing an "activated" variant of
 // whatever image they chose.
 const CHECKPOINT_ACTIVE_TINT = 0x4ade80;
-// How long the "Checkpoint!" toast (see showCheckpointToast) stays up —
-// shorter than EditorUI.setStatus's 2500ms since this fires mid-platforming
-// and shouldn't linger over the action.
+// How long a toast (see showToast) stays up — shorter than
+// EditorUI.setStatus's 2500ms since these fire mid-platforming and
+// shouldn't linger over the action.
 const CHECKPOINT_TOAST_MS = 1200;
+// Text color for showToast's "something didn't happen" case (a basket with
+// no matching basket in its paired area — see useBasket) — distinct from
+// the Checkpoint toast's green so a warning reads as a warning at a glance.
+const WARNING_TOAST_COLOR = "#facc15";
 // A basket teleport lands the player standing exactly on top of the
 // *destination* area's own matching basket (see enterArea/useBasket) —
 // without a brief cooldown, that new position immediately overlaps that
@@ -252,7 +257,7 @@ export class PlayScene extends Phaser.Scene {
   // threaded through restart() the way `checkpoint` itself is, since
   // create() re-derives it from `this.checkpoint` when spawning.
   private activeCheckpointSprite?: Phaser.GameObjects.Image;
-  private checkpointToast!: Phaser.GameObjects.Text;
+  private toast!: Phaser.GameObjects.Text;
   // See TELEPORT_COOLDOWN_MS — set by useBasket, checked at its own top.
   private teleportCooldownUntil = 0;
   // Every goal/chest/enemy/item/decor sprite spawned below, grouped by
@@ -364,7 +369,7 @@ export class PlayScene extends Phaser.Scene {
       .setScrollFactor(0);
     this.updateHud();
 
-    this.checkpointToast = this.add
+    this.toast = this.add
       .text(this.scale.width / 2, GRID_ORIGIN_Y + 24, "", {
         fontSize: "14px",
         color: "#4ade80",
@@ -626,12 +631,18 @@ export class PlayScene extends Phaser.Scene {
     // Baskets (see "Sub/Up areas" under Art) — two-way teleport triggers
     // between Main and their own satellite area. Both types render with
     // the same texture (see Palette.ts) and only differ in which area they
-    // pair with (see basketDestination/useBasket).
+    // pair with (see basketDestination/useBasket) — basket-up gets
+    // UP_BASKET_TINT_COLOR (see its own docstring) so the two read as
+    // visually distinct in gameplay too, not just the editor; cleared
+    // again below if a custom skin ends up overriding this basket's
+    // texture, so a player's own uploaded art is never involuntarily
+    // recolored.
     for (const basketType of ["basket-sub", "basket-up"] as const) {
       for (const entity of area.entities.filter((e) => e.type === basketType)) {
         const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
         const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
         const basketSprite = this.add.image(x, y, "magic-basket").setDepth(5);
+        if (basketType === "basket-up") basketSprite.setTint(UP_BASKET_TINT_COLOR);
         this.trackSprite(basketType, basketSprite);
         this.tweens.add({
           targets: basketSprite,
@@ -736,6 +747,11 @@ export class PlayScene extends Phaser.Scene {
         if (!skinKey) continue;
         for (const sprite of sprites) {
           sprite.setTexture(skinKey);
+          // A custom skin is the player's own chosen art for this brush —
+          // the default-only UP_BASKET_TINT_COLOR (applied above, before
+          // this async resolve had a chance to land) shouldn't multiply
+          // into it.
+          if (brushId === "basket-up") sprite.clearTint();
           const enemySize = sprite.getData("enemySize") as EnemySize | undefined;
           if (enemySize) applyEnemySize(sprite as Phaser.Physics.Arcade.Sprite, brushId as EntityType, enemySize);
           else applyDefaultSkinSize(sprite);
@@ -748,19 +764,30 @@ export class PlayScene extends Phaser.Scene {
 
   /** Called on overlap with a basket zone (see the loop above) — teleports
    * to wherever the same-type basket sits in the paired area, through the
-   * cooldown guard described at TELEPORT_COOLDOWN_MS. Silently does
-   * nothing if the paired area doesn't exist yet, or exists but has no
-   * matching basket placed in it (see "Sub/Up areas" under Art) — matching
-   * this codebase's established "gracefully degrade, never crash"
-   * convention elsewhere (e.g. resolveStaticBackground's own fallback). */
+   * cooldown guard described at TELEPORT_COOLDOWN_MS. Does nothing if the
+   * paired area doesn't exist yet, or exists but has no matching basket
+   * placed in it (see "Sub/Up areas" under Art) — a level designer hits
+   * this every time they place a basket in Main and forget the matching
+   * one in Sub/Up (or place the wrong type in either spot, easy to do back
+   * when both baskets looked identical — see UP_BASKET_TINT_COLOR), so it
+   * surfaces a toast rather than staying fully silent the way this used to
+   * (silent no-ops elsewhere, e.g. resolveStaticBackground's own fallback,
+   * don't need one — the player never took an action expecting a visible
+   * result). The cooldown is claimed up front for *both* outcomes so
+   * standing on an inert basket doesn't retrigger the toast every physics
+   * frame of continued overlap. */
   private useBasket(basketType: "basket-sub" | "basket-up"): void {
     if (this.time.now < this.teleportCooldownUntil) return;
     const destinationKey = basketDestination(basketType, this.currentAreaKey);
     if (!destinationKey) return;
+    this.teleportCooldownUntil = this.time.now + TELEPORT_COOLDOWN_MS;
     const destinationArea = this.resolveArea(destinationKey);
     const matchingBasket = destinationArea?.entities.find((e) => e.type === basketType);
-    if (!destinationArea || !matchingBasket) return;
-    this.teleportCooldownUntil = this.time.now + TELEPORT_COOLDOWN_MS;
+    if (!destinationArea || !matchingBasket) {
+      const areaLabel = destinationKey === "sub" ? "Sub" : "Up";
+      this.showToast(`No matching basket in ${areaLabel}`, WARNING_TOAST_COLOR);
+      return;
+    }
     this.enterArea(destinationKey, { x: matchingBasket.x, y: matchingBasket.y });
   }
 
@@ -945,22 +972,23 @@ export class PlayScene extends Phaser.Scene {
     this.activeCheckpointSprite = sprite;
     this.checkpoint = { area: this.currentAreaKey, x: tileX, y: tileY };
     this.tweens.add({ targets: sprite, scale: { from: 1.35, to: 1 }, duration: 260, ease: "Back.easeOut" });
-    this.showCheckpointToast();
+    this.showToast("Checkpoint!");
   }
 
-  /** Brief "Checkpoint!" confirmation above the grid — fades in, holds,
-   * fades out, matching EditorUI.setStatus's shape (a message that clears
-   * itself rather than needing an explicit dismiss) but via tweens instead
-   * of a delayed setText("") swap, since this one also animates in rather
-   * than just appearing. Restarting the fade-out timer on every call (via
-   * killTweensOf) means touching a second checkpoint while the first
-   * toast is still fading doesn't cut it off mid-animation or stack two
-   * competing tweens on the same Text object. */
-  private showCheckpointToast(): void {
-    this.tweens.killTweensOf(this.checkpointToast);
-    this.checkpointToast.setText("Checkpoint!").setAlpha(0);
+  /** Brief above-the-grid confirmation/warning — fades in, holds, fades
+   * out, matching EditorUI.setStatus's shape (a message that clears itself
+   * rather than needing an explicit dismiss) but via tweens instead of a
+   * delayed setText("") swap, since this one also animates in rather than
+   * just appearing. Restarting the fade-out timer on every call (via
+   * killTweensOf) means a second toast firing while the first is still
+   * fading doesn't cut it off mid-animation or stack two competing tweens
+   * on the same Text object. `color` defaults to the "Checkpoint!" green;
+   * pass WARNING_TOAST_COLOR for the "didn't happen" case (see useBasket). */
+  private showToast(message: string, color = "#4ade80"): void {
+    this.tweens.killTweensOf(this.toast);
+    this.toast.setText(message).setColor(color).setAlpha(0);
     this.tweens.add({
-      targets: this.checkpointToast,
+      targets: this.toast,
       alpha: 1,
       duration: 150,
       yoyo: true,

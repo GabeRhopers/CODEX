@@ -2093,6 +2093,40 @@ basket-up from a different level, the editor's Area switcher creating/
 switching/two-tap-deleting a Sub area, and a plain level with no Sub/Up
 areas at all still playing and winning exactly as before.
 
+**Sub/Up feedback + basket tint (2026-08-17).** A follow-up investigation
+into a report that Sub/Up areas were "not working properly," plus a
+request to make Basket (Up) visually distinct from Basket (Down) since
+both rendered with the exact same `magic-basket` texture everywhere — the
+editor palette icon, the placed marker, and the in-game sprite — making
+them genuinely impossible to tell apart at a glance. `UP_BASKET_TINT_COLOR
+= 0xffc266` (a multiply-tint, not a second art asset — see Palette.ts) is
+now applied to Basket (Up) at all three of those render sites, plus the
+Skin Creator's pick-brush grid, and explicitly `.clearTint()`'d the moment
+a real custom skin resolves for it so a player's own uploaded art is never
+involuntarily recolored.
+
+Re-testing the teleport itself end to end (correct-area round trips both
+directions, and standing still on the landing basket for 3+ seconds well
+past `TELEPORT_COOLDOWN_MS`) found the underlying mechanic sound — no
+ping-pong, no missed overlaps. What *is* a genuine gap: `useBasket`
+silently did nothing when the destination area didn't exist yet, or
+existed but had no matching basket placed in it — exactly what happens
+when a level designer places a basket in Main and forgets (or, before
+this pass, couldn't visually tell they'd placed the wrong *type* of) the
+matching one in Sub/Up. Walking onto that basket produced zero feedback —
+no error, no toast, nothing — reading indistinguishably from "the feature
+is broken" even though nothing had actually gone wrong. `PlayScene`'s
+Checkpoint-only toast was generalized into a `showToast(message, color?)`
+usable by both, and `useBasket` now surfaces "No matching basket in
+Sub"/"...in Up" (in a warning color, distinct from Checkpoint's green)
+whenever that happens, debounced by the same `TELEPORT_COOLDOWN_MS`
+window so standing on an inert basket doesn't spam the toast every
+physics frame. Verified via Playwright: a Main-only level with a
+Basket (Down) and no Sub area at all shows the warning exactly once and
+never teleports; a correctly-paired level round-trips in both the
+Sub and Up directions with the new gold tint visibly rendering in Test
+Play (not just the editor).
+
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a plain text link under the Menu's card grid rather than a fifth
 card or a mode nested inside the level Editor — it's a much lighter
