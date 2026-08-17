@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y } from "../config/gameConfig";
 import { ENEMY_EDITOR_SIZE_SCALE, isEnemyType } from "../gameplay/EnemyBehaviors";
-import { EnemySize, EntityType, LevelData, LevelEntity } from "../level/LevelSchema";
+import { EnemySize, EntityType, LevelArea, LevelEntity } from "../level/LevelSchema";
 import { Brush } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
@@ -28,6 +28,10 @@ function tileKey(x: number, y: number): string {
  * a placement is actually a change, and what (if anything) needs clearing
  * first to keep the invariants above, is EditorScene's job, not this
  * class's.
+ *
+ * Bound to one `LevelArea` (Main, Sub, or Up — see "Sub/Up areas" under
+ * Art) at a time, not the whole `LevelData` — EditorScene constructs a
+ * fresh one whenever the area being edited switches.
  */
 export class EntityPlacer {
   private markers = new Map<string, Phaser.GameObjects.Image>();
@@ -39,7 +43,7 @@ export class EntityPlacer {
 
   constructor(
     private readonly scene: Phaser.Scene,
-    private readonly level: LevelData,
+    private readonly level: LevelArea,
     private readonly tileSize: number,
   ) {}
 
@@ -110,6 +114,19 @@ export class EntityPlacer {
       this.markers.delete(key);
     }
     return entity;
+  }
+
+  /** Destroys every marker sprite this instance owns — called on the *old*
+   * EntityPlacer right before EditorScene's rebuildVisualsFromLevel
+   * replaces it with a fresh one bound to a different area (see "Sub/Up
+   * areas" under Art). Without this, switching areas would just abandon
+   * the old instance with its markers still live on the display list —
+   * `this.markers` was never anyone else's reference to clean up, and a
+   * fresh EntityPlacer's own `syncFromLevel` only ever clears *its own*
+   * (empty) map, not a completely different instance's. */
+  destroy(): void {
+    for (const marker of this.markers.values()) marker.destroy();
+    this.markers.clear();
   }
 
   /** Rebuilds marker sprites from an already-populated LevelData (e.g. after Load). */

@@ -75,7 +75,13 @@ first time (previously a one-off copy embedded in a single level) — see
 WebGL crash that pass found and fixed. Also as of 2026-08-17, levels can
 place any number of **Checkpoint** bells — touching one makes it where a
 loss respawns you (for that attempt only; a fresh Test Play always starts
-back at Spawn) — see "Checkpoints" under Art. See the plan doc §9.1
+back at Spawn) — see "Checkpoints" under Art. Also as of 2026-08-17, a
+level can grow up to two extra grids — one **Sub** area and one **Up**
+area, each with the exact same block/marker/enemy/item/decor palette and
+its own independent Background/Music as Main — connected via a **Magic
+Basket** marker that teleports the player between them, landing exactly
+on the paired basket, with score/hearts/buffs/active checkpoint carried
+through — see "Sub/Up areas" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -166,7 +172,20 @@ Open the dev server URL in a browser. Controls:
   moves it rather than adding another, since a level can only ever start
   in one place. **Checkpoint** is the one Marker that breaks that rule — a
   level can have any number of them, same as Enemies/Items/Decor — see
-  "Checkpoints" under Art.
+  "Checkpoints" under Art. **Basket (Down)** and **Basket (Up)** are two
+  more exceptions — see the Area switcher bullet below.
+- **Area switcher** (header, right of Eraser): **Main** / **+Sub** /
+  **+Up** buttons switch which of the level's up-to-three grids you're
+  editing — clicking **+Sub** or **+Up** the first time creates a blank
+  area sized to match Main's current width/height, after which its button
+  reads **Sub**/**Up** (no more "+") and a red **Delete** button appears
+  next to it (two-tap confirm, same shape as Clear) for discarding that
+  area and returning to Main. Each area keeps its own ground layer,
+  entities, undo/redo history, and Background/Music choice — painting or
+  placing in Sub never touches Main or Up. Place a **Basket (Down)** (from
+  the Markers tab) in both Main and Sub, or a **Basket (Up)** in both Main
+  and Up, to connect them — see "Sub/Up areas" under Art for the full
+  teleport story.
 - **Enemy Size** (right "Level Settings" panel, below Clear): **Small /
   Medium / Large** — a placement-time modifier for the next enemy you
   place, not a property of anything currently selected, so it stays put
@@ -195,7 +214,8 @@ Open the dev server URL in a browser. Controls:
   music share this exact same trigger-and-thumbnail-submenu shape — see
   "Skin/background/music libraries" under Art.
 - **Test Play** (button or Space): plays the level you've built. Requires
-  a Spawn and a Goal to be placed first; enemies and items are optional.
+  a Spawn and a Goal to be placed first, in any of Main/Sub/Up (they don't
+  both need to be in the same area); enemies and items are optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
   (press again mid-air for a second jump if you've collected a Feather),
   **Esc** back to wherever you launched Play from (the editor for Test
@@ -209,9 +229,11 @@ Open the dev server URL in a browser. Controls:
   **Checkpoint** bell lights it up (and dims whichever one was lit
   before) and makes it where **R** respawns you after a loss, instead of
   back at Spawn — see "Checkpoints" under Art for why that only applies to
-  retrying the attempt you're on, not a fresh Test Play. A Bounce block
-  launches you noticeably higher than a normal jump; a Brick is just
-  solid ground with a different look. On a
+  retrying the attempt you're on, not a fresh Test Play. Stepping on a
+  **Magic Basket** instantly teleports you to wherever the matching
+  basket sits in the paired area — see "Sub/Up areas" under Art. A Bounce
+  block launches you noticeably higher than a normal jump; a Brick is
+  just solid ground with a different look. On a
   touchscreen, semi-transparent **◀ ▶ ▲** buttons in the corners (see
   "Mobile/touch" below) do the same three things and the win/lose screen
   grows tappable **Restart**/**Next Level** buttons next to its
@@ -1910,6 +1932,121 @@ with every bell back to its default color, confirmed via Playwright
 lands back at Spawn). This is a deliberate scope choice, not a missing
 feature: checkpoints make retrying a hard section less punishing within
 one sitting, they're not a persistent level-completion save.
+
+**Sub/Up areas (2026-08-17).** A level can grow up to two extra grids
+beyond its original one — one **Sub** area and one **Up** area, each with
+the exact same block/marker/enemy/item/decor palette and its own
+independent Background/Music choice as Main (see the Area switcher bullet
+under Controls). Connected via a new project-owner-supplied "magical
+laundry basket" asset (`magic-basket.png`, processed the same flood-fill
+white-background removal + crop-to-bbox + premultiplied-alpha LANCZOS
+downscale as the original caged-sheep Goal art, since this source image
+was also fully opaque) placed as two new marker types, `basket-sub` and
+`basket-up` — touching either one instantly teleports the player to
+wherever the *same-type* basket sits in its paired area (Main⇄Sub or
+Main⇄Up), landing exactly on top of it, like a Mario pipe. Not a
+continuous scrolling space — each area is its own independent screen,
+swapped to discontinuously, matching the reference image's own framing of
+the basket as a teleportation trigger rather than a doorway you walk
+through.
+
+*Data model: zero migration.* `LevelArea` is a new interface holding
+every field that used to belong to "the level" directly (background/
+customBackgroundId/customMusicId/width/height/layers/entities); `LevelData
+extends LevelArea` and adds only genuinely level-wide metadata (id/name/
+timestamps/schemaVersion) plus two new optional fields, `subArea` and
+`upArea`. Main's own data stays at the exact same top-level JSON keys it
+always had — an existing saved level loads and plays identically, with
+`subArea`/`upArea` simply absent — while Sub/Up are purely additive
+(`schemaVersion` bumped to 2 anyway, since `LevelSerializer`'s v1→v2
+ground-skin migration already claims that version number for an unrelated
+reason).
+
+*Editor: an Area switcher, not a mode.* The header grows **Main** /
+**+Sub** / **+Up** buttons (see the Controls bullet above) that swap which
+area `EditorScene` is currently painting/placing into — `TilePainter` and
+`EntityPlacer` were retyped from `LevelData` to `LevelArea` and are
+reconstructed on every switch, `HistoryStack` became one-per-area
+(`Record<AreaKey, HistoryStack>`) so undoing while editing Sub can never
+reach back and undo something done in Main, and creating a Sub/Up area for
+the first time sizes it to Main's *current* width/height (there's no
+independent resizing). A first real bug this surfaced: `EditorScene`'s
+`rebuildVisualsFromLevel` (which runs on every area switch) replaced
+`entityPlacer` with a fresh instance but never destroyed the *old* one's
+marker sprites first — switching Main→Sub→Up left every previous area's
+Spawn/basket/coin icons visually stuck on the grid even though the
+underlying per-area entity data was already correctly separated, caught
+by actually looking at a screenshot rather than trusting the (correct)
+entity-count footer alone. Fixed with a new `EntityPlacer.destroy()`
+called on the outgoing instance before replacing it.
+
+*Marker singletons are scoped per area, not per level.* Rather than
+implementing a true cross-level singleton for Spawn/Goal/Chest (which
+would mean reaching into a currently-not-rendered area's data to erase a
+marker there), `MARKER_TYPES`' one-per-type uniqueness check is scoped to
+whichever area is currently being edited — so Main/Sub/Up can each
+independently hold their own Spawn/Goal/Chest. `PlayScene` picks a
+starting area by checking Main, then Sub, then Up, in that fixed order,
+for whichever one has a `player-spawn` (defaulting to Main if none do,
+matching every pre-existing level's behavior exactly), and Test Play now
+checks for a Spawn *and* a Goal across all three areas rather than just
+Main.
+
+*Gameplay: teardown/rebuild, not a scene restart.* A basket teleport needs
+to swap every area-scoped piece of Play state (ground tilemap+collider,
+background, music, every spawned sprite+zone, enemies) while deliberately
+preserving `stats` (score/hearts/buffs) and the player itself — unlike
+Restart, which reruns the *whole* scene from scratch via `scene.restart()`
+and resets those on purpose. `PlayScene.enterArea(key, landingTile?)` is a
+new manually-orchestrated method that does exactly that; `useBasket`
+(cooldown-guarded — see below) is its only caller besides the one-time
+setup in `create()`. Progress carrying through a teleport falls out of
+this for free: nothing about `stats`/`player` is touched, so a level reads
+as one continuous playthrough across Main/Sub/Up, not three separate
+attempts.
+
+Two real bugs this surfaced, both the same root cause: Phaser reuses one
+singleton scene instance across every relaunch rather than constructing a
+fresh one (already true before this feature — see "Enemy hitboxes &
+sizes"' own `spritesByBrushId` note above), so a field like `groundLayer`
+can be a stale-but-truthy reference to a `TilemapLayer` the *previous* run
+already tore down — and a destroyed `TilemapLayer` nulls out its own
+`.tilemap` property, so `.tilemap.destroy()` alone still throws reading
+`.destroy` off `undefined`. `PlayScene` gained an explicit `areaBuilt`
+flag (reset in `init()`, set at the end of a successful `enterArea`) that
+gates its teardown block and its player-reuse-vs-create branch, found via
+Restart crashing after dying in Sub; the exact same class of bug existed
+in `EditorScene.createGroundLayer()` too (`this.groundLayer?.tilemap
+.destroy()`, missing a second `?.`), found separately via starting a
+*second* fresh level in one browser session, fixed the same way.
+
+*Ping-pong cooldown.* Landing on the destination area's own matching
+basket (an inherent consequence of "land exactly on the paired basket")
+would immediately re-overlap that basket's freshly-rebuilt trigger zone
+and bounce the player straight back, forever. `TELEPORT_COOLDOWN_MS =
+500`, checked/set in `useBasket`, is long enough to clear one overlap
+check after landing but short enough that using a *different* basket
+right after arriving doesn't feel blocked.
+
+*Restart respawns in the checkpoint's own area.* `CheckpointCoord` gained
+an `area: AreaKey` field — a checkpoint touched in Sub is meaningless to
+Main's own Spawn-based starting-area guess. A second real bug: `create()`
+originally always called `enterArea(startingAreaKey())`, which only ever
+consults where *Spawn* lives — so restarting after dying at a Sub
+checkpoint silently reopened in Main instead, confirmed by an actual
+screenshot showing the player back at Main's Spawn with the checkpoint
+bell nowhere in sight. Fixed by preferring `this.checkpoint?.area` when a
+checkpoint was carried forward, falling back to `startingAreaKey()` only
+for a genuinely fresh entry.
+
+Verified end-to-end in a mocked-Drive Playwright session: a basket-sub
+round trip (Main→Sub→confirmed no ping-pong) carrying a coin's worth of
+score across the teleport, a checkpoint activated inside Sub, a Restart
+after a lava death correctly reopening in Sub at that checkpoint (not
+Main's Spawn), a Goal placed only in an Up area reached and won via
+basket-up from a different level, the editor's Area switcher creating/
+switching/two-tap-deleting a Sub area, and a plain level with no Sub/Up
+areas at all still playing and winning exactly as before.
 
 ## Project layout
 

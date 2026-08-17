@@ -1,13 +1,17 @@
 import Phaser from "phaser";
 import { groundFrameAt } from "../level/groundAutotile";
-import { EMPTY_TILE, LevelData } from "../level/LevelSchema";
+import { EMPTY_TILE, LevelArea } from "../level/LevelSchema";
 
 /**
  * The single mutator for the editable ground layer. Every paint/erase in
- * EditorScene goes through TilePainter#paint so that (a) the LevelData
- * grid and the visible TilemapLayer never fall out of sync, and (b)
+ * EditorScene goes through TilePainter#paint so that (a) the area's grid
+ * and the visible TilemapLayer never fall out of sync, and (b)
  * PaintTileCommand can wrap this one function for undo/redo instead of
  * every pointer-handling call site needing to know about tiles.
+ *
+ * Bound to one `LevelArea` (Main, Sub, or Up — see "Sub/Up areas" under
+ * Art) at a time, not the whole `LevelData` — EditorScene constructs a
+ * fresh one whenever the area being edited switches, same as EntityPlacer.
  *
  * Drag debouncing ("only paint when the pointer reaches a new cell") lives
  * in EditorScene, not here — it needs to read the pre-paint tile index at
@@ -16,7 +20,7 @@ import { EMPTY_TILE, LevelData } from "../level/LevelSchema";
  */
 export class TilePainter {
   constructor(
-    private readonly level: LevelData,
+    private readonly level: LevelArea,
     private readonly layer: Phaser.Tilemaps.TilemapLayer,
   ) {}
 

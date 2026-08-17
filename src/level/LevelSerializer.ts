@@ -8,6 +8,7 @@ import {
   GROUND_GRASS_TILE,
   GROUND_SNOW_TILE,
   LAVA_TILE,
+  LevelArea,
   LevelData,
   SCHEMA_VERSION,
   WATER_TILE,
@@ -20,11 +21,23 @@ import {
  * and "level as it is saved" never drift apart from ad hoc stringify calls
  * scattered across the codebase.
  */
+function cloneArea<T extends LevelArea>(area: T): T {
+  return {
+    ...area,
+    layers: { ground: area.layers.ground.map((row) => [...row]) },
+    entities: area.entities.map((e) => ({ ...e })),
+  };
+}
+
+/** Deep-clones every area, not just Main — `...level`'s own shallow spread
+ * would otherwise leave `subArea`/`upArea` (see "Sub/Up areas" under Art)
+ * pointing at the exact same nested objects as the original, defeating
+ * the whole point of a clone for those two areas specifically. */
 export function cloneLevel(level: LevelData): LevelData {
   return {
-    ...level,
-    layers: { ground: level.layers.ground.map((row) => [...row]) },
-    entities: level.entities.map((e) => ({ ...e })),
+    ...cloneArea(level),
+    subArea: level.subArea ? cloneArea(level.subArea) : undefined,
+    upArea: level.upArea ? cloneArea(level.upArea) : undefined,
   };
 }
 

@@ -36,7 +36,7 @@ import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
-import { DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelData } from "../level/LevelSchema";
+import { AreaKey, DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { resolveSkinTextureKeys } from "../skins/skinLoader";
@@ -64,6 +64,15 @@ const CHECKPOINT_ACTIVE_TINT = 0x4ade80;
 // shorter than EditorUI.setStatus's 2500ms since this fires mid-platforming
 // and shouldn't linger over the action.
 const CHECKPOINT_TOAST_MS = 1200;
+// A basket teleport lands the player standing exactly on top of the
+// *destination* area's own matching basket (see enterArea/useBasket) —
+// without a brief cooldown, that new position immediately overlaps that
+// basket's own freshly-rebuilt trigger zone and bounces straight back
+// where they came from, forever. Long enough to clear one overlap check
+// after landing, short enough that using a *different* basket right after
+// arriving (e.g. basket-sub then immediately basket-up, both sitting in
+// Main) never feels blocked.
+const TELEPORT_COOLDOWN_MS = 500;
 
 /** Every item brush's textureKey equals its EntityType (see Palette.ts), so
  * spawning just needs the type list — no separate texture lookup like
@@ -111,9 +120,10 @@ interface WorldPlayContext {
   index: number;
 }
 
-/** Tile coordinates of the checkpoint the player last touched this play
- * session — see restart()/the checkpoint handling in create() for why this
- * rides along in PlaySceneData rather than living only as a private field.
+/** Tile coordinates (plus which area they're in — see "Sub/Up areas"
+ * under Art) of the checkpoint the player last touched this play session
+ * — see restart()/the checkpoint handling in enterArea for why this rides
+ * along in PlaySceneData rather than living only as a private field.
  * `scene.restart()` reruns init()/create() from scratch, discarding every
  * instance field along with it (same reason `world`/`returnScene` are
  * threaded through the same way), so a checkpoint touched before dying
@@ -124,8 +134,22 @@ interface WorldPlayContext {
  * attempt," not persisted across separate play sessions the way the level
  * itself is. */
 interface CheckpointCoord {
+  area: AreaKey;
   x: number;
   y: number;
+}
+
+/** Which area a touched `basket-sub`/`basket-up` teleports *to*, from
+ * wherever it's currently touched — see "Sub/Up areas" under Art. Both
+ * baskets are two-way doors between Main and their own satellite area;
+ * touched anywhere else (e.g. a `basket-sub` placed inside Up, which the
+ * editor doesn't prevent but has no defined pairing) they're simply
+ * inert, hence the `null` case. */
+function basketDestination(basketType: "basket-sub" | "basket-up", from: AreaKey): AreaKey | null {
+  const satellite: AreaKey = basketType === "basket-sub" ? "sub" : "up";
+  if (from === "main") return satellite;
+  if (from === satellite) return "main";
+  return null;
 }
 
 interface PlaySceneData {
@@ -146,7 +170,55 @@ export class PlayScene extends Phaser.Scene {
   private returnScene?: string;
   private levelStorage: StorageAdapter = getLevelStorage();
   private player!: Phaser.Physics.Arcade.Sprite;
+  // Which of Main/Sub/Up the player is currently in — see "Sub/Up areas"
+  // under Art. Set once up front (see startingAreaKey) and again on every
+  // basket teleport (see enterArea); everything below that used to
+  // describe "the level" (groundLayer/background/music/every spawned
+  // sprite) now describes "whichever area is current," torn down and
+  // rebuilt by enterArea each time this changes — unlike a fresh Test
+  // Play/restart, `stats` (score/hearts/buffs) and `player` itself are
+  // deliberately *not* part of that teardown, so a teleport reads as
+  // walking through a door in the same level, not starting over.
+  private currentAreaKey: AreaKey = "main";
+  // Guards enterArea's teardown block (and its player-reuse-vs-create
+  // branch) against a real crash: `scene.restart()` (Restart — see
+  // restart()) reruns init()/create() on this exact same PlayScene
+  // *instance* rather than constructing a fresh one, same reason
+  // spritesByBrushId gets explicitly reset in init() rather than relying
+  // on a field initializer. Left alone, `groundLayer`/`groundCollider`/
+  // `background`/`player` would carry over as stale references to
+  // GameObjects Phaser already destroyed tearing down the previous run —
+  // e.g. a destroyed TilemapLayer nulls out its own `.tilemap` property,
+  // so `this.groundLayer.tilemap.destroy()` throws reading `.destroy` off
+  // `undefined`. Reset to false in init() (a fresh run has nothing real to
+  // tear down, and needs a new player sprite); set true at the end of
+  // enterArea's first successful build. A basket teleport within the same
+  // run (see useBasket) always finds this already true, so it correctly
+  // tears down and reuses the *live* player rather than skipping either.
+  private areaBuilt = false;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
+  // Rebuilt alongside groundLayer on every enterArea call — Phaser doesn't
+  // automatically drop a collider just because the TilemapLayer it
+  // referenced got destroyed, so the old one needs explicit removal
+  // before the new one's added, or the player would end up colliding
+  // against a stale, already-destroyed layer.
+  private groundCollider?: Phaser.Physics.Arcade.Collider;
+  // Every zone (goal/checkpoint/basket/item/chest overlap trigger) spawned
+  // for the *current* area, destroyed and rebuilt alongside everything
+  // else in enterArea — unlike sprites (tracked via spritesByBrushId,
+  // which doubles as the skin-resolve pass's index), zones have no other
+  // reason to be tracked, so this array exists purely for teardown.
+  private areaZones: Phaser.GameObjects.Zone[] = [];
+  // Every overlap Collider returned by physics.add.overlap for the
+  // *current* area (goal/checkpoint/basket/item/chest/enemy), destroyed
+  // explicitly in enterArea's teardown *before* the zones/sprites they
+  // reference — Phaser doesn't automatically drop a Collider just because
+  // one of its two GameObjects gets destroyed (unlike groundCollider,
+  // which is tracked individually since it's rebuilt every time rather
+  // than accumulated), so leaving these behind would have the very next
+  // physics step process a collider referencing an already-destroyed
+  // GameObject.
+  private areaColliders: Phaser.Physics.Arcade.Collider[] = [];
   private input$!: PlayerInputKeys;
   private touch!: TouchControls;
   private wizardAnim: WizardAnimState = createWizardAnimState();
@@ -181,6 +253,8 @@ export class PlayScene extends Phaser.Scene {
   // create() re-derives it from `this.checkpoint` when spawning.
   private activeCheckpointSprite?: Phaser.GameObjects.Image;
   private checkpointToast!: Phaser.GameObjects.Text;
+  // See TELEPORT_COOLDOWN_MS — set by useBasket, checked at its own top.
+  private teleportCooldownUntil = 0;
   // Every goal/chest/enemy/item/decor sprite spawned below, grouped by
   // its Palette brush id (equal to its EntityType for every one of these
   // — only Spawn's id/type differ, "spawn"/"player-spawn", and Spawn has
@@ -224,26 +298,48 @@ export class PlayScene extends Phaser.Scene {
     // level with a skinned enemy — the skin-resolve pass below iterated
     // the first run's now-destroyed sprite right alongside the new one.
     this.spritesByBrushId = new Map();
+    this.areaZones = [];
+    this.areaColliders = [];
+    this.areaBuilt = false;
+  }
+
+  /** Resolves an AreaKey to its actual data — undefined for "sub"/"up"
+   * when the level never got one (see "Sub/Up areas" under Art); "main"
+   * always resolves since it's just `this.level` itself. */
+  private resolveArea(key: AreaKey): LevelArea | undefined {
+    if (key === "sub") return this.level.subArea;
+    if (key === "up") return this.level.upArea;
+    return this.level;
+  }
+
+  /** The area whichever call is currently building — a thin wrapper around
+   * resolveArea for the common "the current one" case, asserting non-null
+   * since enterArea already confirmed the area it's about to switch
+   * `currentAreaKey` to actually exists before calling this. */
+  private area(): LevelArea {
+    return this.resolveArea(this.currentAreaKey)!;
+  }
+
+  /** Which area the level actually starts in — wherever its Spawn marker
+   * is, defaulting to Main when none of the three have one (matching
+   * every pre-Sub/Up-areas level's own behavior exactly). Checked in a
+   * fixed Main-then-Sub-then-Up order: Markers are singleton *per area*,
+   * not a true cross-level singleton (see EditorScene's MARKER_TYPES), so
+   * a level with Spawn placed in more than one area is possible but not
+   * something the editor encourages — this picks one deterministically
+   * rather than crashing or picking arbitrarily. */
+  private startingAreaKey(): AreaKey {
+    const order: AreaKey[] = ["main", "sub", "up"];
+    for (const key of order) {
+      const area = this.resolveArea(key);
+      if (area?.entities.some((e) => e.type === "player-spawn")) return key;
+    }
+    return "main";
   }
 
   create(): void {
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
-    // Bounded to the level's actual width, not the (often wider, to fit the
-    // editor's side panels) canvas — see StaticBackground's docstring.
-    // Async since a "custom" background's texture isn't preloaded by
-    // BootScene like every built-in one is — see backgroundLoader.ts.
-    void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
-      this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
-    });
 
-    // A level with no uploaded music (the common case — there's no
-    // built-in fallback track the way there is for backgrounds) resolves
-    // to null and this is simply a no-op.
-    void resolveLevelMusicKey(this, this.level).then((musicKey) => {
-      if (!musicKey) return;
-      this.music = this.sound.add(musicKey, { loop: true });
-      this.music.play();
-    });
     // Sound objects aren't scene-scoped in Phaser (scene.sound is the
     // game's shared SoundManager), so without this explicit stop+destroy
     // a level's music would keep playing after Esc/win/lose returns to
@@ -251,192 +347,6 @@ export class PlayScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.music?.stop();
       this.music?.destroy();
-    });
-
-    // One Tileset per ground skin, each claiming its own 6-wide gid range
-    // (grass 0-5, desert 6-11, castle 12-17, snow 18-23 — see
-    // groundAutotile.ts) so a level can freely mix all four skins' ground/
-    // brick/bounce/hazard blocks on one layer instead of being locked to
-    // whichever one tileset a level-wide theme used to pick.
-    const map = this.make.tilemap({
-      data: buildRenderGrid(this.level.layers.ground),
-      tileWidth: TILE_SIZE,
-      tileHeight: TILE_SIZE,
-    });
-    const tilesets = GROUND_SKINS.map((skin, i) => {
-      const key = groundTilesetKey(skin);
-      return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
-    });
-    this.groundLayer = map.createLayer(0, tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
-    // Lava isn't solid — standing in it is an instant hazard (see the
-    // per-frame check in update()), not a floor to stand on. Water isn't
-    // solid either, but for the opposite reason: it's swimmable, not a
-    // hazard at all (see the swim handling in update()) — excluded here
-    // via its own WATER_FRAMES set now that it no longer shares
-    // HAZARD_FRAMES with lava.
-    this.groundLayer.setCollisionByExclusion([-1, ...WATER_FRAMES, ...HAZARD_FRAMES]);
-
-    const spawn = this.level.entities.find((e) => e.type === "player-spawn");
-    // A checkpoint touched earlier this same play session (see
-    // CheckpointCoord's docstring) takes priority over the level's own
-    // Spawn marker — that's the entire point of Restart carrying it
-    // forward. Falls back to Spawn (and Spawn's own GRID_ORIGIN_X/
-    // TILE_SIZE fallback for a level with neither) exactly as before this
-    // feature existed when no checkpoint has been touched yet.
-    const respawnTile = this.checkpoint ?? spawn;
-    const spawnX = respawnTile ? GRID_ORIGIN_X + respawnTile.x * TILE_SIZE + TILE_SIZE / 2 : GRID_ORIGIN_X + TILE_SIZE;
-    // Bottom-anchored (see below), so Y is where the feet should land — the
-    // top of the ground tile one row below the spawn/checkpoint tile.
-    const spawnY = GRID_ORIGIN_Y + (respawnTile ? (respawnTile.y + 1) * TILE_SIZE : TILE_SIZE);
-
-    // Left/right only (checkUp/checkDown false below) — the player and
-    // enemies must not walk/patrol past where the level's ground and
-    // background actually end (see StaticBackground's mask, sized to
-    // exactly this same `level.width * TILE_SIZE`), but jumping above the
-    // top or falling past the bottom are both already meaningful on their
-    // own (a normal jump arc, and the fall-off-the-level loss check below)
-    // and must stay unobstructed. y/height are irrelevant with both checks
-    // off; kept generous only so that stays true regardless.
-    const levelLeftX = GRID_ORIGIN_X;
-    const levelRightX = GRID_ORIGIN_X + this.level.width * TILE_SIZE;
-    this.physics.world.setBounds(levelLeftX, -100000, levelRightX - levelLeftX, 200000, true, true, false, false);
-
-    this.player = this.physics.add.sprite(spawnX, spawnY, "wizard-idle");
-    this.player.setOrigin(0.5, 1);
-    applyWizardTexture(this.player, "wizard-idle");
-    this.player.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, this.groundLayer, (_player, tile) => this.onGroundCollide(tile as Phaser.Tilemaps.Tile));
-
-    const goal = this.level.entities.find((e) => e.type === "goal");
-    if (goal) {
-      const goalX = GRID_ORIGIN_X + goal.x * TILE_SIZE + TILE_SIZE / 2;
-      const goalY = GRID_ORIGIN_Y + goal.y * TILE_SIZE + TILE_SIZE / 2;
-      const goalSprite = this.add.image(goalX, goalY, "goal-portal").setDepth(5);
-      this.trackSprite("goal", goalSprite);
-      this.tweens.add({
-        targets: goalSprite,
-        scale: { from: 1, to: 1.08 },
-        yoyo: true,
-        repeat: -1,
-        duration: 900,
-        ease: "Sine.easeInOut",
-      });
-      const goalZone = this.add.zone(goalX, goalY, TILE_SIZE, TILE_SIZE);
-      this.physics.add.existing(goalZone, true);
-      this.physics.add.overlap(this.player, goalZone, () => this.onWin());
-    }
-
-    // Checkpoints have no per-level instance limit, unlike Spawn/Goal/Chest
-    // — see Palette.ts's docstring on why Checkpoint is the one Marker
-    // that behaves like Enemies/Items/Decor below rather than its Marker
-    // siblings. Each spawns its own persistent sprite (unlike an item, a
-    // checkpoint is never destroyed on touch — it stays visible, and stays
-    // touchable, so backtracking to an earlier one can reactivate it) plus
-    // an overlap zone that calls activateCheckpoint. A checkpoint whose
-    // tile matches `this.checkpoint` (the one carried forward by restart())
-    // starts already activated, so respawning after a death shows the
-    // right bell lit up without needing the player to touch it again.
-    for (const entity of this.level.entities.filter((e) => e.type === "checkpoint")) {
-      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
-      const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
-      const bell = this.add.image(x, y, "checkpoint-bell").setDepth(5);
-      this.trackSprite("checkpoint", bell);
-      const alreadyActive = this.checkpoint?.x === entity.x && this.checkpoint?.y === entity.y;
-      if (alreadyActive) {
-        bell.setTint(CHECKPOINT_ACTIVE_TINT);
-        this.activeCheckpointSprite = bell;
-      }
-      const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
-      this.physics.add.existing(zone, true);
-      this.physics.add.overlap(this.player, zone, () => this.activateCheckpoint(entity.x, entity.y, bell));
-    }
-
-    // Enemies/Items/Decor have no per-level instance limit (see Palette.ts),
-    // so every matching entity spawns, not just the first — unlike the
-    // Markers below (player-spawn/goal/chest), which EntityPlacer still
-    // keeps singleton and so are looked up with `.find`.
-    for (const def of ENEMY_DEFS) {
-      for (const entity of this.level.entities.filter((e) => e.type === def.type)) {
-        const size = entity.size ?? DEFAULT_ENEMY_SIZE;
-        const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
-        applyEnemySize(sprite, def.type, size);
-        // Stashed on the sprite itself (Phaser's own GameObject data store)
-        // rather than a parallel map — the skin-resolve pass below needs
-        // to know each individual sprite's own size again after a skin
-        // swap, and spritesByBrushId only groups by brush id/type, losing
-        // which instance had which size once two same-type enemies could
-        // differ (this feature's whole point).
-        sprite.setData("enemySize", size);
-        this.trackSprite(def.type, sprite);
-        // Clamped to the level's own left/right edges (not just its spawn
-        // point) — see createGhostState's docstring — so an enemy placed
-        // near an edge patrols back in, the same edge the player's own
-        // setCollideWorldBounds above is held to.
-        const state = createGhostState(sprite, levelLeftX, levelRightX);
-        this.enemies.push({ sprite, state, stompable: def.stompable });
-        this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable));
-      }
-    }
-
-    for (const type of ITEM_TYPES) {
-      for (const entity of this.level.entities.filter((e) => e.type === type)) {
-        const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
-        const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
-        // textureKey === entityType for every item brush (see Palette.ts).
-        const icon = this.add.image(x, y, type).setDepth(5);
-        this.trackSprite(type, icon);
-        this.tweens.add({ targets: icon, y: y - 6, yoyo: true, repeat: -1, duration: 700, ease: "Sine.easeInOut" });
-        const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
-        this.physics.add.existing(zone, true);
-        this.physics.add.overlap(this.player, zone, () => this.collectItem(type, icon, zone));
-      }
-    }
-
-    const chestEntity = this.level.entities.find((e) => e.type === "chest");
-    if (chestEntity) {
-      const x = GRID_ORIGIN_X + chestEntity.x * TILE_SIZE + TILE_SIZE / 2;
-      const y = GRID_ORIGIN_Y + chestEntity.y * TILE_SIZE + TILE_SIZE / 2;
-      const chestSprite = this.add.image(x, y, "chest").setDepth(5);
-      this.trackSprite("chest", chestSprite);
-      const chestZone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
-      this.physics.add.existing(chestZone, true);
-      this.physics.add.overlap(this.player, chestZone, () => this.tryOpenChest(chestSprite, chestZone));
-    }
-
-    // Decoration entities (see DECOR_TYPES) — plain static images, no
-    // physics body, no overlap: purely visual, same as they look in the
-    // editor. Like Enemies/Items above, every placed instance spawns.
-    for (const type of DECOR_TYPES) {
-      for (const entity of this.level.entities.filter((e) => e.type === type)) {
-        const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
-        const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
-        this.trackSprite(type, this.add.image(x, y, type).setDepth(3));
-      }
-    }
-
-    // Custom skins (see "Custom skins" under Art) apply to gameplay too,
-    // not just the editor — same async "pop in a moment later" tolerance
-    // as the background/music resolves above; every sprite tracked via
-    // trackSprite above has its texture swapped in place once this
-    // resolves. Also re-normalizes display size (and, for enemies, the
-    // physics body) after the swap — a skin can be uploaded at any
-    // resolution up to skinUpload.ts's 128px cap, and setTexture alone
-    // doesn't touch a sprite's current scale, so without this a skinned
-    // enemy/item/decor/goal would render at its *uploaded* image's own
-    // native size instead of a tile-appropriate one (a real bug: found
-    // while verifying skins actually apply correctly in Test Play, not
-    // just in the editor's own palette/grid preview).
-    void resolveSkinTextureKeys(this).then((skinTextureKeys) => {
-      for (const [brushId, sprites] of this.spritesByBrushId) {
-        const key = skinTextureKeys.get(brushId);
-        if (!key) continue;
-        for (const sprite of sprites) {
-          sprite.setTexture(key);
-          const enemySize = sprite.getData("enemySize") as EnemySize | undefined;
-          if (enemySize) applyEnemySize(sprite as Phaser.Physics.Arcade.Sprite, brushId as EntityType, enemySize);
-          else applyDefaultSkinSize(sprite);
-        }
-      }
     });
 
     this.input$ = createPlayerInput(this);
@@ -521,6 +431,337 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
 
     new VolumeControl(this, this.scale.width / 2 - 90, 20, 180, 30);
+
+    // A checkpoint carried forward by Restart (see CheckpointCoord's
+    // docstring) wins outright over startingAreaKey's own Spawn-based
+    // guess — that guess only exists for a *fresh* entry (Test Play/
+    // World/Template/Next Level), which never carries a checkpoint at
+    // all. Without this, restarting after dying in Sub/Up would silently
+    // reopen in whichever area Spawn happens to live in (Main, almost
+    // always) instead of the area the checkpoint itself remembers —
+    // enterArea's own `checkpointHere` resolution only ever finds a match
+    // once `currentAreaKey` is already set to that same area.
+    this.enterArea(this.checkpoint?.area ?? this.startingAreaKey());
+  }
+
+  /** Tears down (if anything's currently built — a no-op the very first
+   * call, from create() above) and rebuilds every area-scoped piece of
+   * Play state for `key`: background, music, ground tilemap+collider,
+   * player position, and every entity sprite/zone (goal/checkpoints/
+   * baskets/enemies/items/chest/decor). What deliberately survives a call
+   * to this — `stats`/`player` itself/`checkpoint` — is exactly what makes
+   * a basket teleport read as walking through a door in the same level
+   * rather than starting over; see currentAreaKey's docstring.
+   *
+   * `landingTile`, when given (a basket teleport — see useBasket), places
+   * the player there instead of resolving this area's own checkpoint/
+   * Spawn — that resolution only makes sense for "where do I start in
+   * this area fresh," not "where do I arrive mid-level." */
+  private enterArea(key: AreaKey, landingTile?: { x: number; y: number }): void {
+    const area = this.resolveArea(key);
+    if (!area) return; // defensive; every caller already confirmed key exists
+
+    // Colliders/overlaps are destroyed *before* the zones/sprites/enemies
+    // they reference (see areaColliders' own docstring), then everything
+    // else area-scoped follows. groundCollider/background are tracked
+    // individually (rebuilt fresh every call, not accumulated); the rest
+    // are cleared arrays/maps. Guarded by areaBuilt (see its own
+    // docstring) — skipped on the very first call after a fresh create()
+    // (a plain Play launch, or Restart's scene.restart()), when
+    // groundLayer/groundCollider/background/player are either unset or
+    // stale references to GameObjects the *previous* run already tore
+    // down, not anything this call is responsible for destroying itself.
+    if (this.areaBuilt) {
+      for (const collider of this.areaColliders) collider.destroy();
+      this.areaColliders = [];
+      this.groundCollider?.destroy();
+      this.groundCollider = undefined;
+      this.background?.destroy();
+      this.background = undefined;
+      this.groundLayer.tilemap.destroy();
+      for (const zone of this.areaZones) zone.destroy();
+      this.areaZones = [];
+      for (const sprites of this.spritesByBrushId.values()) {
+        for (const sprite of sprites) sprite.destroy();
+      }
+      this.spritesByBrushId = new Map();
+      this.enemies = [];
+      this.activeCheckpointSprite = undefined;
+    }
+
+    this.currentAreaKey = key;
+
+    // Bounded to the area's actual width, not the (often wider, to fit the
+    // editor's side panels) canvas — see StaticBackground's docstring.
+    // Async since a "custom" background's texture isn't preloaded by
+    // BootScene like every built-in one is — see backgroundLoader.ts.
+    // Guarded against a second enterArea landing before this resolves
+    // (e.g. basket-sub then immediately basket-up) overwriting the
+    // *newer* area's background with a stale result.
+    void resolveBackgroundTextureKey(this, area).then((textureKey) => {
+      if (this.currentAreaKey !== key) return;
+      this.background = new StaticBackground(this, area.width * TILE_SIZE, textureKey);
+    });
+
+    // A level with no uploaded music (the common case — there's no
+    // built-in fallback track the way there is for backgrounds) resolves
+    // to null and this is simply a no-op.
+    this.music?.stop();
+    this.music?.destroy();
+    this.music = undefined;
+    void resolveLevelMusicKey(this, area).then((musicKey) => {
+      if (this.currentAreaKey !== key || !musicKey) return;
+      this.music = this.sound.add(musicKey, { loop: true });
+      this.music.play();
+    });
+
+    // One Tileset per ground skin, each claiming its own 6-wide gid range
+    // (grass 0-5, desert 6-11, castle 12-17, snow 18-23 — see
+    // groundAutotile.ts) so an area can freely mix all four skins' ground/
+    // brick/bounce/hazard blocks on one layer instead of being locked to
+    // whichever one tileset a level-wide theme used to pick.
+    const map = this.make.tilemap({
+      data: buildRenderGrid(area.layers.ground),
+      tileWidth: TILE_SIZE,
+      tileHeight: TILE_SIZE,
+    });
+    const tilesets = GROUND_SKINS.map((skin, i) => {
+      const tilesetKey = groundTilesetKey(skin);
+      return map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
+    });
+    this.groundLayer = map.createLayer(0, tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
+    // Lava isn't solid — standing in it is an instant hazard (see the
+    // per-frame check in update()), not a floor to stand on. Water isn't
+    // solid either, but for the opposite reason: it's swimmable, not a
+    // hazard at all (see the swim handling in update()) — excluded here
+    // via its own WATER_FRAMES set now that it no longer shares
+    // HAZARD_FRAMES with lava.
+    this.groundLayer.setCollisionByExclusion([-1, ...WATER_FRAMES, ...HAZARD_FRAMES]);
+
+    const spawn = area.entities.find((e) => e.type === "player-spawn");
+    // A checkpoint touched earlier this same play session, in this same
+    // area (see CheckpointCoord's docstring — a checkpoint touched in a
+    // *different* area has no bearing on where this one starts), takes
+    // priority over the area's own Spawn marker when there's no explicit
+    // `landingTile` (a basket teleport, which always wins outright).
+    const checkpointHere = landingTile ? undefined : this.checkpoint?.area === key ? this.checkpoint : undefined;
+    const respawnTile = landingTile ?? checkpointHere ?? spawn;
+    const spawnX = respawnTile ? GRID_ORIGIN_X + respawnTile.x * TILE_SIZE + TILE_SIZE / 2 : GRID_ORIGIN_X + TILE_SIZE;
+    // Bottom-anchored (see below), so Y is where the feet should land — the
+    // top of the ground tile one row below the spawn/checkpoint/landing tile.
+    const spawnY = GRID_ORIGIN_Y + (respawnTile ? (respawnTile.y + 1) * TILE_SIZE : TILE_SIZE);
+
+    // Left/right only (checkUp/checkDown false below) — the player and
+    // enemies must not walk/patrol past where the area's ground and
+    // background actually end (see StaticBackground's mask, sized to
+    // exactly this same `area.width * TILE_SIZE`), but jumping above the
+    // top or falling past the bottom are both already meaningful on their
+    // own (a normal jump arc, and the fall-off-the-area loss check in
+    // update()) and must stay unobstructed. y/height are irrelevant with
+    // both checks off; kept generous only so that stays true regardless.
+    const areaLeftX = GRID_ORIGIN_X;
+    const areaRightX = GRID_ORIGIN_X + area.width * TILE_SIZE;
+    this.physics.world.setBounds(areaLeftX, -100000, areaRightX - areaLeftX, 200000, true, true, false, false);
+
+    if (this.areaBuilt) {
+      this.player.setPosition(spawnX, spawnY);
+      (this.player.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+    } else {
+      this.player = this.physics.add.sprite(spawnX, spawnY, "wizard-idle");
+      this.player.setOrigin(0.5, 1);
+      applyWizardTexture(this.player, "wizard-idle");
+      this.player.setCollideWorldBounds(true);
+    }
+    this.groundCollider = this.physics.add.collider(this.player, this.groundLayer, (_player, tile) =>
+      this.onGroundCollide(tile as Phaser.Tilemaps.Tile),
+    );
+
+    const goal = area.entities.find((e) => e.type === "goal");
+    if (goal) {
+      const goalX = GRID_ORIGIN_X + goal.x * TILE_SIZE + TILE_SIZE / 2;
+      const goalY = GRID_ORIGIN_Y + goal.y * TILE_SIZE + TILE_SIZE / 2;
+      const goalSprite = this.add.image(goalX, goalY, "goal-portal").setDepth(5);
+      this.trackSprite("goal", goalSprite);
+      this.tweens.add({
+        targets: goalSprite,
+        scale: { from: 1, to: 1.08 },
+        yoyo: true,
+        repeat: -1,
+        duration: 900,
+        ease: "Sine.easeInOut",
+      });
+      const goalZone = this.add.zone(goalX, goalY, TILE_SIZE, TILE_SIZE);
+      this.physics.add.existing(goalZone, true);
+      this.areaZones.push(goalZone);
+      this.areaColliders.push(this.physics.add.overlap(this.player, goalZone, () => this.onWin()));
+    }
+
+    // Checkpoints have no per-level instance limit, unlike Spawn/Goal/Chest
+    // — see Palette.ts's docstring on why Checkpoint is the one Marker
+    // that behaves like Enemies/Items/Decor below rather than its Marker
+    // siblings. Each spawns its own persistent sprite (unlike an item, a
+    // checkpoint is never destroyed on touch — it stays visible, and stays
+    // touchable, so backtracking to an earlier one can reactivate it) plus
+    // an overlap zone that calls activateCheckpoint. A checkpoint whose
+    // tile matches `checkpointHere` (this area's slice of `this.checkpoint`
+    // — see above) starts already activated, so respawning after a death,
+    // or teleporting back into this area, shows the right bell lit up
+    // without needing the player to touch it again.
+    for (const entity of area.entities.filter((e) => e.type === "checkpoint")) {
+      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+      const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
+      const bell = this.add.image(x, y, "checkpoint-bell").setDepth(5);
+      this.trackSprite("checkpoint", bell);
+      const alreadyActive = checkpointHere?.x === entity.x && checkpointHere?.y === entity.y;
+      if (alreadyActive) {
+        bell.setTint(CHECKPOINT_ACTIVE_TINT);
+        this.activeCheckpointSprite = bell;
+      }
+      const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+      this.physics.add.existing(zone, true);
+      this.areaZones.push(zone);
+      this.areaColliders.push(this.physics.add.overlap(this.player, zone, () => this.activateCheckpoint(entity.x, entity.y, bell)));
+    }
+
+    // Baskets (see "Sub/Up areas" under Art) — two-way teleport triggers
+    // between Main and their own satellite area. Both types render with
+    // the same texture (see Palette.ts) and only differ in which area they
+    // pair with (see basketDestination/useBasket).
+    for (const basketType of ["basket-sub", "basket-up"] as const) {
+      for (const entity of area.entities.filter((e) => e.type === basketType)) {
+        const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+        const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
+        const basketSprite = this.add.image(x, y, "magic-basket").setDepth(5);
+        this.trackSprite(basketType, basketSprite);
+        this.tweens.add({
+          targets: basketSprite,
+          scale: { from: 1, to: 1.06 },
+          yoyo: true,
+          repeat: -1,
+          duration: 850,
+          ease: "Sine.easeInOut",
+        });
+        const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+        this.physics.add.existing(zone, true);
+        this.areaZones.push(zone);
+        this.areaColliders.push(this.physics.add.overlap(this.player, zone, () => this.useBasket(basketType)));
+      }
+    }
+
+    // Enemies/Items/Decor have no per-level instance limit (see Palette.ts),
+    // so every matching entity spawns, not just the first — unlike the
+    // Markers above (player-spawn/goal/chest/checkpoint/basket), which
+    // EntityPlacer keeps singleton-per-area and so are looked up with
+    // `.find` (except Checkpoint/basket, which are exceptions to that too
+    // — see Palette.ts).
+    for (const def of ENEMY_DEFS) {
+      for (const entity of area.entities.filter((e) => e.type === def.type)) {
+        const size = entity.size ?? DEFAULT_ENEMY_SIZE;
+        const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
+        applyEnemySize(sprite, def.type, size);
+        // Stashed on the sprite itself (Phaser's own GameObject data store)
+        // rather than a parallel map — the skin-resolve pass below needs
+        // to know each individual sprite's own size again after a skin
+        // swap, and spritesByBrushId only groups by brush id/type, losing
+        // which instance had which size once two same-type enemies could
+        // differ (this feature's whole point).
+        sprite.setData("enemySize", size);
+        this.trackSprite(def.type, sprite);
+        // Clamped to the area's own left/right edges (not just its spawn
+        // point) — see createGhostState's docstring — so an enemy placed
+        // near an edge patrols back in, the same edge the player's own
+        // setCollideWorldBounds above is held to.
+        const state = createGhostState(sprite, areaLeftX, areaRightX);
+        this.enemies.push({ sprite, state, stompable: def.stompable });
+        this.areaColliders.push(this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable)));
+      }
+    }
+
+    for (const type of ITEM_TYPES) {
+      for (const entity of area.entities.filter((e) => e.type === type)) {
+        const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+        const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
+        // textureKey === entityType for every item brush (see Palette.ts).
+        const icon = this.add.image(x, y, type).setDepth(5);
+        this.trackSprite(type, icon);
+        this.tweens.add({ targets: icon, y: y - 6, yoyo: true, repeat: -1, duration: 700, ease: "Sine.easeInOut" });
+        const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+        this.physics.add.existing(zone, true);
+        this.areaZones.push(zone);
+        this.areaColliders.push(this.physics.add.overlap(this.player, zone, () => this.collectItem(type, icon, zone)));
+      }
+    }
+
+    const chestEntity = area.entities.find((e) => e.type === "chest");
+    if (chestEntity) {
+      const x = GRID_ORIGIN_X + chestEntity.x * TILE_SIZE + TILE_SIZE / 2;
+      const y = GRID_ORIGIN_Y + chestEntity.y * TILE_SIZE + TILE_SIZE / 2;
+      const chestSprite = this.add.image(x, y, "chest").setDepth(5);
+      this.trackSprite("chest", chestSprite);
+      const chestZone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+      this.physics.add.existing(chestZone, true);
+      this.areaZones.push(chestZone);
+      this.areaColliders.push(this.physics.add.overlap(this.player, chestZone, () => this.tryOpenChest(chestSprite, chestZone)));
+    }
+
+    // Decoration entities (see DECOR_TYPES) — plain static images, no
+    // physics body, no overlap: purely visual, same as they look in the
+    // editor. Like Enemies/Items above, every placed instance spawns.
+    for (const type of DECOR_TYPES) {
+      for (const entity of area.entities.filter((e) => e.type === type)) {
+        const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+        const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
+        this.trackSprite(type, this.add.image(x, y, type).setDepth(3));
+      }
+    }
+
+    // Custom skins (see "Custom skins" under Art) apply to gameplay too,
+    // not just the editor — same async "pop in a moment later" tolerance
+    // as the background/music resolves above; every sprite tracked via
+    // trackSprite above has its texture swapped in place once this
+    // resolves. Also re-normalizes display size (and, for enemies, the
+    // physics body) after the swap — a skin can be uploaded at any
+    // resolution up to skinUpload.ts's 128px cap, and setTexture alone
+    // doesn't touch a sprite's current scale, so without this a skinned
+    // enemy/item/decor/goal would render at its *uploaded* image's own
+    // native size instead of a tile-appropriate one (a real bug: found
+    // while verifying skins actually apply correctly in Test Play, not
+    // just in the editor's own palette/grid preview). Guarded the same way
+    // as background/music above against a stale result landing after the
+    // player has already teleported elsewhere.
+    void resolveSkinTextureKeys(this).then((skinTextureKeys) => {
+      if (this.currentAreaKey !== key) return;
+      for (const [brushId, sprites] of this.spritesByBrushId) {
+        const skinKey = skinTextureKeys.get(brushId);
+        if (!skinKey) continue;
+        for (const sprite of sprites) {
+          sprite.setTexture(skinKey);
+          const enemySize = sprite.getData("enemySize") as EnemySize | undefined;
+          if (enemySize) applyEnemySize(sprite as Phaser.Physics.Arcade.Sprite, brushId as EntityType, enemySize);
+          else applyDefaultSkinSize(sprite);
+        }
+      }
+    });
+
+    this.areaBuilt = true;
+  }
+
+  /** Called on overlap with a basket zone (see the loop above) — teleports
+   * to wherever the same-type basket sits in the paired area, through the
+   * cooldown guard described at TELEPORT_COOLDOWN_MS. Silently does
+   * nothing if the paired area doesn't exist yet, or exists but has no
+   * matching basket placed in it (see "Sub/Up areas" under Art) — matching
+   * this codebase's established "gracefully degrade, never crash"
+   * convention elsewhere (e.g. resolveStaticBackground's own fallback). */
+  private useBasket(basketType: "basket-sub" | "basket-up"): void {
+    if (this.time.now < this.teleportCooldownUntil) return;
+    const destinationKey = basketDestination(basketType, this.currentAreaKey);
+    if (!destinationKey) return;
+    const destinationArea = this.resolveArea(destinationKey);
+    const matchingBasket = destinationArea?.entities.find((e) => e.type === basketType);
+    if (!destinationArea || !matchingBasket) return;
+    this.teleportCooldownUntil = this.time.now + TELEPORT_COOLDOWN_MS;
+    this.enterArea(destinationKey, { x: matchingBasket.x, y: matchingBasket.y });
   }
 
   /** "Editor"/"Worlds"/"Templates" for the top-left back button; see
@@ -611,7 +852,7 @@ export class PlayScene extends Phaser.Scene {
     // enemy/hazard touch — Hearts and Shield don't apply here, since
     // "bounce back and keep playing" doesn't fit falling the way it fits
     // an on-screen hit.
-    if (this.player.y > GRID_ORIGIN_Y + this.level.height * TILE_SIZE + 200) {
+    if (this.player.y > GRID_ORIGIN_Y + this.area().height * TILE_SIZE + 200) {
       this.onLose();
     }
   }
@@ -698,11 +939,11 @@ export class PlayScene extends Phaser.Scene {
    * concern collectItem/tryOpenChest handle via `.active`, just keyed on
    * position here since a checkpoint's own sprite never gets destroyed. */
   private activateCheckpoint(tileX: number, tileY: number, sprite: Phaser.GameObjects.Image): void {
-    if (this.checkpoint?.x === tileX && this.checkpoint?.y === tileY) return;
+    if (this.checkpoint?.area === this.currentAreaKey && this.checkpoint?.x === tileX && this.checkpoint?.y === tileY) return;
     this.activeCheckpointSprite?.clearTint();
     sprite.setTint(CHECKPOINT_ACTIVE_TINT);
     this.activeCheckpointSprite = sprite;
-    this.checkpoint = { x: tileX, y: tileY };
+    this.checkpoint = { area: this.currentAreaKey, x: tileX, y: tileY };
     this.tweens.add({ targets: sprite, scale: { from: 1.35, to: 1 }, duration: 260, ease: "Back.easeOut" });
     this.showCheckpointToast();
   }

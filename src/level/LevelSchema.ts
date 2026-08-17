@@ -33,10 +33,20 @@ export const LAVA_TILE = 9;
 
 export const SCHEMA_VERSION = 2 as const;
 
+/** Which of a level's up-to-three grids something refers to — see
+ * "Sub/Up areas" under Art. "main" always exists; "sub"/"up" may not.
+ * Shared between EditorScene/EditorUI (which area is being edited) and
+ * PlayScene (which area is currently being played) rather than each
+ * defining its own copy — both are really talking about the same concept
+ * defined right here alongside LevelArea. */
+export type AreaKey = "main" | "sub" | "up";
+
 export type EntityType =
   | "player-spawn"
   | "goal"
   | "checkpoint"
+  | "basket-sub"
+  | "basket-up"
   | "enemy-ghost"
   | "enemy-spike"
   | "enemy-bat"
@@ -76,18 +86,30 @@ export interface LevelEntity {
   size?: EnemySize;
 }
 
-export interface LevelData {
-  schemaVersion: typeof SCHEMA_VERSION;
-  id: string;
-  name: string;
-  /** Which static background image shows behind the level (see
+/**
+ * One playable grid's worth of level content — a ground layer, its
+ * entities, and its own background/music choice. As of 2026-08-17 a level
+ * can have up to three of these: the Main area (still the top-level
+ * `width`/`height`/`layers`/`entities`/etc. fields on `LevelData` itself,
+ * unchanged since before areas existed — `LevelData extends LevelArea`
+ * below rather than nesting Main under its own key, specifically so an
+ * existing saved level's JSON needs zero migration) plus two optional
+ * satellite areas, `subArea` and `upArea` (see LevelData). Every area
+ * shares the exact same editing tools — the same block/marker/enemy/item/
+ * decor palette, its own independent Background/Music choice — so
+ * `LevelArea` deliberately mirrors every per-area field `LevelData` used
+ * to have all to itself; only the level-wide metadata (id/name/
+ * timestamps/schemaVersion) stays exclusively on `LevelData`.
+ */
+export interface LevelArea {
+  /** Which static background image shows behind this area (see
    * staticBackgrounds.ts). Optional so old saved levels (and
    * hand-authored template levels) with no field yet fall back to the
    * default via `resolveStaticBackground`, rather than needing a
    * migration. */
   background?: StaticBackgroundId;
   /** Which entry of the shared background library (backgrounds.json — see
-   * backgrounds/backgroundLibraryStorage.ts) this level uses, present only
+   * backgrounds/backgroundLibraryStorage.ts) this area uses, present only
    * when `background === "custom"`. As of 2026-08-16, uploading a
    * background adds it to a library shared across every profile and every
    * level (the same "upload once, reuse everywhere, pick from a submenu
@@ -103,9 +125,9 @@ export interface LevelData {
    * instead; nothing writes this field anymore. */
   customBackgroundData?: string;
   /** Which entry of the shared music library (music.json — see
-   * music/musicLibraryStorage.ts) this level plays, present only when the
-   * level has music (there's no built-in pool the way there is for
-   * backgrounds; a level with none of these fields just plays silently).
+   * music/musicLibraryStorage.ts) this area plays, present only when it
+   * has music (there's no built-in pool the way there is for
+   * backgrounds; an area with none of these fields just plays silently).
    * Same shared-library treatment as customBackgroundId above, replacing
    * the old per-level embedded copy — see musicLoader.ts. */
   customMusicId?: string;
@@ -115,15 +137,33 @@ export interface LevelData {
    * see musicLoader.ts. Nothing writes these fields anymore. */
   customMusicData?: string;
   customMusicName?: string;
-  createdAt: string;
-  updatedAt: string;
   width: number;
   height: number;
-  tileSize: number;
   layers: {
     ground: number[][];
   };
   entities: LevelEntity[];
+}
+
+export interface LevelData extends LevelArea {
+  schemaVersion: typeof SCHEMA_VERSION;
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  tileSize: number;
+  /** A second area "below" Main, reached via a `basket-sub` marker placed
+   * in each — touching either one teleports the player to wherever the
+   * other one sits, and back. Undefined until the editor's Area switcher
+   * creates one (capped at this single optional field, matching the
+   * "limited to 1 sub area" scope — there's no array of areas to manage).
+   * See "Sub/Up areas" under Art for the full teleport/pairing story. */
+  subArea?: LevelArea;
+  /** Same shape and story as `subArea`, but reached via `basket-up`
+   * instead — "above" Main only by name/flavor (a level with both areas
+   * doesn't render Sub/Main/Up as one continuous stacked space; each is
+   * its own screen, swapped to instantly on touch, not scrolled into). */
+  upArea?: LevelArea;
 }
 
 export interface LevelSummary {
@@ -151,6 +191,22 @@ export function createEmptyLevel(name = "Untitled Level", width = GRID_COLS, hei
     tileSize: TILE_SIZE,
     layers: {
       ground: createEmptyGrid(clampedWidth, clampedHeight),
+    },
+    entities: [],
+  };
+}
+
+/** A blank Sub/Up area — always sized to match Main's own current
+ * `width`/`height` (areas don't get independent sizing; see "Sub/Up
+ * areas" under Art) rather than the GRID_COLS/GRID_ROWS default
+ * `createEmptyLevel` itself falls back to, since Main may well have
+ * already been resized by the time a Sub/Up area is first created. */
+export function createEmptyArea(width: number, height: number): LevelArea {
+  return {
+    width,
+    height,
+    layers: {
+      ground: createEmptyGrid(width, height),
     },
     entities: [],
   };

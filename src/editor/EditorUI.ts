@@ -9,7 +9,7 @@ import {
   RIGHT_PANEL_WIDTH,
   TILE_SIZE,
 } from "../config/gameConfig";
-import { EnemySize } from "../level/LevelSchema";
+import { AreaKey, EnemySize } from "../level/LevelSchema";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { AssetPickerItem, AssetPickerMenu } from "./AssetPickerMenu";
 import { LevelNameInput } from "./LevelNameInput";
@@ -27,6 +27,16 @@ export interface EditorUICallbacks {
   onRenameLevel: (name: string) => void;
   onToggleEraser: () => void;
   onSelectSize: (size: EnemySize) => void;
+
+  // Sub/Up areas (see "Sub/Up areas" under Art): switching to "sub"/"up"
+  // when that area doesn't exist yet creates it (a blank grid matching
+  // Main's own size) as part of switching, rather than needing a separate
+  // "create" step — EditorScene's onSelectArea handles both. Deleting is
+  // scoped to whichever area is currently selected (never "main", see the
+  // Delete button's own visibility in setAreaState) and needs no argument
+  // for the same reason.
+  onSelectArea: (key: AreaKey) => void;
+  onDeleteArea: () => void;
 
   // Skin/background/music each follow the same shape now — see
   // AssetPickerMenu: an "open" hook that resolves and pushes the
@@ -190,6 +200,13 @@ export class EditorUI {
   private skinPicker!: AssetPickerMenu;
   private eraserButton!: PanelButton;
   private clearButton!: PanelButton;
+  private areaButtons = new Map<AreaKey, PanelButton>();
+  private deleteAreaButton!: PanelButton;
+  private deleteAreaArmed = false;
+  private deleteAreaArmTimer?: Phaser.Time.TimerEvent;
+  private currentAreaKey: AreaKey = "main";
+  private subAreaExists = false;
+  private upAreaExists = false;
   private sizeButtons = new Map<EnemySize, PanelButton>();
   private currentSize: EnemySize = "medium";
   private iconGrid: Phaser.GameObjects.Container;
@@ -251,6 +268,30 @@ export class EditorUI {
     this.wireHoverStyles(addHeaderButton("Redo", 56, () => this.callbacks.onRedo()).bg);
     this.eraserButton = addHeaderButton("Eraser", 64, () => this.callbacks.onToggleEraser());
     this.refreshEraserStyle();
+
+    // Area switcher (see "Sub/Up areas" under Art): Main always exists;
+    // Sub/Up show "+Sub"/"+Up" until first switched to, at which point
+    // EditorScene creates a blank one and setAreaState relabels the
+    // button plain "Sub"/"Up" — same button, no separate create step.
+    const AREA_KEYS: AreaKey[] = ["main", "sub", "up"];
+    const AREA_BUTTON_WIDTH: Record<AreaKey, number> = { main: 40, sub: 40, up: 34 };
+    for (const key of AREA_KEYS) {
+      const button = addHeaderButton(this.areaButtonLabel(key), AREA_BUTTON_WIDTH[key], () => this.callbacks.onSelectArea(key));
+      button.bg.on("pointerover", () => button.bg.setFillStyle(BUTTON_HOVER_COLOR));
+      button.bg.on("pointerout", () => this.refreshAreaButtonStyles());
+      this.areaButtons.set(key, button);
+    }
+    headerX += 6; // a little extra breathing room before the (usually hidden) Delete button
+    this.deleteAreaButton = addHeaderButton("Delete", 68, () => this.onDeleteAreaClicked());
+    this.deleteAreaButton.bg.on("pointerover", () =>
+      this.deleteAreaButton.bg.setFillStyle(this.deleteAreaArmed ? CLEAR_ARMED_HOVER_COLOR : BUTTON_HOVER_COLOR),
+    );
+    this.deleteAreaButton.bg.on("pointerout", () =>
+      this.deleteAreaButton.bg.setFillStyle(this.deleteAreaArmed ? CLEAR_ARMED_COLOR : BUTTON_COLOR),
+    );
+    this.refreshAreaButtonStyles();
+    this.deleteAreaButton.bg.setVisible(false);
+    this.deleteAreaButton.label.setVisible(false);
 
     // --- Header: right-anchored cluster (Menu, Test Play, Save, status) ---
     const menuWidth = 60;
@@ -658,6 +699,67 @@ export class EditorUI {
     this.clearArmed = false;
     this.clearButton.label.setText("Clear");
     this.clearButton.bg.setFillStyle(BUTTON_COLOR);
+  }
+
+  private areaButtonLabel(key: AreaKey): string {
+    if (key === "main") return "Main";
+    if (key === "sub") return this.subAreaExists ? "Sub" : "+Sub";
+    return this.upAreaExists ? "Up" : "+Up";
+  }
+
+  /** Persistent highlight on whichever area is currently selected, same
+   * "restyle on both selection and hover-out" treatment as Enemy Size's
+   * own refreshSizeStyles. */
+  private refreshAreaButtonStyles(): void {
+    for (const [key, button] of this.areaButtons) {
+      button.bg.setFillStyle(key === this.currentAreaKey ? BUTTON_HOVER_COLOR : BUTTON_COLOR);
+    }
+  }
+
+  /** Called by EditorScene right after construction (a loaded level may
+   * already have Sub and/or Up areas) and again after every area create/
+   * switch/delete — relabels the Main/Sub/Up switcher (+Sub/+Up vs. plain
+   * Sub/Up), moves the persistent highlight, and shows the Delete button
+   * only once there's actually a non-Main area selected to delete (Main
+   * itself is permanent). Also disarms any pending Delete confirmation —
+   * switching areas (or the area just having been deleted out from under
+   * it) means whatever was armed no longer applies. */
+  setAreaState(existing: { sub: boolean; up: boolean }, current: AreaKey): void {
+    this.subAreaExists = existing.sub;
+    this.upAreaExists = existing.up;
+    this.currentAreaKey = current;
+    for (const [key, button] of this.areaButtons) {
+      button.label.setText(this.areaButtonLabel(key));
+    }
+    this.refreshAreaButtonStyles();
+    this.deleteAreaButton.bg.setVisible(current !== "main");
+    this.deleteAreaButton.label.setVisible(current !== "main");
+    this.deleteAreaArmTimer?.remove(false);
+    this.disarmDeleteArea();
+  }
+
+  /** Same two-tap arm/confirm shape as onClearClicked/disarmClear — kept
+   * as its own copy rather than a shared helper since the two buttons'
+   * labels/targets differ enough (and there are only two) that factoring
+   * out "generic armed button" would be more indirection than the
+   * duplication it'd save. */
+  private onDeleteAreaClicked(): void {
+    if (this.deleteAreaArmed) {
+      this.deleteAreaArmTimer?.remove(false);
+      this.disarmDeleteArea();
+      this.callbacks.onDeleteArea();
+      return;
+    }
+    this.deleteAreaArmed = true;
+    this.deleteAreaButton.label.setText("Delete?");
+    this.deleteAreaButton.bg.setFillStyle(CLEAR_ARMED_COLOR);
+    this.deleteAreaArmTimer = this.scene.time.delayedCall(CLEAR_ARM_TIMEOUT_MS, () => this.disarmDeleteArea());
+  }
+
+  private disarmDeleteArea(): void {
+    this.deleteAreaArmed = false;
+    this.deleteAreaButton.label.setText("Delete");
+    this.deleteAreaButton.bg.setFillStyle(BUTTON_COLOR);
   }
 
   private selectSize(size: EnemySize): void {

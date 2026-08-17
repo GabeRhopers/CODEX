@@ -21,7 +21,7 @@ import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
-import { createEmptyLevel, DEFAULT_ENEMY_SIZE, EMPTY_TILE, EnemySize, EntityType, LevelData } from "../level/LevelSchema";
+import { AreaKey, createEmptyArea, createEmptyLevel, DEFAULT_ENEMY_SIZE, EMPTY_TILE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
 import { backgroundDisplayLabel, resolveStaticBackground, STATIC_BACKGROUNDS, StaticBackgroundId } from "../level/staticBackgrounds";
 import { MusicAsset } from "../music/MusicLibrary";
 import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musicLibraryStorage";
@@ -45,14 +45,28 @@ interface EditorSceneData {
  * "about to leave" one. */
 const AUTOSAVE_DEBOUNCE_MS = 2000;
 
-/** Entity types kept singleton per level (see EntityPlacer's docstring) —
- * placing one moves the existing instance rather than adding another,
- * unlike Enemies/Items/Decor which have no such limit. */
-const MARKER_TYPES = new Set<EntityType>(["player-spawn", "goal", "chest"]);
+/** Entity types kept singleton per *area* (see EntityPlacer's docstring)
+ * — placing one moves the existing instance rather than adding another,
+ * unlike Enemies/Items/Decor which have no such limit. "Per area," not
+ * per level, now that Sub/Up areas exist (see "Sub/Up areas" under Art):
+ * this check runs against whichever area is currently being edited (see
+ * `area()`), so Main/Sub/Up can each independently have their own Spawn/
+ * Goal/Chest/basket — a deliberate simplification over a true cross-level
+ * singleton, which would need erasing an existing marker in a *different*
+ * area than the one currently open. `basket-sub`/`basket-up` need this
+ * for a different reason than their siblings: the teleport pairing (see
+ * PlayScene) only makes sense with at most one of each per area. */
+const MARKER_TYPES = new Set<EntityType>(["player-spawn", "goal", "chest", "basket-sub", "basket-up"]);
 
 export class EditorScene extends Phaser.Scene {
   private initialLevel?: LevelData;
   private level!: LevelData;
+  // Which of Main/Sub/Up is currently being edited — see area() and
+  // "Sub/Up areas" under Art. Every field below that used to describe
+  // "the level" (groundLayer/painter/entityPlacer/backgroundId/background)
+  // now describes "whichever area is currently open," rebuilt from scratch
+  // by switchArea whenever this changes.
+  private currentAreaKey: AreaKey = "main";
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private painter!: TilePainter;
   private entityPlacer!: EntityPlacer;
@@ -67,11 +81,23 @@ export class EditorScene extends Phaser.Scene {
   // brush being placed is an enemy (see applyEntityBrushAt); persists
   // across brush/category switches like currentBrush itself does, rather
   // than resetting to "medium" every time, so picking Large once and then
-  // browsing other categories doesn't lose the choice.
+  // browsing other categories doesn't lose the choice. Level-wide tool
+  // state, same as currentBrush/eraserActive — unaffected by switching
+  // which area is being edited.
   private currentSize: EnemySize = DEFAULT_ENEMY_SIZE;
   private storage: StorageAdapter = getLevelStorage();
   private brushesByType = new Map<EntityType, Brush>();
-  private history = new HistoryStack();
+  // One stack per area rather than one shared stack — undoing while
+  // editing Sub shouldn't reach back and undo something done in Main
+  // earlier, which sharing one HistoryStack across differently-scoped
+  // TilePainter/EntityPlacer instances would risk getting subtly wrong.
+  // `history` below always resolves to whichever one matches
+  // currentAreaKey, so every existing `this.history.xxx` call site needed
+  // no change at all.
+  private histories: Record<AreaKey, HistoryStack> = { main: new HistoryStack(), sub: new HistoryStack(), up: new HistoryStack() };
+  private get history(): HistoryStack {
+    return this.histories[this.currentAreaKey];
+  }
   private dragCommands: Command[] = [];
   private dragLastX = -1;
   private dragLastY = -1;
@@ -111,11 +137,21 @@ export class EditorScene extends Phaser.Scene {
     this.initialLevel = data?.level;
   }
 
+  /** Resolves to whichever of Main/Sub/Up is currently being edited — see
+   * `currentAreaKey`'s docstring. Only ever called once `switchArea` (or
+   * `create`'s own initial setup) has confirmed the area actually exists;
+   * Main always does. */
+  private area(): LevelArea {
+    if (this.currentAreaKey === "sub") return this.level.subArea!;
+    if (this.currentAreaKey === "up") return this.level.upArea!;
+    return this.level;
+  }
+
   create(): void {
     this.level = this.initialLevel ?? createEmptyLevel();
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
     this.backgroundId = resolveStaticBackground(this.level);
-    // Bounded to the level's actual placeable width, not the (often wider,
+    // Bounded to the area's actual placeable width, not the (often wider,
     // to fit the side panels) canvas — see StaticBackground's docstring.
     // Async because a "custom" background's texture isn't preloaded by
     // BootScene like every built-in one is — see backgroundLoader.ts. The
@@ -139,10 +175,10 @@ export class EditorScene extends Phaser.Scene {
       backgroundDisplayLabel(this.backgroundId),
       // A library-backed track's real name lives in music.json, not on the
       // level — leave the initial label blank and let it pop in a moment
-      // later (see the loadMusicLibrary resolve below), same tolerance as
-      // every other Drive-backed value here. A level with only the legacy
-      // embedded field (no customMusicId) still has its name on hand
-      // already, so shows it immediately.
+      // later (see resolveAreaLabels below), same tolerance as every other
+      // Drive-backed value here. A level with only the legacy embedded
+      // field (no customMusicId) still has its name on hand already, so
+      // shows it immediately.
       this.level.customMusicId ? null : this.level.customMusicName ?? null,
       this.level.name,
       this.level.width,
@@ -159,6 +195,8 @@ export class EditorScene extends Phaser.Scene {
         onRenameLevel: (name) => this.renameLevel(name),
         onToggleEraser: () => this.toggleEraser(),
         onSelectSize: (size) => (this.currentSize = size),
+        onSelectArea: (key) => this.switchArea(key),
+        onDeleteArea: () => this.deleteCurrentArea(),
         onSkinPickerOpen: () => this.onSkinPickerOpen(),
         onSelectSkin: (skinId) => this.onSelectSkin(skinId),
         onUploadSkin: (file) => this.uploadSkin(file),
@@ -173,27 +211,8 @@ export class EditorScene extends Phaser.Scene {
         onDeleteMusic: (id) => this.onDeleteMusic(id),
       },
     );
-
-    // A library-backed background/track's real display name lives in
-    // backgrounds.json/music.json, not on the level itself (only its id
-    // does) — resolve it once up front so the trigger label reads the
-    // actual name instead of a generic "Custom" the whole time it's open.
-    // A level with only the legacy embedded field has nothing to resolve
-    // here (its name, if any, is already showing).
-    if (this.backgroundId === "custom" && this.level.customBackgroundId) {
-      const wantedId = this.level.customBackgroundId;
-      void loadBackgroundLibrary().then((library) => {
-        const asset = library.find((item) => item.id === wantedId);
-        if (asset) this.ui.setBackgroundLabel(asset.name);
-      });
-    }
-    if (this.level.customMusicId) {
-      const wantedId = this.level.customMusicId;
-      void loadMusicLibrary().then((library) => {
-        const asset = library.find((item) => item.id === wantedId);
-        if (asset) this.ui.setMusicLabel(asset.name);
-      });
-    }
+    this.ui.setAreaState({ sub: !!this.level.subArea, up: !!this.level.upArea }, this.currentAreaKey);
+    this.resolveAreaLabels(this.level, this.backgroundId);
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
 
@@ -256,6 +275,97 @@ export class EditorScene extends Phaser.Scene {
     });
   }
 
+  /** A library-backed background/track's real display name lives in
+   * backgrounds.json/music.json, not on the area itself (only its id
+   * does) — resolves it once for whichever area is now current so the
+   * trigger label reads the actual name instead of a generic "Custom" the
+   * whole time it's open. Shared by create()'s initial resolve and every
+   * switchArea call. `area`/`backgroundId` are captured by value (not
+   * re-read from `this.area()`/`this.backgroundId` once the Drive read
+   * finishes) so a user switching areas again before either resolve lands
+   * can't have a stale result overwrite whatever the *new* area's own
+   * trigger should be showing — the `this.area() !== area` guard is what
+   * actually enforces that. */
+  private resolveAreaLabels(area: LevelArea, backgroundId: StaticBackgroundId): void {
+    if (backgroundId === "custom" && area.customBackgroundId) {
+      const wantedId = area.customBackgroundId;
+      void loadBackgroundLibrary().then((library) => {
+        if (this.area() !== area) return;
+        const asset = library.find((item) => item.id === wantedId);
+        if (asset) this.ui.setBackgroundLabel(asset.name);
+      });
+    }
+    if (area.customMusicId) {
+      const wantedId = area.customMusicId;
+      void loadMusicLibrary().then((library) => {
+        if (this.area() !== area) return;
+        const asset = library.find((item) => item.id === wantedId);
+        if (asset) this.ui.setMusicLabel(asset.name);
+      });
+    }
+  }
+
+  /** Switches which of Main/Sub/Up is being edited — creating a blank one
+   * first (matching Main's current size, see "Sub/Up areas" under Art)
+   * the first time Sub or Up is ever selected. Tears down and rebuilds
+   * every area-scoped piece of editor state (ground tilemap, painter/
+   * entityPlacer, background preview, background/music trigger labels) —
+   * currentBrush/eraserActive/currentSize and every skin stay untouched,
+   * since those are level-wide tool state, not per-area data. A no-op if
+   * already on the requested area. */
+  private switchArea(key: AreaKey): void {
+    if (key === this.currentAreaKey) return;
+    let created = false;
+    if (key === "sub" && !this.level.subArea) {
+      this.level.subArea = createEmptyArea(this.level.width, this.level.height);
+      created = true;
+    } else if (key === "up" && !this.level.upArea) {
+      this.level.upArea = createEmptyArea(this.level.width, this.level.height);
+      created = true;
+    }
+    this.currentAreaKey = key;
+    this.dragCommands = [];
+    this.dragLastX = -1;
+    this.dragLastY = -1;
+
+    const area = this.area();
+    this.backgroundId = resolveStaticBackground(area);
+    this.background?.destroy();
+    this.background = undefined;
+    void resolveBackgroundTextureKey(this, area).then((textureKey) => {
+      if (this.area() !== area) return; // switched away again before this resolved
+      this.background = new StaticBackground(this, area.width * TILE_SIZE, textureKey);
+    });
+
+    this.createGroundLayer();
+    this.rebuildVisualsFromLevel();
+
+    this.ui.setBackgroundLabel(this.backgroundId === "custom" ? "Custom" : backgroundDisplayLabel(this.backgroundId));
+    this.ui.setMusicLabel(area.customMusicId ? null : area.customMusicName ?? null);
+    this.resolveAreaLabels(area, this.backgroundId);
+    this.ui.setAreaState({ sub: !!this.level.subArea, up: !!this.level.upArea }, key);
+    this.ui.setEntityCount(area.entities.length);
+
+    if (created) this.markDirty();
+  }
+
+  /** Called by EditorUI's Delete button — only ever reachable while a
+   * non-Main area is selected (Main has no delete affordance at all, see
+   * EditorUI.setAreaState). Discards that area's content entirely and
+   * switches back to Main; there's no undo for this the way there is for
+   * a paint stroke, matching Clear's own irreversible-after-confirm
+   * behavior (and reusing the same two-tap arm/confirm gesture on the
+   * EditorUI side to guard against a stray click). */
+  private deleteCurrentArea(): void {
+    if (this.currentAreaKey === "main") return; // defensive; shouldn't be reachable
+    const deletedKey = this.currentAreaKey;
+    if (deletedKey === "sub") this.level.subArea = undefined;
+    else this.level.upArea = undefined;
+    this.switchArea("main");
+    this.markDirty();
+    this.ui.setStatus(`${deletedKey === "sub" ? "Sub" : "Up"} area deleted`);
+  }
+
   /** Phaser's keyboard queue can re-emit the same physical keydown more
    * than once within a single rendered frame under frame stalls (observed
    * with software-rendered WebGL) even though the browser only dispatched
@@ -295,7 +405,8 @@ export class EditorScene extends Phaser.Scene {
     }
     const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
     const tileY = Math.floor((pointer.y - GRID_ORIGIN_Y) / TILE_SIZE);
-    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) {
+    const area = this.area();
+    if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height) {
       this.highlight.setPosition(-100, -100);
     } else {
       this.highlight.setPosition(
@@ -303,7 +414,7 @@ export class EditorScene extends Phaser.Scene {
         GRID_ORIGIN_Y + tileY * TILE_SIZE + TILE_SIZE / 2,
       );
     }
-    this.ui.setCursorTile(tileX >= 0 && tileY >= 0 && tileX < this.level.width && tileY < this.level.height ? { x: tileX, y: tileY } : null);
+    this.ui.setCursorTile(tileX >= 0 && tileY >= 0 && tileX < area.width && tileY < area.height ? { x: tileX, y: tileY } : null);
     if (this.isPointerDown) {
       if (this.eraserActive) this.applyEraseAt(tileX, tileY);
       else if (this.currentBrush.kind === "tile") this.applyTileBrushAt(tileX, tileY);
@@ -320,7 +431,7 @@ export class EditorScene extends Phaser.Scene {
     this.dragLastX = tileX;
     this.dragLastY = tileY;
 
-    const prevIndex = this.level.layers.ground[tileY]?.[tileX];
+    const prevIndex = this.area().layers.ground[tileY]?.[tileX];
     if (prevIndex === undefined) return; // out of bounds
 
     const newIndex = this.currentBrush.tileIndex;
@@ -339,9 +450,11 @@ export class EditorScene extends Phaser.Scene {
   }
 
   /** Places the current brush's entity at (tileX, tileY). Marker types
-   * (Spawn/Goal/Chest) stay singleton per level — placing one clears any
-   * earlier instance of that same type first, wherever it was, same as
-   * before multi-instance support existed. Enemies/Items/Decor have no such
+   * (Spawn/Goal/Chest/basket-sub/basket-up) stay singleton per *area* (see
+   * MARKER_TYPES) — placing one clears any earlier instance of that same
+   * type first within the area currently being edited, wherever it was
+   * there, same as before multi-instance support (and before Sub/Up areas)
+   * existed. Enemies/Items/Decor have no such
    * limit; only the target tile itself needs clearing, and only if
    * something else already occupies it (EntityPlacer's "one entity per
    * tile" invariant). Whatever gets displaced is erased via its own
@@ -360,13 +473,14 @@ export class EditorScene extends Phaser.Scene {
   private applyEntityBrushAt(tileX: number, tileY: number): void {
     const type = this.currentBrush.entityType;
     if (!type) return;
-    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
+    const area = this.area();
+    if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height) return;
     const size = isEnemyType(type) ? this.currentSize : undefined;
 
     const commands: Command[] = [];
 
     if (MARKER_TYPES.has(type)) {
-      const existingOfType = this.level.entities.find((e) => e.type === type);
+      const existingOfType = area.entities.find((e) => e.type === type);
       if (existingOfType && existingOfType.x === tileX && existingOfType.y === tileY) return; // no-op, same spot
       if (existingOfType) commands.push(new EraseEntityCommand(this.entityPlacer, this.brushesByType, existingOfType));
     }
@@ -404,7 +518,8 @@ export class EditorScene extends Phaser.Scene {
    * applyEntityBrushAt's immediate-execute command pattern, so both erase
    * paths can share one dragCommands array with flushDragCommands. */
   private applyEraseAt(tileX: number, tileY: number): void {
-    if (tileX < 0 || tileY < 0 || tileX >= this.level.width || tileY >= this.level.height) return;
+    const area = this.area();
+    if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height) return;
 
     const occupant = this.entityPlacer.entityAt(tileX, tileY);
     if (occupant) {
@@ -420,7 +535,7 @@ export class EditorScene extends Phaser.Scene {
     if (tileX === this.dragLastX && tileY === this.dragLastY) return;
     this.dragLastX = tileX;
     this.dragLastY = tileY;
-    const prevIndex = this.level.layers.ground[tileY]?.[tileX];
+    const prevIndex = area.layers.ground[tileY]?.[tileX];
     if (prevIndex === undefined || prevIndex === EMPTY_TILE) return; // out of bounds, or already empty
     if (!this.painter.paint(tileX, tileY, EMPTY_TILE)) return;
     this.dragCommands.push(new PaintTileCommand(this.painter, tileX, tileY, prevIndex, EMPTY_TILE));
@@ -433,13 +548,32 @@ export class EditorScene extends Phaser.Scene {
    * see groundAutotile.ts, which is the single source of truth for that
    * layout). A tile's stored value picks both its skin and its frame, so
    * one level can freely mix all four skins; there's no level-wide
-   * "active" tileset to rebuild when nothing's just been placed. */
+   * "active" tileset to rebuild when nothing's just been placed.
+   *
+   * Destroys any previous tilemap first — no-op the very first time
+   * (nothing to destroy yet), but switchArea calls this again every time
+   * the area being edited changes, and a stale tilemap's own layer would
+   * otherwise leak (and, worse, `this.groundLayer` would end up pointing
+   * at whichever one was created last while the old one's GPU resources
+   * never got released). */
   private createGroundLayer(): void {
+    // Both `?.`s matter, not just the first: on a *second* "New Level"/
+    // Load in the same browser session, Phaser reruns create() on this
+    // same singleton EditorScene instance (see PlayScene's areaBuilt for
+    // the sibling version of this issue) rather than constructing a fresh
+    // one, so `this.groundLayer` itself can be a stale-but-truthy
+    // reference to a TilemapLayer the *previous* session's scene teardown
+    // already destroyed — and a destroyed TilemapLayer nulls out its own
+    // `.tilemap` property, so `.tilemap.destroy()` alone still throws
+    // reading `.destroy` off `undefined` (found via a real crash starting
+    // a second level in one mocked-Drive Playwright session).
+    this.groundLayer?.tilemap?.destroy();
+    const area = this.area();
     const map = this.make.tilemap({
       tileWidth: TILE_SIZE,
       tileHeight: TILE_SIZE,
-      width: this.level.width,
-      height: this.level.height,
+      width: area.width,
+      height: area.height,
     });
     const tilesets = GROUND_SKINS.map((skin, i) => {
       const key = groundTilesetKey(skin);
@@ -462,14 +596,14 @@ export class EditorScene extends Phaser.Scene {
    * file (see FileInputOverlay) — downscales/re-encodes it, adds it to the
    * shared library (see backgrounds/backgroundLibraryStorage.ts — visible
    * to every profile and every level from now on, not just this one), and
-   * points this level at the new entry. */
+   * points whichever area is currently being edited at the new entry. */
   private uploadBackground(file: File): void {
     const uploadedBy = loadActiveProfile() ?? "unknown";
     readAndDownscaleImage(file)
       .then((dataUrl) => addBackgroundAsset(file.name, dataUrl, uploadedBy))
       .then(
         (id) => {
-          this.level.customBackgroundId = id;
+          this.area().customBackgroundId = id;
           this.applyBackground("custom", file.name);
           this.ui.setStatus("Background uploaded");
         },
@@ -491,7 +625,7 @@ export class EditorScene extends Phaser.Scene {
         ...STATIC_BACKGROUNDS.map((bg) => ({ id: bg.id, label: bg.label, textureKey: bg.textureKey })),
         ...thumbnails.map((t) => ({ id: t.id, label: t.name, textureKey: t.textureKey, deletable: true })),
       ];
-      const activeId = this.backgroundId === "custom" ? this.level.customBackgroundId ?? "" : this.backgroundId;
+      const activeId = this.backgroundId === "custom" ? this.area().customBackgroundId ?? "" : this.backgroundId;
       this.ui.setBackgroundPickerItems(items, activeId);
     });
   }
@@ -507,7 +641,7 @@ export class EditorScene extends Phaser.Scene {
       return;
     }
     const asset = this.backgroundLibrary.find((item) => item.id === id);
-    this.level.customBackgroundId = id;
+    this.area().customBackgroundId = id;
     this.applyBackground("custom", asset?.name);
   }
 
@@ -534,14 +668,15 @@ export class EditorScene extends Phaser.Scene {
   /** Called by EditorUI once its music picker's "Upload" tile has a file
    * — no re-encoding is possible for audio the way there is for images
    * (see musicUpload.ts's MusicTooLargeError for the one check that does
-   * apply), adds it to the shared library, and points this level at it. */
+   * apply), adds it to the shared library, and points whichever area is
+   * currently being edited at it. */
   private uploadMusic(file: File): void {
     const uploadedBy = loadActiveProfile() ?? "unknown";
     readAudioAsDataUrl(file)
       .then((dataUrl) => addMusicAsset(file.name, dataUrl, uploadedBy))
       .then(
         (id) => {
-          this.level.customMusicId = id;
+          this.area().customMusicId = id;
           this.ui.setMusicLabel(file.name);
           this.markDirty();
           this.ui.setStatus("Music uploaded");
@@ -567,46 +702,47 @@ export class EditorScene extends Phaser.Scene {
         { id: NO_MUSIC_ID, label: "None", textureKey: "music-note-muted" },
         ...tracks.map((t) => ({ id: t.id, label: t.name, textureKey: "music-note", deletable: true })),
       ];
-      const activeId = this.level.customMusicId ?? NO_MUSIC_ID;
+      const activeId = this.area().customMusicId ?? NO_MUSIC_ID;
       this.ui.setMusicPickerItems(items, activeId);
     });
   }
 
   /** Called by EditorUI once a music picker item is picked — `null` (from
    * the "None" option, see EditorUI's own NO_MUSIC_ID -> null mapping)
-   * clears every music field on the level (there's no built-in fallback
-   * track the way backgrounds have, so "None" is a real, explicit state,
-   * not just "point at nothing and fall back"); otherwise points the level
-   * at the chosen library entry. */
+   * clears every music field on whichever area is currently being edited
+   * (there's no built-in fallback track the way backgrounds have, so
+   * "None" is a real, explicit state, not just "point at nothing and fall
+   * back"); otherwise points that area at the chosen library entry. */
   private onSelectMusic(id: string | null): void {
+    const area = this.area();
     if (id === null) {
-      this.level.customMusicId = undefined;
-      this.level.customMusicData = undefined;
-      this.level.customMusicName = undefined;
+      area.customMusicId = undefined;
+      area.customMusicData = undefined;
+      area.customMusicName = undefined;
       this.ui.setMusicLabel(null);
       this.markDirty();
       this.ui.setStatus("Music removed");
       return;
     }
     const asset = this.musicLibrary.find((track) => track.id === id);
-    this.level.customMusicId = id;
+    area.customMusicId = id;
     this.ui.setMusicLabel(asset?.name ?? "Custom");
     this.markDirty();
   }
 
   /** Called by EditorUI's music picker delete badge — removes a track from
    * the shared library and refreshes the open picker's item list. Unlike
-   * background deletion, explicitly clears this level's own reference too
-   * when it was the deleted track — there's no built-in fallback track for
-   * musicLoader.ts to silently land on, so leaving a dangling
-   * `customMusicId` would otherwise leave the trigger showing a name for a
-   * track that no longer exists anywhere. */
+   * background deletion, explicitly clears the current area's own
+   * reference too when it was the deleted track — there's no built-in
+   * fallback track for musicLoader.ts to silently land on, so leaving a
+   * dangling `customMusicId` would otherwise leave the trigger showing a
+   * name for a track that no longer exists anywhere. */
   private onDeleteMusic(id: string): void {
     removeMusicAsset(id).then(
       () => {
         this.ui.setStatus("Track removed");
-        if (this.level.customMusicId === id) {
-          this.level.customMusicId = undefined;
+        if (this.area().customMusicId === id) {
+          this.area().customMusicId = undefined;
           this.ui.setMusicLabel(null);
           this.markDirty();
         }
@@ -754,22 +890,38 @@ export class EditorScene extends Phaser.Scene {
    * `customLabel` is the library entry's own name — used only when `id`
    * is "custom" (built-ins get their label from backgroundDisplayLabel
    * instead, which has nothing else to go on); omitted falls back to the
-   * generic "Custom" for the rare case a caller doesn't have a name handy. */
+   * generic "Custom" for the rare case a caller doesn't have a name handy.
+   *
+   * Applies to whichever area is currently being edited, not necessarily
+   * Main — each area has its own independent background choice (see
+   * "Sub/Up areas" under Art). Guards the async resolve against a
+   * since-switched-away area the same way switchArea's own resolve does,
+   * for the same reason. */
   private applyBackground(id: StaticBackgroundId, customLabel?: string): void {
+    const area = this.area();
     this.backgroundId = id;
-    this.level.background = id;
+    area.background = id;
     this.background?.destroy();
     this.background = undefined;
-    void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
-      this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
+    void resolveBackgroundTextureKey(this, area).then((textureKey) => {
+      if (this.area() !== area) return;
+      this.background = new StaticBackground(this, area.width * TILE_SIZE, textureKey);
     });
     this.ui.setBackgroundLabel(id === "custom" ? customLabel ?? "Custom" : backgroundDisplayLabel(id));
     this.markDirty();
   }
 
+  /** Spawn/Goal need to exist *somewhere* across the level — any area, not
+   * just whichever one happens to be open right now — since either could
+   * legitimately live in Sub or Up instead of Main (see "Sub/Up areas"
+   * under Art on why Markers are per-area singletons, not cross-level
+   * ones). The Test Play snapshot itself (`cloneLevel`) already carries
+   * every area along regardless, so nothing else here needs to change
+   * depending on which one is currently selected. */
   private testPlay(): void {
-    const hasSpawn = this.level.entities.some((e) => e.type === "player-spawn");
-    const hasGoal = this.level.entities.some((e) => e.type === "goal");
+    const areas = [this.level, this.level.subArea, this.level.upArea].filter((a): a is LevelArea => !!a);
+    const hasSpawn = areas.some((a) => a.entities.some((e) => e.type === "player-spawn"));
+    const hasGoal = areas.some((a) => a.entities.some((e) => e.type === "goal"));
     if (!hasSpawn || !hasGoal) {
       this.ui.setStatus("Place a Spawn and a Goal before Test Play");
       return;
@@ -832,7 +984,7 @@ export class EditorScene extends Phaser.Scene {
   private markDirty(): void {
     this.dirty = true;
     this.ui.setSaveState("unsaved");
-    this.ui.setEntityCount(this.level.entities.length);
+    this.ui.setEntityCount(this.area().entities.length);
     this.autosaveTimer?.remove(false);
     this.autosaveTimer = this.time.delayedCall(AUTOSAVE_DEBOUNCE_MS, () => void this.autosave());
   }
@@ -854,29 +1006,47 @@ export class EditorScene extends Phaser.Scene {
     this.scene.start("Menu");
   }
 
+  /** Clears whichever area is currently being edited — Main, Sub, or Up —
+   * not the whole level; switching to a different area afterward finds it
+   * untouched. */
   private clearLevel(): void {
-    for (let y = 0; y < this.level.height; y++) {
-      for (let x = 0; x < this.level.width; x++) {
-        this.level.layers.ground[y][x] = -1;
+    const area = this.area();
+    for (let y = 0; y < area.height; y++) {
+      for (let x = 0; x < area.width; x++) {
+        area.layers.ground[y][x] = -1;
       }
     }
-    this.level.entities = [];
+    area.entities = [];
     this.rebuildVisualsFromLevel();
     this.history.clear();
     this.markDirty();
     this.ui.setStatus("Cleared");
   }
 
+  /** Rebuilds the ground tilemap + entity markers from whichever area is
+   * currently being edited (see area()) — used after Clear, after loading
+   * an existing level, and by switchArea every time which area that is
+   * changes. */
   private rebuildVisualsFromLevel(): void {
-    this.painter = new TilePainter(this.level, this.groundLayer);
-    for (let y = 0; y < this.level.height; y++) {
-      for (let x = 0; x < this.level.width; x++) {
-        const index = this.level.layers.ground[y][x];
+    const area = this.area();
+    this.painter = new TilePainter(area, this.groundLayer);
+    for (let y = 0; y < area.height; y++) {
+      for (let x = 0; x < area.width; x++) {
+        const index = area.layers.ground[y][x];
         if (index === -1) this.groundLayer.removeTileAt(x, y);
-        else this.groundLayer.putTileAt(groundFrameAt(this.level.layers.ground, x, y), x, y);
+        else this.groundLayer.putTileAt(groundFrameAt(area.layers.ground, x, y), x, y);
       }
     }
-    this.entityPlacer = new EntityPlacer(this, this.level, TILE_SIZE);
+    // Destroys the *previous* entityPlacer's marker sprites before
+    // abandoning it — without this, switching areas (or Clear/Load, which
+    // also route through here) would leave every marker it ever placed
+    // stuck on the display list, since a freshly constructed EntityPlacer
+    // only knows how to clear its own (empty) markers map, not a
+    // completely different instance's (see EntityPlacer.destroy's own
+    // docstring — found via a real accumulation bug switching Main→Sub→Up
+    // in a mocked-Drive Playwright session).
+    this.entityPlacer?.destroy();
+    this.entityPlacer = new EntityPlacer(this, area, TILE_SIZE);
     this.entityPlacer.setSkinTextureKeys(this.skinTextureKeys);
     this.entityPlacer.syncFromLevel(this.brushesByType);
   }
