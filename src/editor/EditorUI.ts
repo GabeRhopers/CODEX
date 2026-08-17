@@ -26,6 +26,7 @@ export interface EditorUICallbacks {
   onRedo: () => void;
   onRenameLevel: (name: string) => void;
   onToggleEraser: () => void;
+  onToggleHand: () => void;
   onSelectSize: (size: EnemySize) => void;
 
   // Sub/Up areas (see "Sub/Up areas" under Art): switching to "sub"/"up"
@@ -90,10 +91,11 @@ const PANEL_HEIGHT = GRID_ROWS * TILE_SIZE;
 const RIGHT_PANEL_X = GAME_WIDTH - RIGHT_PANEL_WIDTH;
 const FOOTER_Y = GRID_ORIGIN_Y + GRID_ROWS * TILE_SIZE;
 
-// --- Header: Level Name anchored to the left edge, Undo/Redo/Eraser follow
-// it; Save status/Save/Test Play/Menu anchor to the right edge instead of
-// following the left-hand cluster, so neither the variable-length save
-// status text nor the level name ever shifts them — see the constructor.
+// --- Header: Level Name anchored to the left edge, Undo/Redo/Eraser/Hand
+// follow it; Save/Test Play/Menu anchor to the right edge instead of
+// following the left-hand cluster, so the level name never shifts them —
+// see the constructor. The save-state readout used to sit here too (just
+// left of Save) but moved to the footer as of 2026-08-17 — see FOOTER_SAVE_STATUS_X.
 const HEADER_BUTTON_HEIGHT = 32;
 const HEADER_BUTTON_Y = (HEADER_HEIGHT - HEADER_BUTTON_HEIGHT) / 2;
 const NAME_LABEL_X = PANEL_PADDING;
@@ -146,10 +148,17 @@ const MUSIC_PICKER_ITEM_SIZE = 24;
 // --- Footer: read-only stats, left-aligned in fixed-width slots (nothing
 // here is interactive, so unlike the header's buttons a slot's exact width
 // doesn't matter — there's nothing downstream of it to keep from shifting).
+// The save-state readout is the one exception — right-aligned to the
+// footer's own right edge (as of 2026-08-17, moved down from the header —
+// see the constructor) rather than another fixed left-hand slot, since
+// unlike the other three stats it's not "read whenever you happen to look
+// down here," it's the one thing worth a dedicated, always-in-the-same-
+// corner spot the way it had next to Save before.
 const FOOTER_TEXT_Y = FOOTER_Y + FOOTER_HEIGHT / 2;
 const FOOTER_LEVEL_SIZE_X = PANEL_PADDING;
 const FOOTER_CURSOR_X = 220;
 const FOOTER_ENTITIES_X = 420;
+const FOOTER_SAVE_STATUS_X = GAME_WIDTH - PANEL_PADDING;
 
 // How long the Clear button stays "armed" (a second tap actually clears)
 // before silently reverting to its normal label — long enough to not feel
@@ -158,14 +167,15 @@ const FOOTER_ENTITIES_X = 420;
 const CLEAR_ARM_TIMEOUT_MS = 3000;
 
 /**
- * Header (Level Name/Undo/Redo/Eraser/Save/Test Play/Menu) above, a stats
- * footer (level size/cursor tile/entity count) below, and two docked
- * vertical panels flanking the grid in between — all opaque and rendered
- * above the background (see PANEL_DEPTH vs StaticBackground's depth -100):
- * a left "Palette" panel (category chip + that category's icon grid +
- * Skin/Upload Skin) and a right "Level Settings" panel (Background/Music/
- * Clear). Erasing lives in the header now, not the palette — see
- * EditorScene's `eraserActive` — so unlike the palette's old Erase brushes
+ * Header (Level Name/Undo/Redo/Eraser/Hand/Save/Test Play/Menu) above, a
+ * stats footer (level size/cursor tile/entity count/save status) below,
+ * and two docked vertical panels flanking the grid in between — all opaque
+ * and rendered above the background (see PANEL_DEPTH vs StaticBackground's
+ * depth -100): a left "Palette" panel (category chip + that category's
+ * icon grid + Skin/Upload Skin) and a right "Level Settings" panel
+ * (Background/Music/Clear). Erasing lives in the header now, not the
+ * palette — see EditorScene's `eraserActive` — so unlike the palette's old
+ * Erase brushes
  * it applies no matter which category tab happens to be open.
  */
 /** A fixed-size button = an interactive background rect (the hit area and
@@ -181,6 +191,8 @@ const BUTTON_COLOR = 0x0f3460;
 const BUTTON_HOVER_COLOR = 0x3a5a9c;
 const ERASER_ACTIVE_COLOR = 0xaa3333;
 const ERASER_ACTIVE_HOVER_COLOR = 0xd14f4f;
+const HAND_ACTIVE_COLOR = 0x6a3fa0;
+const HAND_ACTIVE_HOVER_COLOR = 0x8c5bc9;
 const TEST_PLAY_COLOR = 0x2e7d32;
 const TEST_PLAY_HOVER_COLOR = 0x43a047;
 const CLEAR_ARMED_COLOR = 0xaa3333;
@@ -192,13 +204,15 @@ export class EditorUI {
   // Persistent, unlike statusText above (which auto-clears after 2.5s and
   // is reused for one-off messages like "Cleared") — always shows whether
   // the level in memory currently matches what's in storage. See
-  // EditorScene's `dirty` flag/autosave for what drives it. Anchored to the
-  // header's right-hand cluster, just left of the Save button.
+  // EditorScene's `dirty` flag/autosave for what drives it. Lives in the
+  // footer, right-aligned to its own edge (as of 2026-08-17 — it sat in the
+  // header just left of Save before that; see FOOTER_SAVE_STATUS_X).
   private saveStatusText: Phaser.GameObjects.Text;
   private backgroundPicker!: AssetPickerMenu;
   private musicPicker!: AssetPickerMenu;
   private skinPicker!: AssetPickerMenu;
   private eraserButton!: PanelButton;
+  private handButton!: PanelButton;
   private clearButton!: PanelButton;
   private areaButtons = new Map<AreaKey, PanelButton>();
   private deleteAreaButton!: PanelButton;
@@ -214,6 +228,7 @@ export class EditorUI {
   private dropdownContainer: Phaser.GameObjects.Container;
   private dropdownOpen = false;
   private eraserActive = false;
+  private handActive = false;
   private clearArmed = false;
   private clearArmTimer?: Phaser.Time.TimerEvent;
   private activeCategory: BrushCategory;
@@ -268,6 +283,15 @@ export class EditorUI {
     this.wireHoverStyles(addHeaderButton("Redo", 56, () => this.callbacks.onRedo()).bg);
     this.eraserButton = addHeaderButton("Eraser", 64, () => this.callbacks.onToggleEraser());
     this.refreshEraserStyle();
+    // Mutually exclusive with Eraser (EditorScene.toggleHand/toggleEraser
+    // each clear the other's flag and call both setters here) — grabbing an
+    // entity to drag it and erasing whatever's clicked are two different
+    // things to do with a pointerdown on the grid, so only one can own it
+    // at a time. Grab-and-drag itself (pointerdown on an occupied tile,
+    // drag, pointerup on an empty one) lives in EditorScene's beginGrab/
+    // endGrab; this button only flips the mode.
+    this.handButton = addHeaderButton("Hand", 54, () => this.callbacks.onToggleHand());
+    this.refreshHandStyle();
 
     // Area switcher (see "Sub/Up areas" under Art): Main always exists;
     // Sub/Up show "+Sub"/"+Up" until first switched to, at which point
@@ -293,21 +317,13 @@ export class EditorUI {
     this.deleteAreaButton.bg.setVisible(false);
     this.deleteAreaButton.label.setVisible(false);
 
-    // --- Header: right-anchored cluster (Menu, Test Play, Save, status) ---
+    // --- Header: right-anchored cluster (Menu, Test Play, Save) ---
     const menuWidth = 60;
     const testPlayWidth = 110;
     const saveWidth = 56;
     const menuX = GAME_WIDTH - PANEL_PADDING - menuWidth;
     const testPlayX = menuX - 8 - testPlayWidth;
     const saveX = testPlayX - 8 - saveWidth;
-
-    this.saveStatusText = scene.add
-      .text(saveX - 8, HEADER_HEIGHT / 2, SAVE_STATE_DISPLAY.saved.text, {
-        fontSize: "12px",
-        color: SAVE_STATE_DISPLAY.saved.color,
-      })
-      .setOrigin(1, 0.5)
-      .setDepth(CONTENT_DEPTH);
 
     const saveButton = this.makeFixedWidthButton(saveX, HEADER_BUTTON_Y, saveWidth, HEADER_BUTTON_HEIGHT, "Save", () => this.callbacks.onSave());
     this.wireHoverStyles(saveButton.bg);
@@ -475,6 +491,13 @@ export class EditorUI {
     this.footerEntitiesText = scene.add
       .text(FOOTER_ENTITIES_X, FOOTER_TEXT_Y, `Entities: ${initialEntityCount}`, { fontSize: "11px", color: "#8b8bb0" })
       .setOrigin(0, 0.5)
+      .setDepth(CONTENT_DEPTH);
+    this.saveStatusText = scene.add
+      .text(FOOTER_SAVE_STATUS_X, FOOTER_TEXT_Y, SAVE_STATE_DISPLAY.saved.text, {
+        fontSize: "11px",
+        color: SAVE_STATE_DISPLAY.saved.color,
+      })
+      .setOrigin(1, 0.5)
       .setDepth(CONTENT_DEPTH);
 
     this.statusText = scene.add
@@ -675,6 +698,23 @@ export class EditorUI {
     this.eraserButton.bg.off("pointerout");
     this.eraserButton.bg.on("pointerover", () => this.eraserButton.bg.setFillStyle(this.eraserActive ? ERASER_ACTIVE_HOVER_COLOR : BUTTON_HOVER_COLOR));
     this.eraserButton.bg.on("pointerout", () => this.eraserButton.bg.setFillStyle(this.eraserActive ? ERASER_ACTIVE_COLOR : BUTTON_COLOR));
+  }
+
+  /** Called by EditorScene's toggleHand — same "persistent state, not
+   * momentary hover" treatment as setEraserActive/refreshEraserStyle. A
+   * distinct color (not ERASER_ACTIVE_COLOR) so the two toggles read as
+   * different tools at a glance even though only one can ever be active. */
+  setHandActive(active: boolean): void {
+    this.handActive = active;
+    this.refreshHandStyle();
+  }
+
+  private refreshHandStyle(): void {
+    this.handButton.bg.setFillStyle(this.handActive ? HAND_ACTIVE_COLOR : BUTTON_COLOR);
+    this.handButton.bg.off("pointerover");
+    this.handButton.bg.off("pointerout");
+    this.handButton.bg.on("pointerover", () => this.handButton.bg.setFillStyle(this.handActive ? HAND_ACTIVE_HOVER_COLOR : BUTTON_HOVER_COLOR));
+    this.handButton.bg.on("pointerout", () => this.handButton.bg.setFillStyle(this.handActive ? HAND_ACTIVE_COLOR : BUTTON_COLOR));
   }
 
   /** First tap arms the button (distinct color + revised label) and starts

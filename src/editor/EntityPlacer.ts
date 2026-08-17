@@ -116,6 +116,54 @@ export class EntityPlacer {
     return entity;
   }
 
+  /** Repositions the marker at (fromX, fromY) to raw pointer/world
+   * coordinates while a Hand-tool drag is in progress (see EditorScene's
+   * beginGrab/onPointerMove) — a pure visual follow that never touches
+   * `level.entities` or the markers map's key, which stays filed under the
+   * origin tile until moveTo commits the drag or cancelDrag reverts it. A
+   * no-op if the origin tile has no marker (shouldn't happen via the Hand
+   * tool's own gesture, which only ever begins a grab on an occupied tile). */
+  previewDragTo(fromX: number, fromY: number, worldX: number, worldY: number): void {
+    this.markers.get(tileKey(fromX, fromY))?.setPosition(worldX, worldY);
+  }
+
+  /** Snaps the marker at (fromX, fromY) back to its own tile's center —
+   * called when a Hand-tool drag ends without committing a move (dropped
+   * outside the grid, back on its own tile, or onto a tile something else
+   * already occupies). */
+  cancelDrag(fromX: number, fromY: number): void {
+    const marker = this.markers.get(tileKey(fromX, fromY));
+    marker?.setPosition(
+      GRID_ORIGIN_X + fromX * this.tileSize + this.tileSize / 2,
+      GRID_ORIGIN_Y + fromY * this.tileSize + this.tileSize / 2,
+    );
+  }
+
+  /** Commits a Hand-tool drag: relocates whatever entity sits at (fromX,
+   * fromY) to (toX, toY), updating both `level.entities` and the markers
+   * map's key — the same sprite, just repositioned, so no destroy/recreate
+   * and no skin/size re-application needed. Unconditional, like add/
+   * removeAt: callers (EditorScene's endGrab, and MoveEntityCommand's
+   * execute/undo, which calls this in both directions) are responsible for
+   * having already confirmed the destination tile is empty. Returns false
+   * if there's nothing at `from` — shouldn't happen via the Hand tool's own
+   * gesture, but keeps this safe to call from undo/redo after some other
+   * edit already touched the tile. */
+  moveTo(fromX: number, fromY: number, toX: number, toY: number): boolean {
+    const entity = this.entityAt(fromX, fromY);
+    if (!entity) return false;
+    entity.x = toX;
+    entity.y = toY;
+    const fromKey = tileKey(fromX, fromY);
+    const marker = this.markers.get(fromKey);
+    this.markers.delete(fromKey);
+    if (marker) {
+      marker.setPosition(GRID_ORIGIN_X + toX * this.tileSize + this.tileSize / 2, GRID_ORIGIN_Y + toY * this.tileSize + this.tileSize / 2);
+      this.markers.set(tileKey(toX, toY), marker);
+    }
+    return true;
+  }
+
   /** Destroys every marker sprite this instance owns — called on the *old*
    * EntityPlacer right before EditorScene's rebuildVisualsFromLevel
    * replaces it with a fresh one bound to a different area (see "Sub/Up

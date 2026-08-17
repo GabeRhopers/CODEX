@@ -6,10 +6,11 @@ import { Command } from "../editor/commands/Command";
 import { CompositeCommand } from "../editor/commands/CompositeCommand";
 import { EraseEntityCommand } from "../editor/commands/EraseEntityCommand";
 import { HistoryStack } from "../editor/commands/HistoryStack";
+import { MoveEntityCommand } from "../editor/commands/MoveEntityCommand";
 import { PaintTileCommand } from "../editor/commands/PaintTileCommand";
 import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
 import { DEFAULT_SKIN_ID, EditorUI, NO_MUSIC_ID } from "../editor/EditorUI";
-import { EntityPlacer } from "../editor/EntityPlacer";
+import { EntityPlacer, TileCoord } from "../editor/EntityPlacer";
 import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
 import { Brush, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
@@ -77,6 +78,16 @@ export class EditorScene extends Phaser.Scene {
   // Header-level toggle, independent of currentBrush — see applyEraseAt's
   // docstring for why erasing stopped being a per-category brush.
   private eraserActive = false;
+  // Header-level toggle, mutually exclusive with eraserActive (see
+  // toggleHand/toggleEraser) — while active, pointerdown on an occupied
+  // tile grabs that entity instead of erasing or placing; see beginGrab/
+  // endGrab. Independent of currentBrush, same as eraserActive.
+  private handActive = false;
+  // Set for the duration of a Hand-tool drag (pointerdown on an occupied
+  // tile through pointerup) — the tile the grabbed entity started on, so
+  // endGrab/onPointerMove know which marker sprite EntityPlacer's preview/
+  // cancel/commit calls are about. `null` whenever no drag is in progress.
+  private grabbedFromTile: TileCoord | null = null;
   // The right panel's "Enemy Size" selector — meaningful only when the
   // brush being placed is an enemy (see applyEntityBrushAt); persists
   // across brush/category switches like currentBrush itself does, rather
@@ -194,6 +205,7 @@ export class EditorScene extends Phaser.Scene {
         onRedo: () => this.redo(),
         onRenameLevel: (name) => this.renameLevel(name),
         onToggleEraser: () => this.toggleEraser(),
+        onToggleHand: () => this.toggleHand(),
         onSelectSize: (size) => (this.currentSize = size),
         onSelectArea: (key) => this.switchArea(key),
         onDeleteArea: () => this.deleteCurrentArea(),
@@ -227,7 +239,9 @@ export class EditorScene extends Phaser.Scene {
       if (!this.isOverGrid(pointer)) return; // Palette/Level Settings panel, header, footer, or the dead space below the grid
       const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
       const tileY = Math.floor((pointer.y - GRID_ORIGIN_Y) / TILE_SIZE);
-      if (this.eraserActive) {
+      if (this.handActive) {
+        this.beginGrab(tileX, tileY);
+      } else if (this.eraserActive) {
         this.isPointerDown = true;
         this.dragCommands = [];
         this.dragLastX = -1;
@@ -243,9 +257,10 @@ export class EditorScene extends Phaser.Scene {
         this.applyEntityBrushAt(tileX, tileY);
       }
     });
-    this.input.on("pointerup", () => {
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
       this.isPointerDown = false;
       this.flushDragCommands();
+      if (this.grabbedFromTile) this.endGrab(pointer);
     });
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer));
 
@@ -327,6 +342,7 @@ export class EditorScene extends Phaser.Scene {
     this.dragCommands = [];
     this.dragLastX = -1;
     this.dragLastY = -1;
+    this.grabbedFromTile = null; // any in-progress Hand-tool drag refers to the area being left; nothing to reconcile it against in the new one
 
     const area = this.area();
     this.backgroundId = resolveStaticBackground(area);
@@ -399,6 +415,14 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
+    // A Hand-tool drag in progress: the grabbed marker just follows the raw
+    // pointer (not snapped to a tile) for a natural "holding it" feel,
+    // regardless of whether the pointer is currently over the grid — the
+    // highlight/cursor-text logic below still runs afterward so the
+    // destination tile stays visible while dragging.
+    if (this.grabbedFromTile) {
+      this.entityPlacer.previewDragTo(this.grabbedFromTile.x, this.grabbedFromTile.y, pointer.x, pointer.y);
+    }
     if (!this.isOverGrid(pointer)) {
       this.highlight.setPosition(-100, -100);
       return;
@@ -507,7 +531,79 @@ export class EditorScene extends Phaser.Scene {
    * was selected before untouched. */
   private toggleEraser(): void {
     this.eraserActive = !this.eraserActive;
+    if (this.eraserActive) this.handActive = false;
     this.ui.setEraserActive(this.eraserActive);
+    this.ui.setHandActive(this.handActive);
+  }
+
+  /** Header-level Hand toggle — mutually exclusive with Eraser (turning one
+   * on turns the other off), same "flip a flag, hand it to the UI" shape as
+   * toggleEraser. Doesn't touch currentBrush, so switching Hand back off
+   * leaves whatever brush was selected before untouched, same as Eraser. */
+  private toggleHand(): void {
+    this.handActive = !this.handActive;
+    if (this.handActive) this.eraserActive = false;
+    this.ui.setHandActive(this.handActive);
+    this.ui.setEraserActive(this.eraserActive);
+  }
+
+  /** Starts a Hand-tool drag: grabs whatever entity occupies (tileX, tileY),
+   * if any — a no-op with a status message on an empty tile or a
+   * ground-only one, since the Hand tool only moves entities (Markers/
+   * Enemies/Items/Decor), never ground blocks — see endGrab's docstring.
+   * Just records which tile the drag started from; the actual visual
+   * follow happens in onPointerMove, and the data mutation only happens
+   * once endGrab commits it — nothing about the level changes here, so an
+   * aborted drag (e.g. pointer released off-screen) needs no cleanup beyond
+   * the sprite snapping back via cancelDrag. */
+  private beginGrab(tileX: number, tileY: number): void {
+    const area = this.area();
+    if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height) return;
+    if (!this.entityPlacer.entityAt(tileX, tileY)) {
+      this.ui.setStatus("Nothing to grab there");
+      return;
+    }
+    this.grabbedFromTile = { x: tileX, y: tileY };
+  }
+
+  /** Ends a Hand-tool drag, committing the move if the drop is valid or
+   * snapping the marker back to its origin tile otherwise. A drop is
+   * invalid — reverted via EntityPlacer.cancelDrag rather than moved — when
+   * it lands outside the grid, back on its own origin tile (nothing to do),
+   * or on a tile something else already occupies (blocked rather than
+   * swapped or displaced, the same "very simple first" cut this project
+   * takes elsewhere — see WorldMakerScene's own no-drag-reorder choice).
+   * Ground tiles are out of scope for the Hand tool entirely: it only ever
+   * looks up/moves entities (Markers/Enemies/Items/Decor), never touches
+   * `layers.ground`, matching "grab elements and move them" rather than
+   * "grab paint." A valid move becomes one MoveEntityCommand, undoable like
+   * any other edit. */
+  private endGrab(pointer: Phaser.Input.Pointer): void {
+    const from = this.grabbedFromTile;
+    if (!from) return;
+    this.grabbedFromTile = null;
+
+    if (!this.isOverGrid(pointer)) {
+      this.entityPlacer.cancelDrag(from.x, from.y);
+      return;
+    }
+    const area = this.area();
+    const tileX = Math.floor((pointer.x - GRID_ORIGIN_X) / TILE_SIZE);
+    const tileY = Math.floor((pointer.y - GRID_ORIGIN_Y) / TILE_SIZE);
+    if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height || (tileX === from.x && tileY === from.y)) {
+      this.entityPlacer.cancelDrag(from.x, from.y);
+      return;
+    }
+    if (this.entityPlacer.entityAt(tileX, tileY)) {
+      this.entityPlacer.cancelDrag(from.x, from.y);
+      this.ui.setStatus("Tile occupied");
+      return;
+    }
+
+    const command = new MoveEntityCommand(this.entityPlacer, from, { x: tileX, y: tileY });
+    command.execute();
+    this.history.push(command);
+    this.markDirty();
   }
 
   /** Erases whatever occupies (tileX, tileY): an entity first (any

@@ -186,7 +186,18 @@ Open the dev server URL in a browser. Controls:
   level can have any number of them, same as Enemies/Items/Decor — see
   "Checkpoints" under Art. **Basket (Down)** and **Basket (Up)** are two
   more exceptions — see the Area switcher bullet below.
-- **Area switcher** (header, right of Eraser): **Main** / **+Sub** /
+- **Hand** (header toggle, right of Eraser): grabs whatever entity occupies
+  a clicked tile and lets you drag it to a new one, instead of erasing and
+  re-placing to move something — press down on an entity, drag (the marker
+  follows your pointer), release over an empty tile to drop it there.
+  Releasing outside the grid, back on its own tile, or onto a tile
+  something else already occupies snaps it back to where it started (a
+  status toast says "Tile occupied" for the last case); a valid move is one
+  undo step, same as any other edit. Mutually exclusive with Eraser — only
+  one can be the active tool, so turning one on turns the other off. Only
+  moves entities (Markers/Enemies/Items/Decor); ground blocks aren't
+  grabbable — see "Hand tool" under Art.
+- **Area switcher** (header, right of Hand): **Main** / **+Sub** /
   **+Up** buttons switch which of the level's up-to-three grids you're
   editing — clicking **+Sub** or **+Up** the first time creates a blank
   area sized to match Main's current width/height, after which its button
@@ -255,8 +266,9 @@ Open the dev server URL in a browser. Controls:
   profiles" under Art for why this replaced `localStorage`) — every level
   you save is kept (see My Levels), not just the most recent one. You
   rarely need to click it: a persistent **● Saved / ● Unsaved changes /
-  ● Saving… / ● Save failed** indicator just left of the Save button in
-  the header (see "Autosave & save-state tracking" under Art) tracks
+  ● Saving… / ● Save failed** indicator in the footer's bottom-right corner
+  (moved there from the header as of 2026-08-17 — see "Autosave &
+  save-state tracking" under Art) tracks
   whether the level in memory matches storage, and edits autosave a couple
   seconds after you stop — Save itself still exists for "save right now
   and show a confirmation toast," and still mints the level's id on first
@@ -304,9 +316,10 @@ Open the dev server URL in a browser. Controls:
   came with it (typing a space used to launch Test Play; clicking Save
   right after typing a name used to silently drop it).
 - **Undo** / **Redo** (buttons, or Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z): a whole
-  paint drag or single entity placement/move undoes as one step. Clear
-  resets the undo history (undoing past a full level swap doesn't make
-  sense); so does loading a different level via My Levels → Edit.
+  paint drag, a single entity placement, or a Hand-tool drag-move undoes as
+  one step. Clear resets the undo history (undoing past a full level swap
+  doesn't make sense); so does loading a different level via My Levels →
+  Edit.
 
 ## Mobile / touch
 
@@ -526,16 +539,24 @@ tracks a `dirty` flag, flipped true by every paint drag, entity
 move, undo, and redo (`markDirty()`, called from those exact spots —
 `flushDragCommands`, `applyEntityBrushAt`, `undo`, `redo`), and flipped
 back false only once a save actually succeeds. A small persistent label
-in `EditorUI` (`saveStatusText`, in the header just left of Save as of
-2026-08-16) mirrors that flag in real
+in `EditorUI` (`saveStatusText`) mirrors that flag in real
 time as **● Saved** / **● Unsaved changes** / **● Saving…** / **●
 Save failed** — deliberately not the same mechanism as `setStatus`'s
 existing transient 2.5s toast (still used for one-off messages like
 "Cleared"), since a save-state readout needs to persist until the state
-actually changes, not disappear on a timer. `WorldMakerScene` has the
+actually changes, not disappear on a timer. It sat in the header, just
+left of Save, from 2026-08-16 until 2026-08-17, when it moved to the
+footer's right edge instead (`FOOTER_SAVE_STATUS_X`) — freeing up the
+header room the new Hand tool button needed (see "Hand tool" below) and
+giving the readout a spot among the footer's other read-only stats
+(level size/cursor tile/entity count) rather than crowding the header's
+button row, which was already tight once Delete's area-delete button is
+showing. `WorldMakerScene` has the
 identical `dirty`/`saveStatusText` pattern (added/removed levels mark it
-dirty), sharing the same four-state vocabulary and colors from
-`src/persistence/saveState.ts` rather than each scene inventing its own.
+dirty) in its own header-style corner — it has no footer band to move
+into, so it's unaffected by this — sharing the same four-state
+vocabulary and colors from `src/persistence/saveState.ts` rather than
+each scene inventing its own.
 
 Three triggers actually write to storage, all funneled through one
 `persistLevel()` (`persistWorld()` for Worlds) so id-minting,
@@ -1347,13 +1368,14 @@ vary category to category. The right panel, retitled **Level Settings**,
 keeps Background/Upload BG/Music/Upload Music, plus Clear (now a two-tap
 arm/confirm — see the Controls section above — instead of firing
 immediately); Test Play/Save/Menu/Undo/Redo moved out of it into the
-header, and the save-state indicator moved with Save. The **footer** is
+header. The **footer** is
 new: read-only level size (`W×H`), the live cursor tile (`EditorScene`
 calls `EditorUI.setCursorTile` from the same `onPointerMove` that already
 drives the hover highlight), and entity count (`EditorUI.setEntityCount`,
 called from `markDirty` since almost every edit could have changed it —
 cheaper than threading a "did the count actually change" check through
-every call site).
+every call site). The save-state indicator joined it as of 2026-08-17 —
+see "Hand tool" below.
 
 Shifting the grid down (not just right, as the 2026-08-14 pass already
 did) needed the same treatment `GRID_ORIGIN_X` got: a new `GRID_ORIGIN_Y`
@@ -2152,6 +2174,71 @@ again → Back round trip, confirming exactly one browse-list entry (an
 overwrite, not a duplicate) after the second save; and Delete correctly
 returning the browse list to its empty state.
 
+**Hand tool (2026-08-17).** A new header toggle, right of Eraser, for
+moving an already-placed entity without erasing and re-placing it — press
+down on an occupied tile to grab whatever's there, drag (the marker
+sprite follows the raw pointer position, not snapped to a tile, for a
+natural "holding it" feel), release over an empty tile to drop it.
+Mutually exclusive with Eraser, same shape as the two Enemy-Size-style
+toggles elsewhere in this UI: `EditorScene.toggleHand`/`toggleEraser` each
+clear the other's flag before handing both states to
+`EditorUI.setHandActive`/`setEraserActive`, so only one can ever be the
+active tool, and a distinct color (`HAND_ACTIVE_COLOR`, purple, vs.
+Eraser's red) makes which one at a glance.
+
+Scoped to entities only (Markers/Enemies/Items/Decor) — "grab elements and
+move them," not "grab paint" — so ground blocks aren't grabbable at all;
+`EntityPlacer.entityAt` is the only lookup `beginGrab` makes, with no
+fallback to the ground layer the way the universal Eraser has one. Three
+new `EntityPlacer` methods carry the whole gesture, all keyed by tile
+position like `entityAt`/`removeAt` already were:
+
+- `previewDragTo(fromX, fromY, worldX, worldY)` — a pure visual
+  reposition of the marker sprite still filed under its origin tile,
+  called from `onPointerMove` on every frame a drag is in progress. Never
+  touches `level.entities` or the markers map's key, so nothing about the
+  level actually changes until the drag commits.
+- `cancelDrag(fromX, fromY)` — snaps the marker back to its own tile's
+  center. Covers every way a drag can end without committing: dropped
+  outside the grid, back on its own tile (no-op, nothing to do), or onto a
+  tile something else already occupies (blocked rather than swapped or
+  displaced — the same "very simple first" cut this project takes
+  elsewhere, e.g. World Maker's own no-drag-reorder choice — with a "Tile
+  occupied" status toast so the block doesn't read as the tool silently
+  failing).
+- `moveTo(fromX, fromY, toX, toY)` — commits the move: updates the
+  entity's `x`/`y` in place and re-keys the markers map, repositioning the
+  *same* sprite rather than destroying and recreating it, so a custom skin
+  texture or an Enemy Size display scale already applied to it survives
+  the move untouched. Unconditional like `add`/`removeAt` — `EditorScene`'s
+  `endGrab` is responsible for having already confirmed the destination
+  was empty.
+
+A successful drop becomes one `MoveEntityCommand` (new, alongside
+`AddEntityCommand`/`EraseEntityCommand`) — `execute` calls `moveTo` one
+way, `undo` calls it the other, so Ctrl+Z/Ctrl+Y cover a Hand-tool move
+exactly like any other edit, and it counts as a normal `markDirty` edit
+for autosave purposes too. Verified end-to-end in a mocked-Drive
+Playwright session: grab-drag-drop moving a Spawn marker to a new tile,
+Ctrl+Z reverting it and Ctrl+Shift+Z re-applying it, dragging it onto a
+tile an already-placed Goal occupied (blocked, "Tile occupied" toast,
+snapped back to its pre-drag position, entity count unchanged), and
+toggling Eraser while Hand was active correctly turning Hand back off.
+
+**Save-state readout moved to the footer (2026-08-17).** Freeing up room
+in the header for the Hand tool button (see above) was the immediate
+reason, but the footer is also just a better fit for a persistent,
+read-only stat — its own doc-comment now spells out why: unlike the other
+three footer slots (level size, cursor tile, entity count), which are
+left-aligned in fixed slots since nothing downstream of them depends on
+their width, the save-state readout is right-aligned to the footer's own
+edge (`FOOTER_SAVE_STATUS_X = GAME_WIDTH - PANEL_PADDING`), the one thing
+in the footer worth a dedicated, always-in-the-same-corner spot, the way
+it had next to Save before. `WorldMakerScene`'s own save-state label is
+unaffected — that scene has no footer band to move it into, so it stays
+in its original header-style corner (top-right, below its own Save World
+button).
+
 ## Project layout
 
 See `docs/spellbound-editor-implementation-plan.md` §4 for the intended
@@ -2186,6 +2273,7 @@ src/
 │       ├── PaintTileCommand.ts
 │       ├── AddEntityCommand.ts  adds one entity; undo removes it
 │       ├── EraseEntityCommand.ts removes one entity; undo re-adds it from its own snapshot
+│       ├── MoveEntityCommand.ts relocates one entity (Hand tool); undo moves it back
 │       ├── CompositeCommand.ts batches a whole drag (or an entity move/replace — see "Entity eraser & multiple instances" under Art) into one undo step
 │       └── HistoryStack.ts    undo/redo stacks (+ unit tests)
 ├── level/
