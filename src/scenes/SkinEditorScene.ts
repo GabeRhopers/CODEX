@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { Brush, PALETTE } from "../editor/Palette";
-import { PixelCanvasOverlay } from "../editor/PixelCanvasOverlay";
+import { PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { fitWithinTile } from "../editor/spriteFit";
 import { loadActiveProfile } from "../profile/Profile";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES } from "../skins/pixelPalettes";
@@ -14,6 +14,10 @@ const BUTTON_HOVER_COLOR = 0x3a5a9c;
 const ARM_TIMEOUT_MS = 3000;
 const ROW_START_Y = 90;
 const ROW_HEIGHT = 44;
+// How much a single Zoom +/- click changes the canvas's on-screen size —
+// see PixelCanvasOverlay.setDisplaySize for the [MIN_DISPLAY_SIZE,
+// MAX_DISPLAY_SIZE] clamp this steps within.
+const ZOOM_STEP = 40;
 
 type Mode = "browse" | "pick-brush" | "canvas";
 
@@ -53,11 +57,24 @@ export class SkinEditorScene extends Phaser.Scene {
   private mode: Mode = "browse";
   private target?: EditingTarget;
   private pixelCanvas?: PixelCanvasOverlay;
-  private currentColor: string | null = null;
   private statusText?: Phaser.GameObjects.Text;
   private clearButton?: Phaser.GameObjects.Text;
   private clearArmed = false;
   private clearArmTimer?: Phaser.Time.TimerEvent;
+  // Every field below is a *tool preference*, not per-skin data — deliberately
+  // never reset in create()/rebuild(), same convention currentColor already
+  // followed before this pass: picking Fill or zooming in once should still
+  // feel that way the next time you open the Skin Creator this session,
+  // not silently revert to defaults every time you switch brushes or skins.
+  private currentColor: string | null = null;
+  private currentTool: PixelTool = "paint";
+  private mirrorEnabled = false;
+  private gridVisible = false;
+  private canvasSize = 280;
+  // Phaser's keyboard queue can re-emit one physical keydown more than
+  // once within a single rendered frame under frame stalls — see
+  // EditorScene's onceThisFrame for the same guard and why.
+  private readonly lastActionFrame = new Map<string, number>();
 
   constructor() {
     super("SkinEditor");
@@ -67,6 +84,42 @@ export class SkinEditorScene extends Phaser.Scene {
     this.mode = "browse";
     this.target = undefined;
     this.rebuild();
+
+    // Registered once here, not inside buildCanvas() — rebuild() reruns
+    // buildCanvas() on every palette switch and browse<->canvas round
+    // trip without ever re-running create(), so registering these inside
+    // buildCanvas() instead would stack up a fresh duplicate listener on
+    // every visit to canvas mode, firing undo/redo multiple times per
+    // keypress after a few round trips. The `this.mode !== "canvas"`
+    // guard is what actually scopes these to canvas mode instead.
+    this.input.keyboard?.on("keydown-Z", (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (this.mode !== "canvas") return;
+      event.preventDefault();
+      if (event.shiftKey) this.onceThisFrame("redo", () => this.performRedo());
+      else this.onceThisFrame("undo", () => this.performUndo());
+    });
+    this.input.keyboard?.on("keydown-Y", (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (this.mode !== "canvas") return;
+      event.preventDefault();
+      this.onceThisFrame("redo", () => this.performRedo());
+    });
+  }
+
+  private onceThisFrame(action: string, fn: () => void): void {
+    const frame = this.game.loop.frame;
+    if (this.lastActionFrame.get(action) === frame) return;
+    this.lastActionFrame.set(action, frame);
+    fn();
+  }
+
+  private performUndo(): void {
+    if (!this.pixelCanvas?.undo()) this.statusText?.setText("Nothing to undo").setColor("#ffeb3b");
+  }
+
+  private performRedo(): void {
+    if (!this.pixelCanvas?.redo()) this.statusText?.setText("Nothing to redo").setColor("#ffeb3b");
   }
 
   private rebuild(): void {
@@ -262,7 +315,16 @@ export class SkinEditorScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, 20, `Editing: ${target.brush.label}`, { fontSize: "16px", color: "#ffffff" })
       .setOrigin(0.5, 0);
 
-    this.makeSmallButton(GAME_WIDTH - 24 - 60, 20 + 10, "Save", () => this.onSave()).setOrigin(0, 0.5);
+    // --- header right cluster: Undo, Redo, Save — Save stays at its
+    // fixed spot; Redo/Undo are auto-width Text buttons (makeSmallButton
+    // has no fixed-width rectangle the way EditorUI's header buttons do),
+    // so each is positioned from its *own* rendered `.width` immediately
+    // after creation, right-to-left, rather than a guessed pixel offset. ---
+    const saveButton = this.makeSmallButton(GAME_WIDTH - 24 - 60, 20 + 10, "Save", () => this.onSave());
+    const redoButton = this.makeSmallButton(0, 20 + 10, "Redo", () => this.performRedo());
+    redoButton.setX(saveButton.x - 8 - redoButton.width);
+    const undoButton = this.makeSmallButton(0, 20 + 10, "Undo", () => this.performUndo());
+    undoButton.setX(redoButton.x - 8 - undoButton.width);
 
     this.statusText = this.add.text(GAME_WIDTH / 2, 44, "", { fontSize: "12px", color: "#4ade80" }).setOrigin(0.5, 0);
 
@@ -290,13 +352,42 @@ export class SkinEditorScene extends Phaser.Scene {
       px += paletteButtonWidth + 8;
     }
 
+    // --- tool-mode buttons (Paint / Fill / Pick), right-aligned on the
+    // swatch row's own y — declared before the swatch row below since a
+    // swatch click resumes Paint mode (see setTool inside the swatch
+    // handler), same "eyedropper is momentary" reasoning the
+    // onColorPicked callback further down uses. Pinned to the row's right
+    // edge rather than laid out relative to the swatch row's own (palette-
+    // dependent) width, so it never collides with it even for the widest
+    // palette (Pico-8/Sweetie16/DawnBringer's 17-item row still leaves
+    // ~250px of clearance here). ---
+    const sy = 96;
+    const toolButtons: { tool: PixelTool; button: Phaser.GameObjects.Text }[] = [];
+    const refreshToolHighlight = (): void => {
+      for (const { tool, button } of toolButtons) {
+        button.setStyle({ backgroundColor: tool === this.currentTool ? "#3a5a9c" : "#0f3460" });
+      }
+    };
+    const setTool = (tool: PixelTool): void => {
+      this.currentTool = tool;
+      this.pixelCanvas?.setTool(tool);
+      refreshToolHighlight();
+    };
+    const pickButton = this.makeSmallButton(0, sy + 12, "Pick", () => setTool("eyedropper"));
+    pickButton.setX(GAME_WIDTH - 24 - pickButton.width);
+    const fillButton = this.makeSmallButton(0, sy + 12, "Fill", () => setTool("fill"));
+    fillButton.setX(pickButton.x - 6 - fillButton.width);
+    const paintButton = this.makeSmallButton(0, sy + 12, "Paint", () => setTool("paint"));
+    paintButton.setX(fillButton.x - 6 - paintButton.width);
+    toolButtons.push({ tool: "paint", button: paintButton }, { tool: "fill", button: fillButton }, { tool: "eyedropper", button: pickButton });
+    refreshToolHighlight();
+
     // --- color swatch row (palette colors + a transparent "eraser") ---
     const swatchSize = 24;
     const swatchGap = 6;
     const swatchColors: (string | null)[] = [...palette.colors, null];
     const swatchRowWidth = swatchColors.length * (swatchSize + swatchGap) - swatchGap;
     let sx = (GAME_WIDTH - swatchRowWidth) / 2;
-    const sy = 96;
     if (this.currentColor === null || !palette.colors.includes(this.currentColor)) {
       this.currentColor = palette.colors[0];
     }
@@ -319,6 +410,17 @@ export class SkinEditorScene extends Phaser.Scene {
       bg.on("pointerdown", () => {
         this.currentColor = color;
         this.pixelCanvas?.setCurrentColor(color);
+        // Only Eyedropper auto-reverts here — it's a momentary "sample and
+        // get back to work" gesture, so picking a color instead of
+        // clicking the canvas still counts as "done sampling." Fill is
+        // the opposite: it's a deliberate, sticky mode (fill one region,
+        // pick a different color, fill another, repeat) — forcing it back
+        // to Paint on every single color change would silently break that
+        // workflow before a fill click ever lands (a real bug caught in
+        // testing: Fill -> pick a color -> click the canvas only ever
+        // painted one cell, because this handler had already switched the
+        // tool back to Paint out from under the click).
+        if (this.currentTool === "eyedropper") setTool("paint");
         refreshSwatchHighlight();
       });
       swatchNodes.push({ color, bg });
@@ -326,23 +428,77 @@ export class SkinEditorScene extends Phaser.Scene {
     }
     refreshSwatchHighlight();
 
-    // --- the 32x32 pixel canvas itself ---
-    const canvasDisplaySize = 280;
+    // --- the 32x32 pixel canvas itself — size is a persisted tool
+    // preference (see canvasSize's own field docstring), not always 280 ---
+    const canvasDisplaySize = this.canvasSize;
     const canvasRect: GameRect = {
       x: (GAME_WIDTH - canvasDisplaySize) / 2,
       y: 132,
       width: canvasDisplaySize,
       height: canvasDisplaySize,
     };
-    this.pixelCanvas = new PixelCanvasOverlay(this, canvasRect, target.initialCells, () => {
-      /* live strokes need no per-cell UI feedback beyond the canvas's own redraw */
-    });
+    this.pixelCanvas = new PixelCanvasOverlay(
+      this,
+      canvasRect,
+      target.initialCells,
+      () => {
+        /* live strokes need no per-cell UI feedback beyond the canvas's own redraw */
+      },
+      (picked) => {
+        // Eyedropper is momentary — sampling a color resumes Paint with
+        // it immediately rather than requiring a manual switch back, same
+        // "pick a color, keep working" flow every other pixel-art tool
+        // gives this gesture.
+        this.currentColor = picked;
+        refreshSwatchHighlight();
+        setTool("paint");
+      },
+    );
     this.pixelCanvas.setCurrentColor(this.currentColor);
+    this.pixelCanvas.setTool(this.currentTool);
+    this.pixelCanvas.setMirrorX(this.mirrorEnabled);
+    this.pixelCanvas.setGridVisible(this.gridVisible);
 
-    // --- Clear (two-tap confirm, same shape as EditorUI's Clear/Delete Area) ---
-    this.clearButton = this.makeSmallButton(GAME_WIDTH / 2 - 30, canvasRect.y + canvasRect.height + 20, "Clear", () =>
-      this.onClearClicked(),
-    ).setOrigin(0.5, 0.5);
+    // --- left column beside the canvas: viewing aids (Zoom, Grid) — a
+    // fixed x=40 regardless of canvasDisplaySize, since even the largest
+    // canvas (MAX_DISPLAY_SIZE, centered) still leaves this column clear
+    // (its left edge never comes closer than ~365px from x=0). ---
+    this.makeSmallButton(40, canvasRect.y + 40, "Zoom +", () => this.adjustZoom(ZOOM_STEP));
+    this.makeSmallButton(40, canvasRect.y + 80, "Zoom −", () => this.adjustZoom(-ZOOM_STEP));
+    const gridButton = this.makeSmallButton(40, canvasRect.y + 120, this.gridVisible ? "Grid: On" : "Grid: Off", () => {
+      this.gridVisible = !this.gridVisible;
+      this.pixelCanvas?.setGridVisible(this.gridVisible);
+      gridButton.setText(this.gridVisible ? "Grid: On" : "Grid: Off").setStyle({ backgroundColor: this.gridVisible ? "#3a5a9c" : "#0f3460" });
+    });
+
+    // --- right column beside the canvas: actions that affect the
+    // drawing (Mirror, Clear) — same "always clear of the canvas at any
+    // zoom level" reasoning as the left column, mirrored. ---
+    const mirrorButton = this.makeSmallButton(
+      GAME_WIDTH - 24 - 130,
+      canvasRect.y + 40,
+      this.mirrorEnabled ? "Mirror: On" : "Mirror: Off",
+      () => {
+        this.mirrorEnabled = !this.mirrorEnabled;
+        this.pixelCanvas?.setMirrorX(this.mirrorEnabled);
+        mirrorButton.setText(this.mirrorEnabled ? "Mirror: On" : "Mirror: Off").setStyle({ backgroundColor: this.mirrorEnabled ? "#3a5a9c" : "#0f3460" });
+      },
+    );
+    // Clear (two-tap confirm, same shape as EditorUI's Clear/Delete Area)
+    this.clearButton = this.makeSmallButton(GAME_WIDTH - 24 - 130, canvasRect.y + 80, "Clear", () => this.onClearClicked());
+  }
+
+  /** Zoom just resizes PixelCanvasOverlay's on-screen CSS box (see its own
+   * setDisplaySize docstring) — no scene rebuild, so it can't disturb the
+   * undo/redo history or drop an in-progress stroke the way routing this
+   * through goTo("canvas") (like the palette switcher does) would.
+   * `getDisplaySize()` reads back the *clamped* result so `canvasSize`
+   * only ever persists a value already known to fit the layout, however
+   * many times Zoom + is clicked past the ceiling. */
+  private adjustZoom(delta: number): void {
+    if (!this.pixelCanvas) return;
+    this.pixelCanvas.setDisplaySize(this.pixelCanvas.getDisplaySize() + delta);
+    this.canvasSize = this.pixelCanvas.getDisplaySize();
   }
 
   private onClearClicked(): void {

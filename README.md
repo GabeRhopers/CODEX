@@ -167,7 +167,14 @@ Open the dev server URL in a browser. Controls:
   pixel-drawn skin to re-edit, or **+ New Skin** and choose which of the
   ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
   skin library and makes it active immediately, same as an ordinary
-  upload — see the Custom skins bullet below.
+  upload — see the Custom skins bullet below. Its own canvas has **Undo/
+  Redo** (buttons or Ctrl+Z/Ctrl+Y), **Paint/Fill/Pick** tools (Fill
+  flood-fills a same-color region; Pick samples a color already on the
+  canvas and resumes painting with it), a **Mirror** toggle (paints the
+  horizontal-mirror cell too), a **Grid** overlay, and **Zoom +/−** —
+  right-click (or a right-button drag) always erases regardless of the
+  selected tool or color, no swatch-switching needed. See "Skin Creator
+  tools" under Art for the full 2026-08-17 pass that added all of this.
 - **Palette** (left panel): a **category chip** at the top (e.g. "Blocks
   ▾") expands into the 5 categories — Blocks, Markers, Enemies, Items,
   Decor — on tap; picking one collapses it back and shows that category's
@@ -2126,7 +2133,8 @@ partway through with one palette and then switching to browse a different
 one's swatches doesn't wipe unsaved strokes — only an explicit two-tap
 **Clear** (matching `EditorUI`'s existing Clear/Delete-Area confirm
 pattern, 3-second auto-disarm) actually erases the canvas. Undo/redo was
-deliberately scoped out of v1 for effort reasons.
+deliberately scoped out of v1 for effort reasons — added the same day, see
+"Skin Creator tools" below.
 
 *Pixel-perfect by construction.* `PixelCanvasOverlay` is a real DOM
 `<canvas>` (positioned over the Phaser canvas the same way
@@ -2177,6 +2185,99 @@ Edit → switch palette mid-edit (strokes survive) → paint more → Save
 again → Back round trip, confirming exactly one browse-list entry (an
 overwrite, not a duplicate) after the second save; and Delete correctly
 returning the browse list to its empty state.
+
+**Skin Creator tools (2026-08-17).** A follow-up pass adding six things a
+review of the v1 canvas flagged as missing, all in `PixelCanvasOverlay`
+(the data/interaction layer) and `SkinEditorScene` (the buttons wiring
+each into the UI):
+
+- *Undo/redo* — the biggest gap, since v1 had no way back from a stray
+  click short of nuking the whole canvas with Clear. `PixelCanvasOverlay`
+  gained its own small history (an array of `{index, prevColor,
+  newColor}` deltas per cell, batched per pointerdown-drag-pointerup
+  gesture or per flood fill into one `undoStack` entry) — a much lighter
+  mechanism than the level editor's Command/HistoryStack classes, since a
+  cell-color delta needs no GameObjects or brush lookups to replay. Ctrl+Z
+  /Ctrl+Y and header Undo/Redo buttons mirror `EditorScene`'s own
+  shortcuts exactly, including the `onceThisFrame` frame-stall guard —
+  registered once in `create()`, not inside `buildCanvas()`, since
+  `rebuild()` reruns `buildCanvas()` on every palette switch and
+  browse↔canvas round trip without ever re-running `create()`; registering
+  keyboard listeners inside `buildCanvas()` instead would have stacked a
+  fresh duplicate listener on every visit to canvas mode, firing undo/redo
+  multiple times per keypress after a few round trips. Loading a different
+  skin to edit, or Clear, both reset the undo/redo stacks — same "a fresh
+  editing session shouldn't carry someone else's undo history" reasoning
+  `EditorScene`'s own Undo/Redo bullet already documents for loading a
+  different level.
+- *Bucket fill* — a `Paint`/`Fill`/`Pick` tool-mode row (right side of the
+  swatch row). Fill is a classic 4-directional (not diagonal) flood fill
+  from the clicked cell, bounded by the target color's own contiguous
+  region, so painting a hollow border first and then filling its interior
+  never bleeds past the border. One `pointerdown` — dragging with Fill
+  active doesn't repeatedly re-flood-fill every cell the pointer crosses.
+- *Zoom* — `PixelCanvasOverlay.setDisplaySize` (clamped to `[200, 320]`)
+  resizes the on-screen CSS box only, re-centered on its previous middle
+  so zooming never shifts the drawing — the 32x32 pixel buffer, `cells`,
+  and undo history are all completely untouched, unlike routing this
+  through a `goTo("canvas")` scene rebuild the way the palette switcher
+  does (which would have wiped the undo stack via `loadCells`). This
+  needed a layout change to have room to matter: v1 put Clear in a row
+  below the canvas, leaving only ~6px of vertical slack in the scene's
+  fixed 468px height — Clear (and the new Mirror toggle) moved to a
+  column beside the canvas instead, freeing the space Zoom needed.
+- *Grid overlay* — a second, sibling `<div>` layered above the canvas
+  with a pure-CSS repeating-gradient grid (`background-size: calc(100% /
+  32)`, so it self-aligns to cell boundaries at any zoom level with no JS
+  math) rather than anything drawn into the pixel buffer itself — keeps
+  it structurally impossible to leak into `exportPngDataUrl()`'s output,
+  same reasoning the checkerboard background already used.
+- *Eyedropper + right-click erase* — Pick samples `cells[index]` back into
+  the current color and auto-reverts to Paint immediately (a momentary
+  "sample and get back to work" gesture, matching every other pixel-art
+  tool's own eyedropper convention). A right-button held during
+  `pointerdown`/`pointermove` (`e.buttons & 2`) always erases regardless
+  of the selected tool or color — a quick "get rid of this" without a
+  swatch round trip — with the canvas's own `contextmenu` listener
+  suppressed so the browser's right-click menu doesn't interrupt the
+  gesture.
+- *Mirror* — a toggle that routes every committed cell (paint, fill, or
+  right-click erase — all three funnel through the same
+  `setCellWithMirror`) through a horizontal-mirror pair too. Mirrors the
+  *action*, not "independently flood-fill both sides" — simpler and more
+  predictable than the two sides disagreeing about where their own fill
+  boundary is if the drawing isn't already symmetric.
+
+**A real bug found in testing: picking a color silently cancelled Fill.**
+The swatch click handler auto-reverted the active tool to Paint on every
+color pick — copied from the eyedropper's own "resume painting after a
+pick" convenience without noticing the two cases aren't the same. For
+Eyedropper that's correct (picking a color *is* the action, so there's
+nothing left to stay in eyedropper mode for). For Fill it broke the whole
+workflow: select Fill, pick a color, click the canvas — except the swatch
+click had already silently switched back to Paint before the canvas click
+landed, so only the single clicked cell ever got painted instead of the
+region flood-filling, with no error and no visual indication anything had
+gone wrong. Caught by a Playwright screenshot showing one red pixel where
+a filled region was expected, not by reasoning about the code — a
+reminder that this class of "silently does the wrong thing, no crash" bug
+is exactly what browser verification catches and a passing build cannot.
+Fixed by only auto-reverting from Eyedropper specifically
+(`if (this.currentTool === "eyedropper") setTool("paint")`), leaving Fill
+undisturbed across as many color changes as a multi-color fill session
+needs.
+
+Verified end-to-end in a mocked-Drive Playwright session at a >1x canvas
+scale: painting a hollow border then flood-filling its interior (contained
+exactly within the border, not bleeding past it), undoing the fill as one
+step and redoing it, enabling Mirror and confirming one click paints both
+a cell and its horizontal-mirror partner, sampling a filled cell's color
+with Eyedropper (confirmed by the Paint tool button re-highlighting and
+the matching swatch showing selected) and painting elsewhere with the
+sampled color, right-click-erasing a cell with Mirror off, toggling the
+Grid overlay on over existing artwork, and zooming in twice — canvas
+visibly larger, grid still aligned, painted design and undo history both
+completely intact.
 
 **Hand tool (2026-08-17).** A new header toggle, right of Eraser, for
 moving an already-placed entity without erasing and re-placing it — press
