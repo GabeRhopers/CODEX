@@ -344,9 +344,19 @@ box, then resized to a 48px-tall PNG with alpha premultiplied before a
 LANCZOS downscale and unpremultiplied after (plain RGBA resize would
 otherwise fringe dark or light halos at the transparent edge). Sized to
 land in the same visual range as the enemy/goal illustrations it sits
-next to (ghost-pillow is 40x40; this is 43x48) — `PlayScene` renders it
+next to (ghost-pillow is 40x40; this was 43x48) — `PlayScene` renders it
 at that native pixel size with no additional scaling beyond its existing
 idle pulse tween, same as before.
+
+As of 2026-08-17, the caged-sheep art itself was swapped for a new
+project-owner-supplied version (a blockier, flat-shaded pixel-art take on
+the same "creature behind gold cage bars" idea) — same filename/texture
+key, so still nothing beyond the source PNG needed to change. Simpler to
+process than the original: the supplied file already carried a real alpha
+channel (background fully transparent, not painted white), so no flood
+fill was needed — just crop to content and the same premultiplied-alpha
+LANCZOS downscale to 48px tall (37x48 this time, since the new art reads
+narrower than the old one at the same height).
 
 **Ground tiles merge with their neighbors.** Ground tiles have no border,
 and which of two dirt/grass frames a cell renders as (grass-capped
