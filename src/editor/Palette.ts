@@ -49,8 +49,13 @@ export const CATEGORIES: { id: BrushCategory; label: string }[] = [
  *
  * Markers (Spawn/Goal/Chest) stay one-per-type-per-level — PlayScene's
  * spawn/win/chest-open logic is built around exactly one of each, Spawn
- * especially (the player can only start in one place). Enemies/Items/Decor
- * have no such limit: a level can have any number of each, one per tile
+ * especially (the player can only start in one place). Checkpoint is the
+ * one exception within the Markers category: a level can have any number
+ * of them, same as Enemies/Items/Decor below, since the whole point is
+ * offering several respawn points along a level — see PlayScene's
+ * checkpoint handling for why "singleton" doesn't apply to it the way it
+ * does to its Marker siblings. Enemies/Items/Decor have no per-type limit
+ * either: a level can have any number of each, one per tile
  * (see EntityPlacer's docstring for the shared "one entity per tile"
  * invariant). Erasing isn't a brush here at all as of the header redesign —
  * see EditorScene's `eraserActive` — so there's no per-category Erase
@@ -115,6 +120,7 @@ export const PALETTE: Brush[] = [
   { id: "spawn", category: "markers", kind: "entity", label: "Spawn", textureKey: "marker-spawn", entityType: "player-spawn" },
   { id: "goal", category: "markers", kind: "entity", label: "Goal", textureKey: "goal-portal", entityType: "goal" },
   { id: "chest", category: "markers", kind: "entity", label: "Chest", textureKey: "chest", entityType: "chest" },
+  { id: "checkpoint", category: "markers", kind: "entity", label: "Checkpoint", textureKey: "checkpoint-bell", entityType: "checkpoint" },
   { id: "enemy-ghost", category: "enemies", kind: "entity", label: "Ghost", textureKey: "enemy-ghost-pillow", entityType: "enemy-ghost" },
   { id: "enemy-spike", category: "enemies", kind: "entity", label: "Spike", textureKey: "enemy-spike-crawler", entityType: "enemy-spike" },
   { id: "enemy-bat", category: "enemies", kind: "entity", label: "Bat", textureKey: "enemy-bat", entityType: "enemy-bat" },

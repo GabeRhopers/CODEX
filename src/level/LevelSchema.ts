@@ -36,6 +36,7 @@ export const SCHEMA_VERSION = 2 as const;
 export type EntityType =
   | "player-spawn"
   | "goal"
+  | "checkpoint"
   | "enemy-ghost"
   | "enemy-spike"
   | "enemy-bat"

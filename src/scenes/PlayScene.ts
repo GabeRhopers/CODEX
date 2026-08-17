@@ -53,6 +53,17 @@ const SWIM_SINK_VELOCITY = 80;
 // update()) — water slows horizontal movement the same way it would in
 // any platformer, without needing a second buff-stacking system.
 const SWIM_SPEED_MULTIPLIER = 0.6;
+// Green reads as "good/active" against every one of this game's built-in
+// backgrounds and the bell's own cyan/blue art, matching the existing
+// buff-tint convention (see updateBuffVisuals) of a flat setTint rather
+// than a second baked texture — cheap, and it survives a user-uploaded
+// skin of any color scheme instead of needing an "activated" variant of
+// whatever image they chose.
+const CHECKPOINT_ACTIVE_TINT = 0x4ade80;
+// How long the "Checkpoint!" toast (see showCheckpointToast) stays up —
+// shorter than EditorUI.setStatus's 2500ms since this fires mid-platforming
+// and shouldn't linger over the action.
+const CHECKPOINT_TOAST_MS = 1200;
 
 /** Every item brush's textureKey equals its EntityType (see Palette.ts), so
  * spawning just needs the type list — no separate texture lookup like
@@ -100,6 +111,23 @@ interface WorldPlayContext {
   index: number;
 }
 
+/** Tile coordinates of the checkpoint the player last touched this play
+ * session — see restart()/the checkpoint handling in create() for why this
+ * rides along in PlaySceneData rather than living only as a private field.
+ * `scene.restart()` reruns init()/create() from scratch, discarding every
+ * instance field along with it (same reason `world`/`returnScene` are
+ * threaded through the same way), so a checkpoint touched before dying
+ * would otherwise be forgotten the moment Restart reconstructs the scene.
+ * Deliberately never set by a *fresh* entry (Test Play, a World's first
+ * level, Templates, Next Level) — only restart() itself carries it
+ * forward — so checkpoint progress is scoped to "retrying this same
+ * attempt," not persisted across separate play sessions the way the level
+ * itself is. */
+interface CheckpointCoord {
+  x: number;
+  y: number;
+}
+
 interface PlaySceneData {
   level: LevelData;
   world?: WorldPlayContext;
@@ -109,6 +137,7 @@ interface PlaySceneData {
    * Defaults to resuming the paused Editor scene, the original Test Play
    * behavior, when omitted. */
   returnScene?: string;
+  checkpoint?: CheckpointCoord;
 }
 
 export class PlayScene extends Phaser.Scene {
@@ -138,6 +167,20 @@ export class PlayScene extends Phaser.Scene {
   private music?: Phaser.Sound.BaseSound;
   private hud!: Phaser.GameObjects.Text;
   private trophy!: Phaser.GameObjects.Image;
+  // Tile coords of the last-touched checkpoint this play session, or
+  // undefined for "no checkpoint touched yet, respawn at Spawn" — see
+  // CheckpointCoord's docstring. Reset fresh (from `data.checkpoint`,
+  // itself only ever set by restart()) on every init(), same lifecycle as
+  // `world`/`returnScene`.
+  private checkpoint?: CheckpointCoord;
+  // Whichever checkpoint sprite is currently showing as "active" (tinted
+  // — see activateCheckpoint), so touching a *different* one can revert
+  // this one's tint without needing to search spritesByBrushId for it.
+  // Reconstructed fresh in create() alongside every other sprite; not
+  // threaded through restart() the way `checkpoint` itself is, since
+  // create() re-derives it from `this.checkpoint` when spawning.
+  private activeCheckpointSprite?: Phaser.GameObjects.Image;
+  private checkpointToast!: Phaser.GameObjects.Text;
   // Every goal/chest/enemy/item/decor sprite spawned below, grouped by
   // its Palette brush id (equal to its EntityType for every one of these
   // — only Spawn's id/type differ, "spawn"/"player-spawn", and Spawn has
@@ -160,6 +203,8 @@ export class PlayScene extends Phaser.Scene {
     this.level = data.level;
     this.world = data.world;
     this.returnScene = data.returnScene;
+    this.checkpoint = data.checkpoint;
+    this.activeCheckpointSprite = undefined;
     this.outcome = "playing";
     this.wizardAnim = createWizardAnimState();
     this.enemies = [];
@@ -232,10 +277,17 @@ export class PlayScene extends Phaser.Scene {
     this.groundLayer.setCollisionByExclusion([-1, ...WATER_FRAMES, ...HAZARD_FRAMES]);
 
     const spawn = this.level.entities.find((e) => e.type === "player-spawn");
-    const spawnX = spawn ? GRID_ORIGIN_X + spawn.x * TILE_SIZE + TILE_SIZE / 2 : GRID_ORIGIN_X + TILE_SIZE;
+    // A checkpoint touched earlier this same play session (see
+    // CheckpointCoord's docstring) takes priority over the level's own
+    // Spawn marker — that's the entire point of Restart carrying it
+    // forward. Falls back to Spawn (and Spawn's own GRID_ORIGIN_X/
+    // TILE_SIZE fallback for a level with neither) exactly as before this
+    // feature existed when no checkpoint has been touched yet.
+    const respawnTile = this.checkpoint ?? spawn;
+    const spawnX = respawnTile ? GRID_ORIGIN_X + respawnTile.x * TILE_SIZE + TILE_SIZE / 2 : GRID_ORIGIN_X + TILE_SIZE;
     // Bottom-anchored (see below), so Y is where the feet should land — the
-    // top of the ground tile one row below the spawn marker's tile.
-    const spawnY = GRID_ORIGIN_Y + (spawn ? (spawn.y + 1) * TILE_SIZE : TILE_SIZE);
+    // top of the ground tile one row below the spawn/checkpoint tile.
+    const spawnY = GRID_ORIGIN_Y + (respawnTile ? (respawnTile.y + 1) * TILE_SIZE : TILE_SIZE);
 
     // Left/right only (checkUp/checkDown false below) — the player and
     // enemies must not walk/patrol past where the level's ground and
@@ -272,6 +324,31 @@ export class PlayScene extends Phaser.Scene {
       const goalZone = this.add.zone(goalX, goalY, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(goalZone, true);
       this.physics.add.overlap(this.player, goalZone, () => this.onWin());
+    }
+
+    // Checkpoints have no per-level instance limit, unlike Spawn/Goal/Chest
+    // — see Palette.ts's docstring on why Checkpoint is the one Marker
+    // that behaves like Enemies/Items/Decor below rather than its Marker
+    // siblings. Each spawns its own persistent sprite (unlike an item, a
+    // checkpoint is never destroyed on touch — it stays visible, and stays
+    // touchable, so backtracking to an earlier one can reactivate it) plus
+    // an overlap zone that calls activateCheckpoint. A checkpoint whose
+    // tile matches `this.checkpoint` (the one carried forward by restart())
+    // starts already activated, so respawning after a death shows the
+    // right bell lit up without needing the player to touch it again.
+    for (const entity of this.level.entities.filter((e) => e.type === "checkpoint")) {
+      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+      const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
+      const bell = this.add.image(x, y, "checkpoint-bell").setDepth(5);
+      this.trackSprite("checkpoint", bell);
+      const alreadyActive = this.checkpoint?.x === entity.x && this.checkpoint?.y === entity.y;
+      if (alreadyActive) {
+        bell.setTint(CHECKPOINT_ACTIVE_TINT);
+        this.activeCheckpointSprite = bell;
+      }
+      const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+      this.physics.add.existing(zone, true);
+      this.physics.add.overlap(this.player, zone, () => this.activateCheckpoint(entity.x, entity.y, bell));
     }
 
     // Enemies/Items/Decor have no per-level instance limit (see Palette.ts),
@@ -376,6 +453,18 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(30)
       .setScrollFactor(0);
     this.updateHud();
+
+    this.checkpointToast = this.add
+      .text(this.scale.width / 2, GRID_ORIGIN_Y + 24, "", {
+        fontSize: "14px",
+        color: "#4ade80",
+        backgroundColor: "#000000aa",
+        padding: { x: 10, y: 5 },
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(30)
+      .setScrollFactor(0)
+      .setAlpha(0);
 
     this.trophy = this.add
       .image(this.scale.width / 2, this.scale.height / 2 - 62, "trophy")
@@ -599,6 +688,46 @@ export class PlayScene extends Phaser.Scene {
     this.updateHud();
   }
 
+  /** Called on overlap with any checkpoint bell — makes (tileX, tileY) the
+   * respawn point Restart carries forward (see CheckpointCoord's
+   * docstring) and gives the touched bell its active tint, reverting
+   * whichever bell held that tint before. Guarded against the tile
+   * already being the active checkpoint so walking back and forth across
+   * an already-lit bell doesn't replay the toast/pulse or do redundant
+   * work every physics frame of continued overlap — the same debounce
+   * concern collectItem/tryOpenChest handle via `.active`, just keyed on
+   * position here since a checkpoint's own sprite never gets destroyed. */
+  private activateCheckpoint(tileX: number, tileY: number, sprite: Phaser.GameObjects.Image): void {
+    if (this.checkpoint?.x === tileX && this.checkpoint?.y === tileY) return;
+    this.activeCheckpointSprite?.clearTint();
+    sprite.setTint(CHECKPOINT_ACTIVE_TINT);
+    this.activeCheckpointSprite = sprite;
+    this.checkpoint = { x: tileX, y: tileY };
+    this.tweens.add({ targets: sprite, scale: { from: 1.35, to: 1 }, duration: 260, ease: "Back.easeOut" });
+    this.showCheckpointToast();
+  }
+
+  /** Brief "Checkpoint!" confirmation above the grid — fades in, holds,
+   * fades out, matching EditorUI.setStatus's shape (a message that clears
+   * itself rather than needing an explicit dismiss) but via tweens instead
+   * of a delayed setText("") swap, since this one also animates in rather
+   * than just appearing. Restarting the fade-out timer on every call (via
+   * killTweensOf) means touching a second checkpoint while the first
+   * toast is still fading doesn't cut it off mid-animation or stack two
+   * competing tweens on the same Text object. */
+  private showCheckpointToast(): void {
+    this.tweens.killTweensOf(this.checkpointToast);
+    this.checkpointToast.setText("Checkpoint!").setAlpha(0);
+    this.tweens.add({
+      targets: this.checkpointToast,
+      alpha: 1,
+      duration: 150,
+      yoyo: true,
+      hold: CHECKPOINT_TOAST_MS,
+      ease: "Sine.easeInOut",
+    });
+  }
+
   private updateHud(): void {
     const hearts = "♥".repeat(this.stats.extraHits);
     const key = this.stats.hasKey ? "  [Key]" : "";
@@ -687,7 +816,7 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private restart(): void {
-    this.scene.restart({ level: this.level, world: this.world, returnScene: this.returnScene });
+    this.scene.restart({ level: this.level, world: this.world, returnScene: this.returnScene, checkpoint: this.checkpoint });
   }
 
   private backToEditor(): void {

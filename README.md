@@ -72,7 +72,10 @@ active upload) with a thumbnail-submenu picker, and backgrounds/music
 uploads got that exact same shared-library-plus-picker treatment for the
 first time (previously a one-off copy embedded in a single level) — see
 "Skin/background/music libraries" under Art, which also covers a real
-WebGL crash that pass found and fixed. See the plan doc §9.1
+WebGL crash that pass found and fixed. Also as of 2026-08-17, levels can
+place any number of **Checkpoint** bells — touching one makes it where a
+loss respawns you (for that attempt only; a fresh Test Play always starts
+back at Spawn) — see "Checkpoints" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
 what's still deliberately deferred (more tile/enemy variety, scrolling,
 IndexedDB, backend sharing, renaming worlds from the browser — levels
@@ -161,7 +164,9 @@ Open the dev server URL in a browser. Controls:
   (see "Multiple instances & the universal Eraser" under Art). Markers
   (Spawn/Goal/Chest) stay one-per-level as before: placing a second Spawn
   moves it rather than adding another, since a level can only ever start
-  in one place.
+  in one place. **Checkpoint** is the one Marker that breaks that rule — a
+  level can have any number of them, same as Enemies/Items/Decor — see
+  "Checkpoints" under Art.
 - **Enemy Size** (right "Level Settings" panel, below Clear): **Small /
   Medium / Large** — a placement-time modifier for the next enemy you
   place, not a property of anything currently selected, so it stays put
@@ -200,7 +205,11 @@ Open the dev server URL in a browser. Controls:
   on top of the Ghost or Bat to squish it; touching either any other way,
   or touching a Spike Crawler at all (it can't be stomped), costs you the
   level **unless** you're holding a Heart in reserve or are currently
-  Shield-protected — see "Items & hit-points" under Art. A Bounce block
+  Shield-protected — see "Items & hit-points" under Art. Touching a
+  **Checkpoint** bell lights it up (and dims whichever one was lit
+  before) and makes it where **R** respawns you after a loss, instead of
+  back at Spawn — see "Checkpoints" under Art for why that only applies to
+  retrying the attempt you're on, not a fresh Test Play. A Bounce block
   launches you noticeably higher than a normal jump; a Brick is just
   solid ground with a different look. On a
   touchscreen, semi-transparent **◀ ▶ ▲** buttons in the corners (see
@@ -1851,6 +1860,56 @@ back to the default built-in (backgrounds) or silence (music, via an
 explicit clear rather than a silent fallback, since there's no built-in
 to land on) the next time that level is opened, matching `removeCustomSkin`'s
 own "revert to default, don't guess a replacement" behavior.
+
+**Checkpoints (2026-08-17).** A new Markers-tab entity (`checkpoint`,
+texture key `checkpoint-bell` — a project-owner-supplied bell sprite,
+processed the same alpha-preserving crop-and-downscale as the 2026-08-17
+Goal art swap above, no flood fill needed) that gives a level mid-run
+respawn points instead of always sending a loss back to Spawn.
+
+Unlike its Markers siblings, Checkpoint is deliberately *not* singleton:
+Spawn/Goal/Chest stay one-per-level (`EditorScene`'s `MARKER_TYPES` set)
+because `PlayScene`'s spawn/win/chest-open logic is each built around
+exactly one, but a level's whole reason to have checkpoints is placing
+*several* along its length — so Checkpoint is simply left out of
+`MARKER_TYPES`, which drops it straight into the same "any number, one
+per tile" placement path Enemies/Items/Decor already use, with zero new
+editor-side code. Being an ordinary entity brush also means it's
+skinnable for free via the existing custom-skins system (see "Skin/
+background/music libraries" above) — nothing about skinning is
+Checkpoint-specific.
+
+*Activation.* Touching a checkpoint's overlap zone
+(`PlayScene.activateCheckpoint`) tints its bell green
+(`CHECKPOINT_ACTIVE_TINT`) and pops it with a quick scale tween, clears
+the tint on whichever bell was active before (only one is ever lit at a
+time — touching an earlier one again after passing a later one re-activates
+that earlier one, there's no "furthest checkpoint wins" ordering), and
+shows a brief "Checkpoint!" toast above the grid. A plain `setTint` rather
+than a second baked "lit" texture — cheap, and it survives a user-uploaded
+skin of any color scheme instead of needing an activated variant of
+whatever image they chose. Re-touching the already-active checkpoint is a
+guarded no-op (checked by tile position, since unlike a collected item a
+checkpoint's sprite is never destroyed and stays touchable) so walking
+back and forth across a lit bell doesn't replay the toast/pulse or fire
+on every physics frame of continued overlap.
+
+*Respawn scope: retry, not resume.* Which checkpoint is active is
+runtime-only Play-session state — never written to `LevelData`, never
+saved. `PlayScene.restart()` (the R key / Restart button after a loss)
+threads the active checkpoint's tile coordinates through
+`scene.restart()`'s data (same mechanism `world`/`returnScene` already
+use to survive that call, which reruns `init()`/`create()` from scratch
+and would otherwise forget it) so retrying the *same* attempt keeps your
+progress; `create()` prefers that position over the level's own Spawn
+marker when present. Every *fresh* entry — Test Play from the editor, a
+World's first level, a Template's Play button, `nextLevel()` advancing a
+World — never passes a checkpoint, so it always starts at the real Spawn
+with every bell back to its default color, confirmed via Playwright
+(touch a checkpoint, Esc back to the editor, Test Play again, player
+lands back at Spawn). This is a deliberate scope choice, not a missing
+feature: checkpoints make retrying a hard section less punishing within
+one sitting, they're not a persistent level-completion save.
 
 ## Project layout
 
