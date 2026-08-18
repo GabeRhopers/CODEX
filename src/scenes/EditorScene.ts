@@ -1102,9 +1102,38 @@ export class EditorScene extends Phaser.Scene {
       this.ui.setStatus("Place a Spawn and a Goal before Test Play");
       return;
     }
+    // A Sub/Up area is only reachable through a matching basket pair — one
+    // of each type in Main *and* in its own satellite area (see useBasket/
+    // basketDestination in PlayScene). Existing purely to make a broken
+    // pairing impossible to ship rather than a silent no-op discovered
+    // later in Test Play (see PlayScene's "No matching basket" toast,
+    // which stays as a safety net for cases this can't catch — e.g. a
+    // basket placed in the *wrong* area entirely). Checked here, not on
+    // Save, matching Spawn/Goal above: in-progress levels can still be
+    // saved half-built, only Test Play needs the level to actually work.
+    if (this.level.subArea && !this.hasMatchingBasketPair(this.level.subArea, "basket-sub")) {
+      this.ui.setStatus("Place a matching Basket (Down) in Main and Sub before Test Play");
+      return;
+    }
+    if (this.level.upArea && !this.hasMatchingBasketPair(this.level.upArea, "basket-up")) {
+      this.ui.setStatus("Place a matching Basket (Up) in Main and Up before Test Play");
+      return;
+    }
     const snapshot = cloneLevel(this.level);
     this.scene.launch("Play", { level: snapshot });
     this.scene.pause();
+  }
+
+  /** True once `satelliteArea` (Sub or Up) has a matching pair with Main
+   * for `basketType` — Main and the satellite area each need at least one
+   * (see testPlay's own docstring above). Multiple of the same basket type
+   * in one area are allowed (PlayScene's own useBasket just `.find`s the
+   * first match in the destination), so this only checks presence, not
+   * count or exact placement. */
+  private hasMatchingBasketPair(satelliteArea: LevelArea, basketType: "basket-sub" | "basket-up"): boolean {
+    const mainHas = this.level.entities.some((e) => e.type === basketType);
+    const satelliteHas = satelliteArea.entities.some((e) => e.type === basketType);
+    return mainHas && satelliteHas;
   }
 
   /** The one place that actually writes to storage — shared by the manual

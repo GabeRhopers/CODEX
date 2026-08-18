@@ -2127,6 +2127,33 @@ never teleports; a correctly-paired level round-trips in both the
 Sub and Up directions with the new gold tint visibly rendering in Test
 Play (not just the editor).
 
+**Mandatory basket pairing (2026-08-18).** The runtime toast above is a
+safety net, not enforcement — it only fires once a player actually walks
+onto an unpaired basket mid-playtest, by which point the broken level has
+already shipped. `testPlay()` already blocked Space/Test Play on a missing
+Spawn or Goal (`this.ui.setStatus("Place a Spawn and a Goal before Test
+Play")`); the exact same shape now also blocks it whenever `subArea`
+exists without a `basket-sub` in *both* Main and Sub, or `upArea` exists
+without a `basket-up` in both Main and Up — `EditorScene.hasMatchingBasketPair`,
+called once per satellite area right after the Spawn/Goal check. Only
+presence is required, not a 1:1 count: multiple baskets of one type in an
+area are allowed (`PlayScene.useBasket` already just `.find`s the first
+match in the destination), so this checks "at least one on each side," not
+"exactly one." Deliberately scoped to Test Play only, not Save — matching
+the Spawn/Goal check's own precedent of letting a level be saved half-built
+and only gating the moment it actually needs to run. A basket placed in the
+*wrong* area entirely (e.g. a `basket-sub` sitting inside Up, which
+`basketDestination` treats as permanently inert — see "Sub/Up areas"
+above) still passes this presence check and isn't something a static check
+can catch without knowing the designer's intent; the runtime toast remains
+the backstop for that case specifically. Verified via Playwright across
+four scenarios per basket type: a satellite area with no basket at all
+(blocked), a basket in the satellite area but not Main (still blocked —
+proving both sides are actually required, not just "one somewhere"), a
+correctly paired level (proceeds), and a plain level with no Sub/Up areas
+at all (completely unaffected, confirming the new check is additive and
+doesn't touch the existing Spawn/Goal gate).
+
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a plain text link under the Menu's card grid rather than a fifth
 card or a mode nested inside the level Editor — it's a much lighter
