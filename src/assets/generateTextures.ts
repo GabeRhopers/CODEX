@@ -25,8 +25,11 @@ import { blockIconKey, groundIconKey, groundTilesetKey, SKIN_COLORS, SkinColors 
  *     three (see blockIconKey) — and, for the same "no matching real
  *     art" reason, its own procedural starfield parallax background
  *     (ParallaxBackground.ts) rather than Kenney's daytime sky art.
- *   - The **Feather** item's icon — the pack has no double-jump-shaped
- *     asset (or anything close), so it's a simple drawn badge instead.
+ *   - The **Chicken Slipper** (double jump, textureKey "item-feather") and
+ *     **PJ Thunder Hat** power-up items — the pack has nothing close to
+ *     either, so both get a simple drawn badge, plus a small un-badged
+ *     accessory sprite each (worn on the equipped player) and, for the
+ *     Thunder Hat, its shock bolt's own in-flight sprite.
  *   - Pure UI chrome with no asset-pack equivalent: the eraser icon, the
  *     spawn marker, the hover highlight, and the palette selection outline.
  *
@@ -118,30 +121,120 @@ function drawLava(g: Phaser.GameObjects.Graphics, offsetX: number): void {
   g.fillRect(offsetX + 23, 23, 4, 4);
 }
 
-const FEATHER_BADGE = 0x7ee8fa;
-const FEATHER_OUTLINE = 0x0e5a66;
-const FEATHER_MARK = 0xffffff;
+const SLIPPER_BADGE = 0xffd66b;
+const SLIPPER_OUTLINE = 0x8a5a1e;
+const SLIPPER_SOLE = 0xffffff;
+const SLIPPER_CLAW = 0xff8c3c;
 
-/** Double-jump power-up icon — styled as a rounded badge to match the real
- * Kenney item icons' look (coin/heart/shield/speed all read as an outlined
- * badge with a symbol inside), even though there's no source tile to match
- * pixel-for-pixel. Two stacked chevrons read as "up, again". */
-function drawFeatherIcon(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(FEATHER_BADGE, 1);
+/** Double-jump power-up icon — the "Chicken Slipper" (2026-08-19 rename of
+ * what used to be a plain Feather; the underlying entityType/textureKey
+ * stay "item-feather" so an already-saved level placing this item isn't
+ * silently orphaned — see Palette.ts's own comment on this entry). Styled
+ * as a rounded badge to match the real Kenney item icons' look (coin/
+ * heart/shield/speed all read as an outlined badge with a symbol inside),
+ * even though there's no source tile to match pixel-for-pixel: a white
+ * slipper sole with three orange chicken-foot claws poking out the toe. */
+function drawChickenSlipperIcon(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(SLIPPER_BADGE, 1);
   g.fillRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 6);
-  g.lineStyle(2, FEATHER_OUTLINE, 1);
+  g.lineStyle(2, SLIPPER_OUTLINE, 1);
   g.strokeRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 6);
-  g.lineStyle(3, FEATHER_MARK, 1);
+  g.fillStyle(SLIPPER_SOLE, 1);
+  g.fillRoundedRect(7, 15, 18, 10, 4);
+  g.fillStyle(SLIPPER_CLAW, 1);
+  g.fillTriangle(9, 15, 12, 9, 14, 15);
+  g.fillTriangle(14, 15, 17, 7, 19, 15);
+  g.fillTriangle(19, 15, 22, 9, 24, 15);
+}
+
+const HAT_BADGE = 0x2e2a4a;
+const HAT_OUTLINE = 0xffe066;
+const HAT_CAP = 0x6a5acd;
+const HAT_BOLT = 0xffe066;
+
+/** PJ Thunder Hat power-up icon (2026-08-19) — same "no matching real art,
+ * so it's a drawn badge instead" situation as the Chicken Slipper above. A
+ * sleeping-cap silhouette (matching "Sleepy Grampa" wearing pajamas) with a
+ * lightning bolt struck across it, reading as "night cap, but electric". */
+function drawThunderHatIcon(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(HAT_BADGE, 1);
+  g.fillRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 6);
+  g.lineStyle(2, HAT_OUTLINE, 1);
+  g.strokeRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 6);
+  g.fillStyle(HAT_CAP, 1);
+  g.fillTriangle(8, 24, 24, 24, 20, 8);
+  g.fillCircle(20, 8, 3);
+  g.fillStyle(HAT_BOLT, 1);
   g.beginPath();
-  g.moveTo(9, 19);
-  g.lineTo(16, 12);
-  g.lineTo(23, 19);
-  g.strokePath();
-  g.beginPath();
-  g.moveTo(9, 26);
+  g.moveTo(17, 10);
+  g.lineTo(12, 19);
   g.lineTo(16, 19);
-  g.lineTo(23, 26);
-  g.strokePath();
+  g.lineTo(13, 26);
+  g.lineTo(21, 15);
+  g.lineTo(17, 15);
+  g.closePath();
+  g.fillPath();
+}
+
+/** The shock bolt's own in-flight sprite (see gameplay/Bolt.ts) — authored
+ * facing right, like every other directional art in this project (see
+ * wizardAnimation.ts's own docstring); PlayScene flips it via setFlipX for
+ * a leftward shot. Small and un-badged (unlike the pickup icons above)
+ * since this renders directly in the level, not in a UI palette. */
+const BOLT_WIDTH = 20;
+const BOLT_HEIGHT = 14;
+
+function drawBoltProjectile(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(HAT_BOLT, 1);
+  g.beginPath();
+  g.moveTo(2, 7);
+  g.lineTo(10, 1);
+  g.lineTo(8, 6);
+  g.lineTo(18, 6);
+  g.lineTo(10, 13);
+  g.lineTo(12, 8);
+  g.lineTo(2, 8);
+  g.closePath();
+  g.fillPath();
+  g.fillStyle(0xffffff, 0.8);
+  g.fillRect(8, 6, 4, 2);
+}
+
+/** Small equipped-accessory sprites PlayScene attaches to the player once
+ * the matching stat flag is set (hasDoubleJump/hasThunderHat) — see
+ * updateAccessoryVisuals there. Un-badged, like the bolt above: these sit
+ * directly on top of the player sprite in the level, not in a UI list, so
+ * the rounded-badge chrome the pickup icons use would just look like a
+ * floating card stuck to the character. */
+const ACCESSORY_SLIPPER_WIDTH = 22;
+const ACCESSORY_SLIPPER_HEIGHT = 14;
+
+function drawSlipperAccessory(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(SLIPPER_SOLE, 1);
+  g.fillRoundedRect(2, 6, 18, 8, 3);
+  g.fillStyle(SLIPPER_CLAW, 1);
+  g.fillTriangle(4, 6, 7, 1, 9, 6);
+  g.fillTriangle(9, 6, 12, 0, 15, 6);
+  g.fillTriangle(14, 6, 17, 2, 19, 6);
+}
+
+const ACCESSORY_HAT_WIDTH = 22;
+const ACCESSORY_HAT_HEIGHT = 18;
+
+function drawHatAccessory(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(HAT_CAP, 1);
+  g.fillTriangle(3, 16, 19, 16, 15, 2);
+  g.fillCircle(15, 2, 3);
+  g.fillStyle(HAT_BOLT, 1);
+  g.beginPath();
+  g.moveTo(13, 5);
+  g.lineTo(8, 12);
+  g.lineTo(11, 12);
+  g.lineTo(9, 17);
+  g.lineTo(16, 9);
+  g.lineTo(13, 9);
+  g.closePath();
+  g.fillPath();
 }
 
 /** A simple double eighth-note glyph, for the music picker submenu's
@@ -246,11 +339,31 @@ export function generateTextures(scene: Phaser.Scene): void {
   drawStarfield(g, 0x14142a, 1500, 0.85, 42);
   g.generateTexture("bg-castle-near", BG_SCENE_WIDTH, BG_SCENE_HEIGHT);
 
-  // Feather item icon (double jump) — see drawFeatherIcon's comment for why
-  // this one's drawn rather than sourced from the asset pack.
+  // Chicken Slipper (double jump) item icon — see drawChickenSlipperIcon's
+  // comment for why this one's drawn rather than sourced from the asset
+  // pack, and why the texture key stays "item-feather".
   g.clear();
-  drawFeatherIcon(g);
+  drawChickenSlipperIcon(g);
   g.generateTexture("item-feather", TILE_SIZE, TILE_SIZE);
+
+  // PJ Thunder Hat item icon — see drawThunderHatIcon's comment.
+  g.clear();
+  drawThunderHatIcon(g);
+  g.generateTexture("item-thunder-hat", TILE_SIZE, TILE_SIZE);
+
+  // Shock bolt in-flight sprite and the two equipped-accessory overlays —
+  // see their own comments above for why these are un-badged.
+  g.clear();
+  drawBoltProjectile(g);
+  g.generateTexture("bolt-projectile", BOLT_WIDTH, BOLT_HEIGHT);
+
+  g.clear();
+  drawSlipperAccessory(g);
+  g.generateTexture("accessory-slippers", ACCESSORY_SLIPPER_WIDTH, ACCESSORY_SLIPPER_HEIGHT);
+
+  g.clear();
+  drawHatAccessory(g);
+  g.generateTexture("accessory-hat", ACCESSORY_HAT_WIDTH, ACCESSORY_HAT_HEIGHT);
 
   // Eraser palette icon: red X on light gray.
   g.clear();

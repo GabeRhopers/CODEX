@@ -55,6 +55,7 @@ export type EntityType =
   | "item-heart"
   | "item-speed"
   | "item-feather"
+  | "item-thunder-hat"
   | "item-shield"
   | "item-key"
   | "chest"

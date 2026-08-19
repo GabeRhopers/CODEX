@@ -251,13 +251,16 @@ Open the dev server URL in a browser. Controls:
   a Spawn and a Goal to be placed first, in any of Main/Sub/Up (they don't
   both need to be in the same area); enemies and items are optional.
 - In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
-  (press again mid-air for a second jump if you've collected a Feather),
-  **Esc** back to wherever you launched Play from (the editor for Test
-  Play, My Worlds for a World, or Templates for a template's Play
+  (press again mid-air for a second jump if you've collected a Chicken
+  Slipper), **X** (or the ⚡ on-screen button) to fire the PJ Thunder
+  Hat's shock, if you've collected one — see "Power-ups" under Art for
+  both, **Esc** back to wherever you launched Play from (the editor for
+  Test Play, My Worlds for a World, or Templates for a template's Play
   button — the on-screen hint always names the right one), **R** to
   restart after winning/losing. Jump
   on top of the Ghost or Bat to squish it; touching either any other way,
-  or touching a Spike Crawler at all (it can't be stomped), costs you the
+  or touching a Spike Crawler at all (it can't be stomped — though the
+  Thunder Hat's shock can defeat it), costs you the
   level **unless** you're holding a Heart in reserve or are currently
   Shield-protected — see "Items & hit-points" under Art. Touching a
   **Checkpoint** bell lights it up (and dims whichever one was lit
@@ -1055,7 +1058,7 @@ it rather than drifting into the empty space beyond the background, and an
 enemy placed one tile from an edge patrolled a shortened, still-fully-
 visible leg instead of crossing it.
 
-**Items & hit-points.** Five collectible brushes, all in the palette's
+**Items & hit-points.** Seven collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
 hardcoded into specific templates) exactly like a Ground tile or a Ghost:
 - **Coin** — +1 to the score shown in Play mode's top-right HUD.
@@ -1067,8 +1070,12 @@ hardcoded into specific templates) exactly like a Ground tile or a Ghost:
 - **Shield** — a timed window (8s) where *any* bad contact is completely
   free, no heart spent; the player tints cyan for its duration.
 - **Speed Potion** — a timed (6s) 1.6× move-speed multiplier.
-- **Feather** — grants a second mid-air jump (press jump again while
-  airborne); resets the moment you land.
+- **Chicken Slipper** (internal id `item-feather` — see "Power-ups" below)
+  — grants a second mid-air jump (press jump again while airborne);
+  resets the moment you land.
+- **PJ Thunder Hat** (see "Power-ups" below) — grants a ranged shock
+  attack (X, or the on-screen ⚡ button), gated by an 800ms cooldown
+  rather than limited ammo.
 
 This is deliberately the game's first hit-points/buff system — earlier
 content passes (Brick, Bounce, Spike Crawler, Bat) explicitly skipped
@@ -1713,8 +1720,9 @@ restriction entirely. It now provides:
   earlier pass used for the first two. The Bat's perched pose is also
   reused as the purely cosmetic "Sleeping Bat" Decor entity.
 - **Coin, Heart, Speed Potion, Shield, and Key** — real item-tile art from
-  the pack. **Feather** has no matching tile in the pack, so it's drawn
-  procedurally (a simple two-chevron badge icon) alongside the rest of
+  the pack. **Chicken Slipper** (internal id `item-feather`) and **PJ
+  Thunder Hat** have no matching tile in the pack, so both are drawn
+  procedurally (badge icons — see "Power-ups" below) alongside the rest of
   `generateTextures.ts`'s procedural art — the same "real art where it
   fits, procedural where it doesn't" split already established for
   Castle's blocks.
@@ -2212,6 +2220,61 @@ changes nothing about which templates are completable — confirmed by
 comparison against the original build, not assumed from a passing test
 run.
 
+**Power-ups: Chicken Slipper and PJ Thunder Hat (2026-08-19).** Two new
+Items-tab pickups, designed end-to-end before writing any code — the
+ambiguous product decisions (does the shock defeat every enemy including
+the un-killable Spike Crawler, permanent equip vs. limited ammo, a visible
+worn accessory vs. HUD-only, rename Feather in place vs. a new item) were
+each surfaced and confirmed rather than assumed.
+
+*Chicken Slipper* is a reskin, not new logic — double jump already existed
+end-to-end as the Feather item (`PlayerStats.hasDoubleJump`/
+`doubleJumpUsed`/`canDoubleJump`/`useDoubleJump`/`resetDoubleJump`, wired
+into `PlayScene.update()`'s jump branch). Only the label and the
+procedurally-drawn icon changed (`drawChickenSlipperIcon` in
+generateTextures.ts, replacing the old placeholder chevron badge with a
+white slipper sole and three orange chicken-foot claws) — the underlying
+`id`/`textureKey`/`entityType` all stay `"item-feather"`, so a level saved
+before this change still places the exact same item, just rendered and
+labeled differently now. Same "gracefully degrade, never orphan existing
+data" rule the Basket (Down)/(Up) pair already established. A new
+`accessory-slippers` sprite now follows the player's feet whenever
+`hasDoubleJump` is true (`PlayScene.updateAccessoryVisuals`).
+
+*PJ Thunder Hat* is genuinely new: a ranged shock that defeats *any*
+enemy on contact, including the Spike Crawler — previously un-killable,
+only avoidable, since `ENEMY_DEFS` marks it `stompable: false`. Permanent
+equip (`PlayerStats.hasThunderHat`) with an 800ms cooldown
+(`THUNDER_COOLDOWN_MS`/`canFireThunderHat`/`fireThunderHat`) rather than
+limited ammo, so a level can't be soft-locked by running out of shots on
+an enemy that needs one. Firing is a new edge-triggered input (X on
+keyboard via `PlayerController`'s `attackKey`/`isAttackPressed`, a 4th
+on-screen ⚡ button in `TouchControls`, stacked above Jump) that spawns a
+`gameplay/Bolt.ts` projectile — fixed 500px/s, gravity-free, 5-tile range,
+launched in whichever direction the player is currently facing
+(`player.flipX`). Resolved via manual per-frame checks in
+`PlayScene.updateBolts()` (expired range, `groundLayer` tile's own
+`.collides` flag, or `physics.overlap` against a live enemy) rather than
+persistent Colliders — a bolt is a short-lived, dynamically-spawned
+object, so a one-off check each frame avoids having to track and
+explicitly tear down a Collider pair for every shot fired, the same
+"colliders don't outlive a destroyed GameObject automatically" trap
+`enterArea`'s own teardown already has to manage for area-scoped content.
+Firing also briefly reuses `"wizard-cast"` (previously only shown once, in
+`onWin()`) as a 150ms cast-flash pose, and a new `accessory-hat` sprite
+follows the player's head whenever `hasThunderHat` is true.
+
+Both accessory sprites and the bolt's own sprite are new procedurally-
+drawn art (no matching asset in the Kenney pack, same situation the
+Feather placeholder was already in) — see generateTextures.ts's own
+comments for why. Verified end-to-end in a real browser session: both
+items collected via the actual editor→Test Play flow, double jump firing
+a second time only while airborne and only once per hop, the shock
+correctly gated by its cooldown (a second press immediately after firing
+does not spawn a second bolt), bolts travelling in the correct direction
+after turning around, and — the one previously-impossible interaction —
+a Spike Crawler destroyed by the shock despite being un-stompable.
+
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a plain text link under the Menu's card grid rather than a fifth
 card or a mode nested inside the level Editor — it's a much lighter
@@ -2697,7 +2760,7 @@ public/assets/
 ├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png (hand-drawn)
 ├── entities/                 ghost-pillow.png (hand-drawn); caged-sheep.png (goal art, project-owner-supplied — see "Goal art" under Art); bat.png, bat-perched.png, spike-crawler.png, golem.png, trophy.png, chest.png (Kenney)
 ├── tiles/                    tileset-{grass,desert,snow}.png, icon-*.png (Kenney, derived — see scripts/)
-├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Feather is procedural, see generateTextures.ts)
+├── items/                    coin.png, heart.png, shield.png, speed.png, key.png (Kenney, derived — Chicken Slipper/PJ Thunder Hat are procedural, see generateTextures.ts)
 ├── decor/                    bush/tree/cactus/lamp/cloud/snowman/sprout/mushroom/rocks.png — purely cosmetic (Kenney, derived)
 ├── audio/
 │   └── menu-theme.mp3        the home page's background music (the project owner's own supplied track) — see "Music" under Art. A level's own uploaded music isn't here — it lives inline in that level's saved JSON, not as a build asset.

@@ -5,6 +5,7 @@ export interface TouchControlState {
   left: boolean;
   right: boolean;
   jump: boolean;
+  attack: boolean;
 }
 
 const BUTTON_RADIUS = 32;
@@ -28,13 +29,17 @@ const PLAYABLE_HEIGHT = GRID_ROWS * TILE_SIZE;
  * simultaneous finger on another button works too — see main.ts's
  * `input.activePointers` for the multi-touch budget this needs. */
 export class TouchControls {
-  private state: TouchControlState = { left: false, right: false, jump: false };
+  private state: TouchControlState = { left: false, right: false, jump: false, attack: false };
 
   constructor(scene: Phaser.Scene) {
     const y = GRID_ORIGIN_Y + PLAYABLE_HEIGHT - MARGIN;
     this.makeButton(scene, MARGIN, y, "◀", (down) => (this.state.left = down));
     this.makeButton(scene, MARGIN + BUTTON_RADIUS * 2 + 16, y, "▶", (down) => (this.state.right = down));
     this.makeButton(scene, GAME_WIDTH - MARGIN, y, "▲", (down) => (this.state.jump = down));
+    // Stacked directly above Jump rather than beside it — there's no
+    // free horizontal room on the right edge once Jump's own margin is
+    // accounted for, and stacking keeps both reachable by the same thumb.
+    this.makeButton(scene, GAME_WIDTH - MARGIN, y - (BUTTON_RADIUS * 2 + 16), "⚡", (down) => (this.state.attack = down));
   }
 
   get(): TouchControlState {

@@ -43,7 +43,8 @@ export class BootScene extends Phaser.Scene {
     this.load.image("trophy", "assets/entities/trophy.png");
     this.load.image("chest", "assets/entities/chest.png");
 
-    // Item icons (real Kenney art, except Feather — see generateTextures.ts).
+    // Item icons (real Kenney art, except Chicken Slipper/PJ Thunder Hat —
+    // see generateTextures.ts).
     this.load.image("item-coin", "assets/items/coin.png");
     this.load.image("item-heart", "assets/items/heart.png");
     this.load.image("item-speed", "assets/items/speed.png");

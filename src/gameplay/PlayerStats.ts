@@ -19,6 +19,14 @@ export interface PlayerStats {
    * two hits in one collision. */
   invincibleUntil: number;
   speedBoostUntil: number;
+  /** PJ Thunder Hat — a permanent equip (like Chicken Slipper/double jump)
+   * rather than limited ammo, gated by a cooldown instead of a stock count
+   * (see THUNDER_COOLDOWN_MS/canFireThunderHat) so a level can't be
+   * softlocked by running out of shots on an enemy that needs one. */
+  hasThunderHat: boolean;
+  /** Timestamp (compare against scene.time.now) before which firing again
+   * is blocked — set by fireThunderHat, mirrors invincibleUntil's shape. */
+  thunderCooldownUntil: number;
   /** Held until spent opening a Chest — see openChest(). Only ever one Key
    * at a time (matching the one-per-type placement every entity type
    * already uses — see Palette.ts's docstring), so a plain boolean is
@@ -31,6 +39,11 @@ export const SHIELD_DURATION_MS = 8000;
 export const SPEED_DURATION_MS = 6000;
 export const SPEED_MULTIPLIER = 1.6;
 export const CHEST_SCORE_BONUS = 5;
+/** Minimum gap between shots — long enough that spamming the attack input
+ * can't turn the shock into a continuous beam (it's meant to be one bolt
+ * at a time, see PlayScene's Bolt handling), short enough not to feel
+ * unresponsive against a single enemy. */
+export const THUNDER_COOLDOWN_MS = 800;
 
 export function createPlayerStats(): PlayerStats {
   return {
@@ -40,6 +53,8 @@ export function createPlayerStats(): PlayerStats {
     doubleJumpUsed: false,
     invincibleUntil: 0,
     speedBoostUntil: 0,
+    hasThunderHat: false,
+    thunderCooldownUntil: 0,
     hasKey: false,
   };
 }
@@ -93,6 +108,22 @@ export function collectHeart(stats: PlayerStats): void {
 
 export function collectFeather(stats: PlayerStats): void {
   stats.hasDoubleJump = true;
+}
+
+export function collectThunderHat(stats: PlayerStats): void {
+  stats.hasThunderHat = true;
+}
+
+/** Mirrors canDoubleJump's shape: the single decision point for "is a shock
+ * available right now" — gated on the hat being held and the cooldown
+ * having elapsed. Unlike double jump there's no grounded/airborne
+ * restriction; the shock fires from anywhere. */
+export function canFireThunderHat(stats: PlayerStats, now: number): boolean {
+  return stats.hasThunderHat && now >= stats.thunderCooldownUntil;
+}
+
+export function fireThunderHat(stats: PlayerStats, now: number): void {
+  stats.thunderCooldownUntil = now + THUNDER_COOLDOWN_MS;
 }
 
 export function collectShield(stats: PlayerStats, now: number): void {

@@ -7,6 +7,10 @@ export const JUMP_VELOCITY = -450;
 export interface PlayerInputKeys {
   cursors: Phaser.Types.Input.Keyboard.CursorKeys;
   wasd: { left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key; up: Phaser.Input.Keyboard.Key };
+  /** PJ Thunder Hat's shock attack — X, chosen since it's unused by any
+   * existing binding (WASD/arrows move, Space jumps, Esc/R/N are scene
+   * controls — see PlayScene's create()). */
+  attackKey: Phaser.Input.Keyboard.Key;
 }
 
 export function createPlayerInput(scene: Phaser.Scene): PlayerInputKeys {
@@ -16,7 +20,8 @@ export function createPlayerInput(scene: Phaser.Scene): PlayerInputKeys {
     right: scene.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     up: scene.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
   };
-  return { cursors, wasd };
+  const attackKey = scene.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.X);
+  return { cursors, wasd, attackKey };
 }
 
 /** Shared by updatePlayerMovement (level-triggered — held jump auto-repeats
@@ -28,6 +33,14 @@ export function createPlayerInput(scene: Phaser.Scene): PlayerInputKeys {
  * "jump requested". */
 export function isJumpPressed(input: PlayerInputKeys, touch?: TouchControlState): boolean {
   return input.cursors.up.isDown || input.wasd.up.isDown || input.cursors.space.isDown || !!touch?.jump;
+}
+
+/** Same edge-triggered shape as isJumpPressed above — PlayScene tracks its
+ * own previous-frame value (see justPressedAttack there) since the
+ * cooldown-gated shock should fire once per press, not repeat every frame
+ * the key/button stays held. */
+export function isAttackPressed(input: PlayerInputKeys, touch?: TouchControlState): boolean {
+  return input.attackKey.isDown || !!touch?.attack;
 }
 
 export function updatePlayerMovement(

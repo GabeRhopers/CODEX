@@ -138,7 +138,25 @@ export const PALETTE: Brush[] = [
   { id: "item-coin", category: "items", kind: "entity", label: "Coin", textureKey: "item-coin", entityType: "item-coin" },
   { id: "item-heart", category: "items", kind: "entity", label: "Heart", textureKey: "item-heart", entityType: "item-heart" },
   { id: "item-speed", category: "items", kind: "entity", label: "Speed", textureKey: "item-speed", entityType: "item-speed" },
-  { id: "item-feather", category: "items", kind: "entity", label: "Feather", textureKey: "item-feather", entityType: "item-feather" },
+  // Label/art only — id/textureKey/entityType stay "item-feather" so an
+  // already-saved level placing this item doesn't get silently orphaned
+  // (see generateTextures.ts's chicken-slipper icon comment).
+  {
+    id: "item-feather",
+    category: "items",
+    kind: "entity",
+    label: "Chicken Slipper",
+    textureKey: "item-feather",
+    entityType: "item-feather",
+  },
+  {
+    id: "item-thunder-hat",
+    category: "items",
+    kind: "entity",
+    label: "PJ Thunder Hat",
+    textureKey: "item-thunder-hat",
+    entityType: "item-thunder-hat",
+  },
   { id: "item-shield", category: "items", kind: "entity", label: "Shield", textureKey: "item-shield", entityType: "item-shield" },
   { id: "item-key", category: "items", kind: "entity", label: "Key", textureKey: "item-key", entityType: "item-key" },
   { id: "decor-bush", category: "decor", kind: "entity", label: "Bush", textureKey: "decor-bush", entityType: "decor-bush" },

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canDoubleJump,
+  canFireThunderHat,
   CHEST_SCORE_BONUS,
   collectCoin,
   collectFeather,
@@ -8,7 +9,9 @@ import {
   collectKey,
   collectShield,
   collectSpeed,
+  collectThunderHat,
   createPlayerStats,
+  fireThunderHat,
   HIT_GRACE_MS,
   isInvincible,
   openChest,
@@ -18,6 +21,7 @@ import {
   SPEED_DURATION_MS,
   SPEED_MULTIPLIER,
   speedMultiplierAt,
+  THUNDER_COOLDOWN_MS,
   useDoubleJump,
 } from "./PlayerStats";
 
@@ -114,6 +118,36 @@ describe("canDoubleJump / useDoubleJump / resetDoubleJump", () => {
   });
 });
 
+describe("canFireThunderHat / fireThunderHat", () => {
+  it("is false without the Thunder Hat", () => {
+    const stats = createPlayerStats();
+    expect(canFireThunderHat(stats, 0)).toBe(false);
+  });
+
+  it("is true immediately after collecting the hat, with no cooldown yet", () => {
+    const stats = createPlayerStats();
+    collectThunderHat(stats);
+    expect(canFireThunderHat(stats, 0)).toBe(true);
+  });
+
+  it("is false immediately after firing, until the cooldown elapses", () => {
+    const stats = createPlayerStats();
+    collectThunderHat(stats);
+    fireThunderHat(stats, 1000);
+    expect(canFireThunderHat(stats, 1000 + THUNDER_COOLDOWN_MS - 1)).toBe(false);
+    expect(canFireThunderHat(stats, 1000 + THUNDER_COOLDOWN_MS)).toBe(true);
+  });
+
+  it("does not consume the hat itself — firing repeatedly stays available after each cooldown", () => {
+    const stats = createPlayerStats();
+    collectThunderHat(stats);
+    fireThunderHat(stats, 0);
+    fireThunderHat(stats, THUNDER_COOLDOWN_MS);
+    expect(stats.hasThunderHat).toBe(true);
+    expect(canFireThunderHat(stats, 2 * THUNDER_COOLDOWN_MS)).toBe(true);
+  });
+});
+
 describe("collect* mutations", () => {
   it("collectCoin increments score by one per call", () => {
     const stats = createPlayerStats();
@@ -134,6 +168,13 @@ describe("collect* mutations", () => {
     collectFeather(stats);
     expect(stats.hasDoubleJump).toBe(true);
     expect(stats.doubleJumpUsed).toBe(false);
+  });
+
+  it("collectThunderHat sets hasThunderHat without touching the cooldown", () => {
+    const stats = createPlayerStats();
+    collectThunderHat(stats);
+    expect(stats.hasThunderHat).toBe(true);
+    expect(stats.thunderCooldownUntil).toBe(0);
   });
 
   it("collectShield extends an already-longer invincibility window instead of shortening it", () => {

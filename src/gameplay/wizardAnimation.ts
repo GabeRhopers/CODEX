@@ -9,7 +9,11 @@ import Phaser from "phaser";
  */
 export const WIZARD_FRAME_KEYS = ["wizard-idle", "wizard-walk1", "wizard-walk2", "wizard-jump", "wizard-cast"] as const;
 
-const FRAME_HEIGHT = 48;
+// Exported for PlayScene's accessory sprites (Chicken Slipper/Thunder Hat —
+// see updateAccessoryVisuals there), which need the player's own display
+// height to position a hat near the top of the frame without duplicating
+// this constant.
+export const FRAME_HEIGHT = 48;
 const BODY_WIDTH = 22;
 const BODY_HEIGHT = 40;
 const WALK_FRAME_INTERVAL_MS = 140;

@@ -12,19 +12,23 @@ import {
   isStompFromAbove,
   updateGhostPatrol,
 } from "../gameplay/EnemyBehaviors";
-import { createPlayerInput, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
+import { createBolt, isBoltExpired } from "../gameplay/Bolt";
+import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { resolveLevelMusicKey } from "../gameplay/musicLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import {
   canDoubleJump,
+  canFireThunderHat,
   collectCoin,
   collectFeather,
   collectHeart,
   collectKey,
   collectShield,
   collectSpeed,
+  collectThunderHat,
   createPlayerStats,
+  fireThunderHat,
   isInvincible,
   openChest,
   PlayerStats,
@@ -34,7 +38,7 @@ import {
   useDoubleJump,
 } from "../gameplay/PlayerStats";
 import { TouchControls } from "../gameplay/TouchControls";
-import { applyWizardTexture, createWizardAnimState, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
+import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
 import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
 import { AreaKey, DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
@@ -86,11 +90,23 @@ const WARNING_TOAST_COLOR = "#facc15";
 // Main) never feels blocked.
 const TELEPORT_COOLDOWN_MS = 500;
 
+// PJ Thunder Hat's shock — see Bolt.ts for the projectile itself.
+// Launch position is roughly the wizard's chest/hand height, offset ahead
+// of the player in whichever direction they're facing (player.flipX).
+const BOLT_LAUNCH_OFFSET_X = 16;
+const BOLT_LAUNCH_OFFSET_Y = 24;
+// How long the "wizard-cast" pose (see onWin's own use of it) flashes on
+// screen when firing a bolt — brief on purpose, just long enough to read
+// as a cast rather than a static jump/idle/walk frame. Applied *after*
+// updateWizardAnimation each frame (see update()) since that function
+// would otherwise immediately overwrite it with the grounded/moving pose.
+const CAST_FLASH_MS = 150;
+
 /** Every item brush's textureKey equals its EntityType (see Palette.ts), so
  * spawning just needs the type list — no separate texture lookup like
  * ENEMY_DEFS needs. Items are collected via a static overlap zone, same
  * pattern as the goal below. */
-const ITEM_TYPES: EntityType[] = ["item-coin", "item-heart", "item-speed", "item-feather", "item-shield", "item-key"];
+const ITEM_TYPES: EntityType[] = ["item-coin", "item-heart", "item-speed", "item-feather", "item-thunder-hat", "item-shield", "item-key"];
 
 /** Purely cosmetic — spawned as plain static images with no collision or
  * overlap logic (unlike every other entity list here), so a level looks
@@ -235,6 +251,19 @@ export class PlayScene extends Phaser.Scene {
   private touch!: TouchControls;
   private wizardAnim: WizardAnimState = createWizardAnimState();
   private enemies: ActiveEnemy[] = [];
+  // PJ Thunder Hat's live shock bolts — see Bolt.ts and updateBolts(). Not
+  // tracked via spritesByBrushId/areaColliders (those are for the area's
+  // own fixed-at-build-time content); a bolt is spawned dynamically mid-
+  // play and checked/expired manually every frame instead.
+  private bolts: Phaser.Physics.Arcade.Sprite[] = [];
+  // Edge-detection for the attack input, same shape as jumpWasDown below —
+  // the shock should fire once per press, not repeat every frame the key/
+  // touch button stays held (the cooldown alone isn't enough: without this,
+  // holding the key would still queue a shot the instant the cooldown
+  // clears rather than requiring a fresh press).
+  private attackWasDown = false;
+  // See CAST_FLASH_MS.
+  private castFlashUntil = 0;
   private outcome: "playing" | "won" | "lost" = "playing";
   private banner!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
@@ -251,6 +280,15 @@ export class PlayScene extends Phaser.Scene {
   private music?: Phaser.Sound.BaseSound;
   private hud!: Phaser.GameObjects.Text;
   private trophy!: Phaser.GameObjects.Image;
+  // Chicken Slipper / PJ Thunder Hat equipped-accessory sprites — created
+  // once in create() (like hud/toast/trophy above) and repositioned every
+  // frame onto the player in updateAccessoryVisuals(), shown only once the
+  // matching PlayerStats flag is set. Unlike the item sprites in
+  // spritesByBrushId these aren't area-scoped: they follow the same player
+  // sprite across a basket teleport, same as the buff tint in
+  // updateBuffVisuals.
+  private slipperAccessory!: Phaser.GameObjects.Image;
+  private hatAccessory!: Phaser.GameObjects.Image;
   // Tile coords of the last-touched checkpoint this play session, or
   // undefined for "no checkpoint touched yet, respawn at Spawn" — see
   // CheckpointCoord's docstring. Reset fresh (from `data.checkpoint`,
@@ -296,6 +334,9 @@ export class PlayScene extends Phaser.Scene {
     this.enemies = [];
     this.stats = createPlayerStats();
     this.jumpWasDown = false;
+    this.bolts = [];
+    this.attackWasDown = false;
+    this.castFlashUntil = 0;
     // Phaser reuses this same PlayScene instance across every Test Play/
     // World/Template run rather than constructing a fresh one each time —
     // create() reruns, but a plain class-field initializer like
@@ -394,6 +435,12 @@ export class PlayScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setVisible(false);
 
+    // Positioned for real every frame in updateAccessoryVisuals() once the
+    // player exists — (0, 0) here is just a harmless placeholder before
+    // enterArea's first build.
+    this.slipperAccessory = this.add.image(0, 0, "accessory-slippers").setDepth(6).setVisible(false);
+    this.hatAccessory = this.add.image(0, 0, "accessory-hat").setDepth(6).setVisible(false);
+
     this.banner = this.add
       .text(this.scale.width / 2, this.scale.height / 2 - 20, "", {
         fontSize: "32px",
@@ -484,6 +531,13 @@ export class PlayScene extends Phaser.Scene {
     // stale references to GameObjects the *previous* run already tore
     // down, not anything this call is responsible for destroying itself.
     if (this.areaBuilt) {
+      // Bolts are area-scoped in practice (they collide against this
+      // area's groundLayer/enemies — see updateBolts()) even though
+      // they're not tracked in areaColliders/spritesByBrushId, so a bolt
+      // still in flight when a basket teleport fires must not survive
+      // into the rebuilt area.
+      for (const bolt of this.bolts) bolt.destroy();
+      this.bolts = [];
       for (const collider of this.areaColliders) collider.destroy();
       this.areaColliders = [];
       this.groundCollider?.destroy();
@@ -862,14 +916,24 @@ export class PlayScene extends Phaser.Scene {
       useDoubleJump(this.stats);
     }
 
+    const attackDown = isAttackPressed(this.input$, touch);
+    const justPressedAttack = attackDown && !this.attackWasDown;
+    this.attackWasDown = attackDown;
+    if (justPressedAttack && canFireThunderHat(this.stats, time)) {
+      this.fireThunderBolt(time);
+    }
+
     updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time) * (swimming ? SWIM_SPEED_MULTIPLIER : 1));
     updateWizardAnimation(this.player, this.wizardAnim, delta);
+    if (time < this.castFlashUntil) applyWizardTexture(this.player, "wizard-cast");
     this.updateBuffVisuals(time);
+    this.updateAccessoryVisuals();
     this.background?.update(this.player.x);
 
     for (const enemy of this.enemies) {
       updateGhostPatrol(enemy.sprite, enemy.state, time);
     }
+    this.updateBolts();
 
     // Lava is a hazard, not solid ground (see the collision exclusion in
     // create()) — standing in it costs a hit exactly like a bad enemy
@@ -915,6 +979,56 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
+  /** Spawns one shock bolt ahead of the player, in whichever direction
+   * they're currently facing (player.flipX — see wizardAnimation.ts),
+   * starts its cooldown, and briefly flashes the "wizard-cast" pose (see
+   * CAST_FLASH_MS). The bolt itself is tracked in `bolts` and driven by
+   * updateBolts() every frame from here on. */
+  private fireThunderBolt(time: number): void {
+    fireThunderHat(this.stats, time);
+    const direction: 1 | -1 = this.player.flipX ? -1 : 1;
+    const x = this.player.x + direction * BOLT_LAUNCH_OFFSET_X;
+    const y = this.player.y - BOLT_LAUNCH_OFFSET_Y;
+    const bolt = createBolt(this, x, y, direction, "bolt-projectile");
+    bolt.setDepth(6);
+    this.bolts.push(bolt);
+    this.castFlashUntil = time + CAST_FLASH_MS;
+  }
+
+  /** Advances every live bolt one frame and resolves its fate: expired
+   * (out of range — see isBoltExpired), blocked by solid ground (checked
+   * via the same groundLayer tile lookup the water/hazard checks in
+   * update() use, keyed off Tile.collides so it automatically matches
+   * whatever setCollisionByExclusion configured — see its own call site),
+   * or touching a live enemy — in which case, unlike a player stomp, *any*
+   * enemy dies to it regardless of `stompable` (the confirmed design: the
+   * shock is Spike Crawler's first-ever counter). Manual per-frame checks
+   * rather than persistent Colliders — see Bolt.ts's own docstring for why. */
+  private updateBolts(): void {
+    for (const bolt of [...this.bolts]) {
+      if (isBoltExpired(bolt)) {
+        this.destroyBolt(bolt);
+        continue;
+      }
+      const tile = this.groundLayer.getTileAtWorldXY(bolt.x, bolt.y);
+      if (tile?.collides) {
+        this.destroyBolt(bolt);
+        continue;
+      }
+      const hitEnemy = this.enemies.find((enemy) => this.physics.overlap(bolt, enemy.sprite));
+      if (hitEnemy) {
+        this.enemies = this.enemies.filter((e) => e !== hitEnemy);
+        hitEnemy.sprite.destroy();
+        this.destroyBolt(bolt);
+      }
+    }
+  }
+
+  private destroyBolt(bolt: Phaser.Physics.Arcade.Sprite): void {
+    bolt.destroy();
+    this.bolts = this.bolts.filter((b) => b !== bolt);
+  }
+
   /** Applies the matching PlayerStats effect for whichever item instance
    * was touched, removes that one sprite and its overlap zone, and
    * refreshes the HUD — a level can have several of the same item type
@@ -936,6 +1050,9 @@ export class PlayScene extends Phaser.Scene {
         break;
       case "item-feather":
         collectFeather(this.stats);
+        break;
+      case "item-thunder-hat":
+        collectThunderHat(this.stats);
         break;
       case "item-shield":
         collectShield(this.stats, now);
@@ -1021,6 +1138,26 @@ export class PlayScene extends Phaser.Scene {
       this.player.setTint(0xffe066);
     } else {
       this.player.clearTint();
+    }
+  }
+
+  /** Keeps the Chicken Slipper/PJ Thunder Hat accessory sprites glued to
+   * the player, visible only once the matching PlayerStats flag is set —
+   * see slipperAccessory/hatAccessory's own field docstring. Player origin
+   * is (0.5, 1) (bottom-anchored — see wizardAnimation.ts), so player.y is
+   * already the feet position for the slippers; the hat subtracts
+   * FRAME_HEIGHT to land near the top of the sprite's frame instead. */
+  private updateAccessoryVisuals(): void {
+    this.slipperAccessory.setVisible(this.stats.hasDoubleJump);
+    if (this.stats.hasDoubleJump) {
+      this.slipperAccessory.setPosition(this.player.x, this.player.y - 2).setFlipX(this.player.flipX).setDepth(this.player.depth + 1);
+    }
+    this.hatAccessory.setVisible(this.stats.hasThunderHat);
+    if (this.stats.hasThunderHat) {
+      this.hatAccessory
+        .setPosition(this.player.x, this.player.y - FRAME_HEIGHT + 6)
+        .setFlipX(this.player.flipX)
+        .setDepth(this.player.depth + 1);
     }
   }
 
