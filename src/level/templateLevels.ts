@@ -43,10 +43,16 @@ import {
  * once loaded in the editor, same as any other level.
  *
  * Gaps/steps built from plain ground or brick are sized well within the
- * player's normal jump (max height ~3.5 tiles, ~6 tile horizontal reach —
- * see PlayerController's MOVE_SPEED/JUMP_VELOCITY and gameConfig's
- * GRAVITY_Y). Bounce-assisted sections are a different physics problem —
- * see the comment on SPRING_MEADOW for how those are placed.
+ * player's normal jump (max height ~2.9 tiles, ~5.1 tile horizontal reach
+ * as of the 2026-08-19 gravity retune — see PlayerController's MOVE_SPEED/
+ * JUMP_VELOCITY and gameConfig's GRAVITY_Y). DESERT_CANYON's gap-plus-
+ * pillar-step is the tightest of these (a real jump-and-rise, not just a
+ * flat gap) — re-verified after the retune with a precisely-timed jump
+ * landing right at the pillar's top edge with margin to spare; see
+ * gameConfig's own comment for why 1100 was chosen over a more aggressive
+ * value specifically because of this level. Bounce-assisted sections are
+ * a different physics problem — see the comment on SPRING_MEADOW for how
+ * those are placed.
  */
 const GROUND_TILE_BY_SKIN: Record<GroundSkin, number> = {
   grass: GROUND_GRASS_TILE,
@@ -168,16 +174,18 @@ const CASTLE_ASCENT = levelFromRows({
 });
 
 /**
- * Bounce launches the player ~7.3 tiles up (BOUNCE_VELOCITY_Y=-650 vs.
- * gravity=900 in PlayScene/gameConfig — h = v²/2g), far past a normal
- * jump. The easy mistake is placing the landing platform directly above
- * the pad: the player is still *rising* when they first reach that
+ * Bounce launches the player ~7.3 tiles up (BOUNCE_VELOCITY_Y=-719 vs.
+ * gravity=1100 in PlayScene/gameConfig — h = v²/2g; -719 was chosen
+ * specifically to keep this exact height when gravity was retuned from
+ * 900 to 1100 on 2026-08-19, see gameConfig's own comment), far past a
+ * normal jump. The easy mistake is placing the landing platform directly
+ * above the pad: the player is still *rising* when they first reach that
  * height, so they'd hit its underside like a ceiling, not land on it.
  * Instead the platform sits several tiles to the right, at a height
  * comfortably *below* the max reach (so a descending player sinks onto
  * it rather than needing to time a peak exactly), wide enough to catch
  * the range of horizontal drift a held-right input produces during the
- * ~1.4s the bounce is airborne — verified by an actual autoplay, not
+ * ~1.3s the bounce is airborne — verified by an actual autoplay, not
  * just this math (see the session notes for exact figures if this ever
  * needs re-tuning).
  */

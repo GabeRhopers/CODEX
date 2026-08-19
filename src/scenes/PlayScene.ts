@@ -42,7 +42,14 @@ import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { resolveSkinTextureKeys } from "../skins/skinLoader";
 
-const BOUNCE_VELOCITY_Y = -650;
+// Raised from -650 alongside GRAVITY_Y's 900→1100 bump (2026-08-19, see
+// its own comment in gameConfig.ts) — v scales by sqrt(1100/900) to keep
+// the bounce's own apex height (h = v²/2g) exactly what it was before,
+// since SPRING_MEADOW's landing platform in templateLevels.ts was placed
+// and verified against that specific height. Airtime drops from ~1.4s to
+// ~1.3s as a side effect, which only makes the pad feel snappier, not
+// less reachable.
+const BOUNCE_VELOCITY_Y = -719;
 // Swimming (see the water check in update()) sets vertical velocity
 // directly every frame rather than fighting gravity, so these aren't
 // forces — SWIM_UP_VELOCITY while jump/up is held, SWIM_SINK_VELOCITY

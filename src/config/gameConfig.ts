@@ -54,4 +54,24 @@ export const GAME_WIDTH = Math.max(
 // list anymore.
 export const GAME_HEIGHT = HEADER_HEIGHT + GRID_ROWS * TILE_SIZE + FOOTER_HEIGHT;
 
-export const GRAVITY_Y = 900;
+// Raised from 900 (2026-08-19) — the original value gave the player's
+// ordinary jump (JUMP_VELOCITY=-450 in PlayerController.ts) a ~3.5-tile
+// apex and a full 1-second hang time, both far past what any shipped
+// template level's gaps/steps actually need (templateLevels.ts's own
+// gaps top out at ~2-3 tiles, purely horizontal) — a routine hop reached
+// tree-canopy height for nothing, reading as floaty rather than tuned.
+//
+// 1200 was the first value tried and measurably fixed the "looks too
+// high" complaint, but Desert Canyon's one real step-up (a 2-tile pillar
+// the enemy-ghost patrols atop, requiring both a gap-clear *and* a rise —
+// see templateLevels.ts) turned out to only just barely clear at 1200:
+// traced the actual trajectory against the pillar's tile edge and found
+// under a tile of margin left, versus roughly 1.3 tiles the level was
+// originally built with. Backed off to 1100 instead, verified against
+// that same jump: apex ~2.9 tiles / ~0.82s hang time — still a real,
+// visible cut from the original (character no longer reads as jumping to
+// tree-canopy height), but with comfortable margin restored on the
+// tightest existing content. BOUNCE_VELOCITY_Y in PlayScene.ts was raised
+// in the same pass to keep the Spring Meadow bounce pad's platform
+// exactly as reachable as before — see its own comment.
+export const GRAVITY_Y = 1100;

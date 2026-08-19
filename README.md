@@ -483,7 +483,8 @@ any level, nothing stops you from repainting one with other skins once
 it's loaded in the editor. Spring Meadow/Crate Canyon
 both put the goal on a platform reachable only by
 bouncing — `BOUNCE_TILE`'s ~7.3-tile launch (`h = v²/2g` with
-`BOUNCE_VELOCITY_Y=-650`, `GRAVITY_Y=900`) is far past normal-jump range,
+`BOUNCE_VELOCITY_Y=-719`, `GRAVITY_Y=1100` as of the 2026-08-19 gravity
+retune — see "Jump feel retune" below) is far past normal-jump range,
 so the platform is placed several tiles *to the side* of the pad rather
 than directly above it: a player is still rising (not falling) when they
 first reach that height, so a platform straight up would hit the
@@ -2153,6 +2154,63 @@ proving both sides are actually required, not just "one somewhere"), a
 correctly paired level (proceeds), and a plain level with no Sub/Up areas
 at all (completely unaffected, confirming the new check is additive and
 doesn't touch the existing Spawn/Goal gate).
+
+**Jump feel retune (2026-08-19).** A report that the player's jump "looks
+too high" turned out to be well-supported, not a misread: `JUMP_VELOCITY
+= -450` against the original `GRAVITY_Y = 900` gave an ordinary hop a
+~3.5-tile apex and a full 1-second hang time — over 2.3× the player's own
+48px sprite height, measured empirically (sampling `player.y` every frame
+in Playwright, not just the math) at ~108.5px/1002ms. A screenshot at the
+apex made the case on its own: a routine flat-ground jump reached
+tree-canopy height with nothing to clear. Cross-checking against
+`templateLevels.ts` sealed it — its own comment already said gaps are
+"sized well *within*" the max jump, and every real gap in the six bundled
+templates tops out at 2-3 tiles, purely horizontal; the extra height was
+never load-bearing for anything, just floaty by default.
+
+Fixed by raising `GRAVITY_Y` rather than cutting `JUMP_VELOCITY` — gravity
+is what actually controls "floaty vs. snappy" (it shortens hang time *and*
+lowers the apex together, plus makes the fall itself read faster), where
+cutting jump velocity alone would only make the same shape of arc smaller
+without changing how it feels. 1200 was the first value tried and
+measurably fixed the complaint, but tracing the exact trajectory against
+Desert Canyon's one real step-up (a 2-tile pillar the enemy-ghost patrols
+atop — a genuine rise, not just a flat gap) found it landing right at the
+pillar's tile edge with under a tile of margin, down from the ~1.3 tiles
+the level was originally built with. Backed off to **1100** instead:
+apex ~2.9 tiles / ~0.82s hang time (still a real, visible cut — the
+character no longer reads as jumping to tree-canopy height) with
+comfortable margin restored on that tightest case.
+
+`BOUNCE_VELOCITY_Y` (Spring Meadow/Crate Canyon's launch pad — see "Six
+starter templates" under Art) shares `GRAVITY_Y`, so raising gravity alone
+would have shrunk the bounce's own apex from ~7.3 tiles to ~5.5 — short of
+the ~6 tiles SPRING_MEADOW's platform actually needs, breaking a level
+that worked before. Raised `BOUNCE_VELOCITY_Y` from -650 to -719
+(`v' = v·√(1100/900)`) in the same pass to keep that exact height
+unchanged; only its hang time drops (~1.4s→~1.3s), which just reads as
+snappier, not less reachable.
+
+*A test-methodology lesson, not a product bug.* A first verification pass
+walked all six templates with a continuous "hold Right + hold Up" bunny-
+hop bot and saw 5/6 fail — alarming, right after a physics change. Re-
+running the *identical* bot against the unmodified original physics
+first (git stash, not just re-reasoning) found 4 of those 5 already
+failing there too, including Spring Meadow/Crate Canyon/Frozen Cavern all
+stopping at the exact same world-edge x-coordinate regardless of gravity
+— the bot was overshooting the Goal's overlap zone while mid-hop, a
+pre-existing artifact of that input pattern, not a jump-height issue.
+Desert Canyon was the one real before/after difference (passed under old
+physics, died under new) — but a precisely-timed *single* jump (not the
+bunny-hop) at both the old and new gravity values died to the same
+enemy-ghost at nearly identical positions either way, proving that
+specific death is the level's enemy placement, unrelated to gravity, in
+both directions. Same for Spring Meadow's bounce sequence: reached the
+platform's height and died to the enemy-bat at essentially the same
+world position under both old and new physics. Net result: the retune
+changes nothing about which templates are completable — confirmed by
+comparison against the original build, not assumed from a passing test
+run.
 
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a plain text link under the Menu's card grid rather than a fifth
