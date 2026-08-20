@@ -63,6 +63,18 @@ const config: Phaser.Types.Core.GameConfig = {
 
 const game = new Phaser.Game(config);
 
+// Exposes the live Phaser.Game instance for the e2e suite's scene
+// introspection (see tests/e2e/support/coords.ts) — dev-server only.
+// `import.meta.env.DEV` is statically `false` in a production build, so
+// this whole block is dead code there (and typically stripped outright by
+// the minifier) — nothing reaches `window` in what actually ships to
+// GitHub Pages. Playwright's own webServer (playwright.config.ts) always
+// runs the dev server, never the production build, so the e2e suite can
+// rely on this being present.
+if (import.meta.env.DEV) {
+  (window as unknown as { __debugGame?: Phaser.Game }).__debugGame = game;
+}
+
 // Phaser's own ScaleManager only ever listens for `window`'s 'resize' and
 // 'orientationchange' events (see node_modules/phaser/src/scale/
 // ScaleManager.js) — it has no ResizeObserver or visualViewport listener

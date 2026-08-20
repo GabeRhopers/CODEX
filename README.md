@@ -126,6 +126,7 @@ npm install
 npm run dev       # start the dev server (Vite)
 npm run build     # type-check + production build to dist/
 npm test          # run the unit test suite (Vitest)
+npm run test:e2e  # run the browser e2e suite (Playwright — see tests/e2e/)
 npm run typecheck # type-check only, no build
 ```
 
@@ -2274,6 +2275,81 @@ correctly gated by its cooldown (a second press immediately after firing
 does not spawn a second bolt), bolts travelling in the correct direction
 after turning around, and — the one previously-impossible interaction —
 a Spike Crawler destroyed by the shock despite being un-stompable.
+
+**Committed Playwright e2e suite (2026-08-20).** Every feature this
+project has shipped was verified in a real browser, but until now that
+meant a hand-written Playwright script re-derived from scratch each
+session — nothing accumulated as a regression net, and CI only ever ran
+`tsc -b && vite build`. Promotes five of those scenarios (basket
+round-trip both directions, the missing-basket-pair Test Play gate, Hand
+tool grab/move with undo for both an entity and a ground block, checkpoint
+restart reopening in its own area, and a plain-level paint→play→win
+regression floor) into `tests/e2e/`, run via `npm run test:e2e`
+(`@playwright/test`) and wired into `.github/workflows/deploy-pages.yml`
+as a new `e2e` job the Pages `deploy` job now depends on alongside
+`build` — a genuine regression blocks the deploy the same way a failing
+build already does.
+
+The real engineering problem was persistence: this app's only storage
+backend is Google Drive (`GoogleDriveStorageAdapter`/`driveClient.ts`),
+gated behind real Google Identity Services OAuth — completely unusable
+headless in CI. `tests/e2e/support/mockDrive.ts` mocks both at the network
+boundary rather than swapping in a fake StorageAdapter: a `page.addInitScript`
+stubs `window.google.accounts.oauth2` before any page script runs (so
+`googleAuth.ts`'s `loadGis()` never even loads the real
+`accounts.google.com/gsi/client` script), and a `page.route` on
+`googleapis.com` backs an in-memory fake Drive filesystem implementing the
+exact request shapes `driveClient.ts` generates (folder search/create,
+file search/get/rename/trash, multipart create/update — parsed off the
+`Content-Type` boundary rather than hardcoding driveClient's own constant).
+This exercises the *real* `GoogleDriveStorageAdapter` code end to end,
+including the real `ProfileGateScene → Menu` boot chain, not a test-only
+substitute for it.
+
+The second problem was clicking anything at all: Phaser renders to one
+`<canvas>`, so there's no DOM to select against. `tests/e2e/support/coords.ts`
+solves this by asking the page's own live game instance for real
+positions at run time — `clickByText`/`clickIconWithLabel` search a
+scene's display list (recursing into Containers, since `EditorUI`'s
+palette icon grid is one) for the Text/Image a real click would land on,
+rather than hardcoding `EditorUI.ts`'s button-layout math, which would
+silently drift out of sync on the next layout change. This surfaced a
+real bug in the coordinate math itself before any spec could pass: Phaser's
+`ScaleManager.displayScale` is *game-space per canvas-space pixel*
+(`baseSize / canvasBounds` — confirmed straight from
+`node_modules/phaser/src/scale/ScaleManager.js`, not assumed), so
+converting a scene coordinate to a page click point needs to *divide* by
+`displayScale`, not multiply — multiplying (my first attempt) put every
+click roughly 20% short of its target, which at this canvas's FIT-mode
+scale-up was just far enough to consistently miss the intended button
+while still looking plausible on paper. Caught immediately by the very
+first real spec run, not by re-reading the math harder.
+
+`tests/e2e/support/levels.ts` builds real `LevelData` objects
+programmatically for specs that need specific pre-built content (a
+basket pair, a checkpoint past a cliff) — setup is programmatic, but the
+actual mechanic under test (a basket teleport, a Hand-tool drag, a
+Test-Play click, walking off a ledge) is still driven by real
+pointer/keyboard input against the live scene, not a scene-state
+shortcut. One of these — the basket round-trip's return leg — needed a
+similar "verify, don't assume" correction: touching a basket and simply
+waiting past its cooldown never re-triggered the return trip on its own,
+because the player's own residual rightward velocity had already carried
+it a few pixels past the landing basket's overlap zone by the time the
+test noticed the area had changed; the fix was to walk back onto the
+basket explicitly rather than assume a stationary re-fire.
+
+The `window.__debugGame` hook every earlier verification pass this
+session added and removed by hand around `src/main.ts` (per the
+"temporary debug hook, always reverted" convention) is now permanent —
+but gated behind `import.meta.env.DEV`, which Vite statically resolves to
+`false` in a production build, so the whole block is dead code in what
+actually deploys to GitHub Pages. Playwright's own `webServer` (see
+`playwright.config.ts`) always runs the dev server, never the production
+build, so the suite can rely on the hook always being present without
+ever touching production behavior — a structural fix for the "must
+remember to revert it" risk the ad hoc version carried, not just a
+one-off instance of following the convention correctly.
 
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a plain text link under the Menu's card grid rather than a fifth

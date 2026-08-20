@@ -30,8 +30,34 @@ jobs:
         with:
           path: dist
 
+  # Priority Matrix (Reliability & testing process, Tier 2): promotes the
+  # Playwright scripts every feature this project shipped was verified by
+  # (previously hand-written from scratch each time, never checked in) into
+  # this committed, CI-run suite — see tests/e2e/ and its own support/
+  # helpers (a from-scratch mocked Google Drive/auth backend, so this never
+  # touches a real Google account). Runs independently of `build` (it
+  # drives its own `npm run dev` instance via playwright.config.ts's
+  # webServer, not the production bundle `build` produces) so both can run
+  # in parallel; `deploy` below waits on both.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
   deploy:
-    needs: build
+    needs: [build, e2e]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
