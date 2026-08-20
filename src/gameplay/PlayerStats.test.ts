@@ -13,6 +13,8 @@ import {
   createPlayerStats,
   fireThunderHat,
   HIT_GRACE_MS,
+  HURT_FLASH_MS,
+  isHurtFlashing,
   isInvincible,
   openChest,
   registerHit,
@@ -66,6 +68,49 @@ describe("registerHit", () => {
     registerHit(stats, 1000);
     expect(registerHit(stats, 1000 + HIT_GRACE_MS)).toBe("absorbed");
     expect(stats.extraHits).toBe(0);
+  });
+});
+
+describe("isHurtFlashing", () => {
+  it("is false before ever being hit", () => {
+    const stats = createPlayerStats();
+    expect(isHurtFlashing(stats, 0)).toBe(false);
+    expect(isHurtFlashing(stats, 999999)).toBe(false);
+  });
+
+  it("flashes briefly after an absorbed hit, then stops", () => {
+    const stats = createPlayerStats();
+    collectHeart(stats);
+    registerHit(stats, 1000);
+    expect(isHurtFlashing(stats, 1000)).toBe(true);
+    expect(isHurtFlashing(stats, 1000 + HURT_FLASH_MS - 1)).toBe(true);
+    expect(isHurtFlashing(stats, 1000 + HURT_FLASH_MS)).toBe(false);
+  });
+
+  it("stops flashing well before the invincibility that hit granted expires", () => {
+    // This is the whole point of the field: a survived hit used to be
+    // indistinguishable from a held Shield, since both only set
+    // invincibleUntil.
+    const stats = createPlayerStats();
+    collectHeart(stats);
+    registerHit(stats, 0);
+    expect(HURT_FLASH_MS).toBeLessThan(HIT_GRACE_MS);
+    expect(isHurtFlashing(stats, HURT_FLASH_MS + 1)).toBe(false);
+    expect(isInvincible(stats, HURT_FLASH_MS + 1)).toBe(true);
+  });
+
+  it("does not flash for a Shield pickup, which is not a hit", () => {
+    const stats = createPlayerStats();
+    collectShield(stats, 1000);
+    expect(isHurtFlashing(stats, 1000)).toBe(false);
+    expect(isInvincible(stats, 1000)).toBe(true);
+  });
+
+  it("does not flash for a hit that was absorbed by invincibility rather than a heart", () => {
+    const stats = createPlayerStats();
+    collectShield(stats, 0);
+    expect(registerHit(stats, 100)).toBe("invincible");
+    expect(isHurtFlashing(stats, 100)).toBe(false);
   });
 });
 

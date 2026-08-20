@@ -263,7 +263,10 @@ Open the dev server URL in a browser. Controls:
   or touching a Spike Crawler at all (it can't be stomped — though the
   Thunder Hat's shock can defeat it), costs you the
   level **unless** you're holding a Heart in reserve or are currently
-  Shield-protected — see "Items & hit-points" under Art. Touching a
+  Shield-protected — see "Items & hit-points" under Art. The character
+  poses differently for each situation — walking, jumping, swimming,
+  casting, surviving a hit, winning and losing all look distinct; see
+  "Character situations" under Art. Touching a
   **Checkpoint** bell lights it up (and dims whichever one was lit
   before) and makes it where **R** respawns you after a loss, instead of
   back at Spawn — see "Checkpoints" under Art for why that only applies to
@@ -2350,6 +2353,77 @@ build, so the suite can rely on the hook always being present without
 ever touching production behavior — a structural fix for the "must
 remember to revert it" risk the ad hoc version carried, not just a
 one-off instance of following the convention correctly.
+
+**Character situations (2026-08-20).** The character now shows a different
+pose for winning, losing, casting, swimming, getting hurt, and picking up a
+power-up — built entirely on the five sprites he already had
+(`public/assets/wizard/`), with no new art.
+
+This started as a request to add sprite editing to the Skin Creator for the
+main character. Measuring the existing frames turned that around: they carry
+**~950–1010 distinct colors each, with 29–35% of their pixels at partial
+alpha** (measured in a real browser, not estimated). They're hand-drawn art
+with soft anti-aliased edges, while `PixelCanvasOverlay`'s model is one flat
+hex color per cell from a ≤16-color palette with binary alpha — importing
+them would have collapsed ~1000 colors to 16 and destroyed every soft edge.
+`PixelSkinData`'s own docstring already says as much about uploaded photos.
+So the sprites stay exactly as they are and the Skin Creator is untouched;
+what was actually missing was the *game using* the frames it already had.
+
+`src/gameplay/characterState.ts` is the new decision point: a pure,
+priority-ordered resolver (`lose > win > cast > swim > jump > walk > idle`)
+plus a frame table and a separate tint table, sitting where `PlayerStats.ts`
+sits — no Phaser types, unit-tested without a scene, 20 cases covering every
+branch. `updateWizardAnimation` now delegates the frame choice and *returns*
+the situation it settled on, so `PlayScene` can apply the matching treatment
+without re-deriving the same precedence a second time. Ordering matters in
+two non-obvious places: swimming has to outrank jumping (in water the player
+is always airborne by the grounded check, so the reverse order would make
+the swim pose unreachable), and casting has to outrank movement so firing
+the Thunder Hat reads mid-stride.
+
+Frame and tint stay deliberately separate, keeping the split
+`updateBuffVisuals` already had — a tint is a modifier on whatever pose is
+showing (you can be hurt while walking), not a pose of its own. Situations
+the five frames don't literally contain reuse the closest one plus a
+treatment: **losing** is the idle frame desaturated and toppled over
+(previously the character just froze mid-stride with no pose at all),
+**swimming** is the jump frame with a forward lean, and **picking up a
+power-up** briefly strikes the cast pose — the arms-up stance already reads
+as "something good happened," so it needed nothing new. Coins and Keys are
+excluded: they change the HUD, not what the character can do.
+
+Two real gaps closed along the way. `onLose()` had no pose whatsoever. And
+getting hurt was visually identical to holding a Shield — both only set
+`invincibleUntil`, so an absorbed hit and an 8-second Shield both tinted
+cyan for over a second. `PlayerStats` gained `lastHitAt`/`isHurtFlashing`
+so a survived hit flashes red for 220ms before settling into the ordinary
+grace tint.
+
+*Why the tilts are safe.* Arcade Physics bodies are axis-aligned and don't
+rotate with their sprite, so `setAngle` changes only what's drawn. That
+matters because the 2026-08-19 gravity retune verified every bundled
+template against a fixed 22×40 body, with Desert Canyon's pillar down to
+roughly a tile of margin — a cosmetic pose must not be able to invalidate
+that. `tests/e2e/character-states.spec.ts` asserts the body stays 22×40
+with a lose tilt applied rather than leaving it to reasoning.
+
+*A testing lesson worth recording.* Three of the four e2e tests failed on
+first run, none of them because of a product defect. Two sampled too
+slowly: `expect.poll` runs on its own cadence (100/250/500ms), which steps
+straight over a 220ms hurt flash or a 260ms power-up flash. The third was
+worse in a more interesting way — the level was short enough that the
+player reached the Goal mid-assertion, and since winning *also* shows the
+cast frame, a win looked exactly like a stuck power-up flash (the failure
+screenshot showed "You Win!" on screen, which is what gave it away). The
+fix for the transients isn't a tighter poll interval but a latch installed
+inside the page on `requestAnimationFrame`, so every rendered frame is
+checked and a quarter-second pose cannot be missed. A fourth failure
+appeared only in the full-suite run: the headless browser falls back to
+software WebGL, so the game loop runs behind wall-clock under load and a
+~1.5s in-game fall genuinely took longer than a 5s poll allowed — the
+screenshot showed "You Lose" already on screen. That one is environmental,
+and the honest fix was headroom, not a workaround.
 
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a plain text link under the Menu's card grid rather than a fifth

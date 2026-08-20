@@ -18,6 +18,14 @@ export interface PlayerStats {
    * briefly re-set after an absorbed hit so the same hazard can't chain
    * two hits in one collision. */
   invincibleUntil: number;
+  /** When the last hit was actually *absorbed* (see registerHit) — distinct
+   * from `invincibleUntil`, which that same hit also sets. Without this, a
+   * survived hit and a held Shield were visually identical: both left the
+   * player tinted cyan for over a second, so there was no way to tell "you
+   * just got hurt" from "you're protected." See characterState.resolveTint,
+   * which flashes red for the brief window this opens before falling back to
+   * the ordinary invincibility tint. 0 means "never been hit this run."  */
+  lastHitAt: number;
   speedBoostUntil: number;
   /** PJ Thunder Hat — a permanent equip (like Chicken Slipper/double jump)
    * rather than limited ammo, gated by a cooldown instead of a stock count
@@ -35,6 +43,10 @@ export interface PlayerStats {
 }
 
 export const HIT_GRACE_MS = 1200;
+/** How long the red "you got hit" flash lasts — deliberately far shorter than
+ * HIT_GRACE_MS, since it's a hit *notification* sitting on top of the longer
+ * invincibility that hit granted, not a duration of its own. */
+export const HURT_FLASH_MS = 220;
 export const SHIELD_DURATION_MS = 8000;
 export const SPEED_DURATION_MS = 6000;
 export const SPEED_MULTIPLIER = 1.6;
@@ -52,6 +64,7 @@ export function createPlayerStats(): PlayerStats {
     hasDoubleJump: false,
     doubleJumpUsed: false,
     invincibleUntil: 0,
+    lastHitAt: 0,
     speedBoostUntil: 0,
     hasThunderHat: false,
     thunderCooldownUntil: 0,
@@ -81,9 +94,19 @@ export function registerHit(stats: PlayerStats, now: number): HitResult {
   if (stats.extraHits > 0) {
     stats.extraHits -= 1;
     stats.invincibleUntil = now + HIT_GRACE_MS;
+    stats.lastHitAt = now;
     return "absorbed";
   }
   return "fatal";
+}
+
+/** True during the brief flash right after an absorbed hit — a strict subset
+ * of the invincibility that same hit granted, which is exactly why it has to
+ * be checked *first* when picking a tint (see characterState.resolveTint).
+ * Only ever true after a hit was actually survived: a fatal hit ends the run,
+ * where the lose pose takes over instead. */
+export function isHurtFlashing(stats: PlayerStats, now: number): boolean {
+  return stats.lastHitAt > 0 && now < stats.lastHitAt + HURT_FLASH_MS;
 }
 
 export function canDoubleJump(stats: PlayerStats, grounded: boolean): boolean {

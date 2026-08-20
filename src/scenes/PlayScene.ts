@@ -13,6 +13,7 @@ import {
   updateGhostPatrol,
 } from "../gameplay/EnemyBehaviors";
 import { createBolt, isBoltExpired } from "../gameplay/Bolt";
+import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from "../gameplay/characterState";
 import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { resolveLevelMusicKey } from "../gameplay/musicLoader";
@@ -29,6 +30,7 @@ import {
   collectThunderHat,
   createPlayerStats,
   fireThunderHat,
+  isHurtFlashing,
   isInvincible,
   openChest,
   PlayerStats,
@@ -95,12 +97,18 @@ const TELEPORT_COOLDOWN_MS = 500;
 // of the player in whichever direction they're facing (player.flipX).
 const BOLT_LAUNCH_OFFSET_X = 16;
 const BOLT_LAUNCH_OFFSET_Y = 24;
-// How long the "wizard-cast" pose (see onWin's own use of it) flashes on
-// screen when firing a bolt — brief on purpose, just long enough to read
-// as a cast rather than a static jump/idle/walk frame. Applied *after*
-// updateWizardAnimation each frame (see update()) since that function
-// would otherwise immediately overwrite it with the grounded/moving pose.
+// How long the "wizard-cast" pose holds when firing a bolt — brief on
+// purpose, just long enough to read as a cast rather than a static jump/
+// idle/walk frame. Fed into characterState's own situation ranking (see
+// update()) rather than stamped over the animation afterward, so it can't
+// fight whatever pose the resolver already chose.
 const CAST_FLASH_MS = 150;
+// The same pose, held a little longer, for the moment a power-up is picked
+// up — the cast frame's arms-up stance already reads as "something good
+// just happened," so this needs no new art. Distinct from the persistent
+// powered-up look, which is the accessory sprites (see
+// updateAccessoryVisuals) plus the Speed/Shield tints.
+const POWERUP_FLASH_MS = 260;
 
 /** Every item brush's textureKey equals its EntityType (see Palette.ts), so
  * spawning just needs the type list — no separate texture lookup like
@@ -632,6 +640,12 @@ export class PlayScene extends Phaser.Scene {
     if (this.areaBuilt) {
       this.player.setPosition(spawnX, spawnY);
       (this.player.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+      // The per-frame pass in update() re-derives tint/angle authoritatively
+      // anyway, so this is belt-and-braces — but a reused player carrying a
+      // stale treatment into a freshly-built area for even one frame is
+      // exactly the kind of thing that only shows up as a flicker later.
+      this.player.clearTint();
+      this.player.setAngle(0);
     } else {
       this.player = this.physics.add.sprite(spawnX, spawnY, "wizard-idle");
       this.player.setOrigin(0.5, 1);
@@ -924,9 +938,17 @@ export class PlayScene extends Phaser.Scene {
     }
 
     updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time) * (swimming ? SWIM_SPEED_MULTIPLIER : 1));
-    updateWizardAnimation(this.player, this.wizardAnim, delta);
-    if (time < this.castFlashUntil) applyWizardTexture(this.player, "wizard-cast");
-    this.updateBuffVisuals(time);
+    // The cast pose used to be re-applied here as a special case *after* the
+    // animation had already picked a frame; it's now just one more situation
+    // the resolver ranks (see characterState.resolveSituation), so swimming
+    // and casting can't fight over the sprite the way an override tacked on
+    // afterward could.
+    const situation = updateWizardAnimation(this.player, this.wizardAnim, delta, {
+      outcome: this.outcome,
+      swimming,
+      casting: time < this.castFlashUntil,
+    });
+    this.updateCharacterVisuals(situation, time);
     this.updateAccessoryVisuals();
     this.background?.update(this.player.x);
 
@@ -1063,6 +1085,11 @@ export class PlayScene extends Phaser.Scene {
       default:
         return;
     }
+    // Coins and Keys are collectibles, not power-ups — they change the HUD,
+    // not what the character can do, so they don't get the celebratory pose.
+    if (type !== "item-coin" && type !== "item-key") {
+      this.castFlashUntil = Math.max(this.castFlashUntil, now + POWERUP_FLASH_MS);
+    }
     icon.destroy();
     zone.destroy();
     this.updateHud();
@@ -1127,18 +1154,41 @@ export class PlayScene extends Phaser.Scene {
     this.hud.setText(`Score: ${this.stats.score}${hearts ? "  " + hearts : ""}${key}`);
   }
 
-  /** Cyan while a Shield (or the post-hit grace period) makes any bad
-   * contact free; yellow while a Speed Potion is active; otherwise no
-   * tint. Shield takes priority since it's the stronger effect and the two
-   * can't meaningfully be told apart by tint alone. */
-  private updateBuffVisuals(now: number): void {
-    if (isInvincible(this.stats, now)) {
-      this.player.setTint(0x66e0ff);
-    } else if (speedMultiplierAt(this.stats, now) > 1) {
-      this.player.setTint(0xffe066);
-    } else {
-      this.player.clearTint();
-    }
+  /** Applies whatever tint and tilt the current situation calls for — the
+   * treatment half of the pose, with characterState owning the precedence
+   * (see resolveTint/angleFor). Replaces the old updateBuffVisuals, which
+   * only knew about Shield and Speed: a *survived* hit now flashes red
+   * first instead of showing the same cyan a Shield does, and losing gets a
+   * slumped, desaturated pose rather than freezing mid-stride.
+   *
+   * Called every frame while playing, and once directly from onWin/onLose —
+   * update() early-returns once the run is over, so a terminal pose has to
+   * be applied at the moment the outcome changes or it never lands. */
+  private updateCharacterVisuals(situation: CharacterSituation, now: number): void {
+    const reason = resolveTint({
+      situation,
+      hurtFlash: isHurtFlashing(this.stats, now),
+      invincible: isInvincible(this.stats, now),
+      speedBoosted: speedMultiplierAt(this.stats, now) > 1,
+    });
+    const color = TINT_COLORS[reason];
+    if (color === null) this.player.clearTint();
+    else this.player.setTint(color);
+    // Arcade Physics bodies stay axis-aligned regardless of the sprite's
+    // angle, so this is provably cosmetic — it cannot move the hitbox the
+    // 2026-08-19 gravity retune verified every template against.
+    this.player.setAngle(angleFor(situation, this.player.flipX));
+  }
+
+  /** Freezes the character into a win/lose pose at the moment the run ends.
+   * Separate from the per-frame path above because update() stops running
+   * entirely once `outcome` changes, so this is the only chance to set it —
+   * and because the walk timer must be reset too, or a character caught
+   * mid-stride would resume on the wrong foot after Restart. */
+  private applyTerminalPose(situation: "win" | "lose"): void {
+    this.wizardAnim = createWizardAnimState();
+    applyWizardTexture(this.player, frameFor(situation, 0));
+    this.updateCharacterVisuals(situation, this.time.now);
   }
 
   /** Keeps the Chicken Slipper/PJ Thunder Hat accessory sprites glued to
@@ -1178,7 +1228,7 @@ export class PlayScene extends Phaser.Scene {
     if (this.outcome !== "playing") return;
     this.outcome = "won";
     this.player.setVelocity(0, 0);
-    applyWizardTexture(this.player, "wizard-cast");
+    this.applyTerminalPose("win");
     this.physics.pause();
     this.trophy.setVisible(true);
 
@@ -1222,6 +1272,7 @@ export class PlayScene extends Phaser.Scene {
     if (this.outcome !== "playing") return;
     this.outcome = "lost";
     this.player.setVelocity(0, 0);
+    this.applyTerminalPose("lose");
     this.physics.pause();
     this.banner.setText("You Lose").setVisible(true);
     this.hint.setText(`Press R to try again, or Esc for ${this.backDestinationPhrase()}`).setVisible(true);

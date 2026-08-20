@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { CharacterMotion, CharacterSituation, frameFor, resolveSituation, WizardFrameKey } from "./characterState";
 
 /**
  * Player character art: cropped/normalized from a hand-drawn sprite sheet
@@ -6,8 +7,20 @@ import Phaser from "phaser";
  * facing right). All frames are pre-scaled offline to the same display
  * height (48px) so swapping textures at runtime never jitters the
  * character's vertical size; only width varies slightly per pose.
+ *
+ * Which of these five shows for a given game situation is decided by
+ * characterState.ts, not here — this module owns the sprite mechanics
+ * (texture swap, body re-centering, facing, walk timing), that one owns the
+ * rules. `satisfies` keeps this preload list and that module's own
+ * WizardFrameKey union from drifting apart.
  */
-export const WIZARD_FRAME_KEYS = ["wizard-idle", "wizard-walk1", "wizard-walk2", "wizard-jump", "wizard-cast"] as const;
+export const WIZARD_FRAME_KEYS = [
+  "wizard-idle",
+  "wizard-walk1",
+  "wizard-walk2",
+  "wizard-jump",
+  "wizard-cast",
+] as const satisfies readonly WizardFrameKey[];
 
 // Exported for PlayScene's accessory sprites (Chicken Slipper/Thunder Hat —
 // see updateAccessoryVisuals there), which need the player's own display
@@ -44,28 +57,55 @@ export function applyWizardTexture(player: Phaser.Physics.Arcade.Sprite, key: st
   body.setOffset((player.width - BODY_WIDTH) / 2, FRAME_HEIGHT - BODY_HEIGHT);
 }
 
-export function updateWizardAnimation(player: Phaser.Physics.Arcade.Sprite, state: WizardAnimState, deltaMs: number): void {
+/** What the caller knows that the sprite itself can't report — see
+ * PlayScene's update(). Everything else (grounded, moving, facing) is read
+ * straight off the physics body here, so PlayScene never has to re-derive it. */
+export interface WizardAnimContext {
+  outcome: "playing" | "won" | "lost";
+  swimming: boolean;
+  casting: boolean;
+}
+
+/**
+ * Advances the character's pose one frame and returns which situation it
+ * settled on, so the caller can apply the matching tint/tilt without
+ * resolving the same precedence a second time (see PlayScene's
+ * updateCharacterVisuals).
+ *
+ * The walk timer only advances while actually walking — any other situation
+ * resets it, so the cycle always restarts from the same foot rather than
+ * resuming mid-stride after a jump or a cast.
+ */
+export function updateWizardAnimation(
+  player: Phaser.Physics.Arcade.Sprite,
+  state: WizardAnimState,
+  deltaMs: number,
+  context: WizardAnimContext,
+): CharacterSituation {
   const body = player.body as Phaser.Physics.Arcade.Body;
-  const grounded = body.blocked.down;
-  const movingHorizontally = Math.abs(body.velocity.x) > MOVING_VELOCITY_THRESHOLD;
 
   if (body.velocity.x < -MOVING_VELOCITY_THRESHOLD) player.setFlipX(true);
   else if (body.velocity.x > MOVING_VELOCITY_THRESHOLD) player.setFlipX(false);
 
-  if (!grounded) {
-    applyWizardTexture(player, "wizard-jump");
-    return;
-  }
+  const motion: CharacterMotion = {
+    outcome: context.outcome,
+    grounded: body.blocked.down,
+    movingHorizontally: Math.abs(body.velocity.x) > MOVING_VELOCITY_THRESHOLD,
+    swimming: context.swimming,
+    casting: context.casting,
+  };
+  const situation = resolveSituation(motion);
 
-  if (movingHorizontally) {
+  if (situation === "walk") {
     state.walkTimer += deltaMs;
     if (state.walkTimer >= WALK_FRAME_INTERVAL_MS) {
       state.walkTimer = 0;
       state.walkFrame = state.walkFrame === 0 ? 1 : 0;
     }
-    applyWizardTexture(player, state.walkFrame === 0 ? "wizard-walk1" : "wizard-walk2");
   } else {
     state.walkTimer = 0;
-    applyWizardTexture(player, "wizard-idle");
   }
+
+  applyWizardTexture(player, frameFor(situation, state.walkFrame));
+  return situation;
 }
