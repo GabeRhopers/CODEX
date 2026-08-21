@@ -136,7 +136,12 @@ Open the dev server URL in a browser. Controls:
   fresh empty editor; **Templates** opens the template browser; **My
   Levels** opens your saved-levels browser; **Worlds** opens the world
   browser. Each card's subtitle is a live status line (how many you've
-  saved, or a nudge toward New Level/Templates when empty).
+  saved, or a nudge toward New Level/Templates when empty). Below the grid,
+  one full-width bar adapts to who's looking: **Continue** reopens your most
+  recently updated level in one click, or, with nothing saved yet, points
+  you at the templates instead. Arrow keys move a focus ring across the
+  whole page and Enter/Space opens whatever it's on, so the home page works
+  without a mouse.
 - **Templates**: 6 pre-built levels, one per ground skin plus two showcasing
   Brick/Bounce/Bat/Spike Crawler together and one showcasing the second
   content pass (see "Templates & ground skins" and "Second content pass" under
@@ -163,7 +168,7 @@ Open the dev server URL in a browser. Controls:
   advance to the next level, or **R** to replay the current one; winning
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
-- **Skin Creator** (a text link below the home page's card grid, not a
+- **Skin Creator** (a chip in the home page's footer row, not a
   5th card — see "Skin Creator" under Art for why): pick an existing
   pixel-drawn skin to re-edit, or **+ New Skin** and choose which of the
   ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
@@ -2476,8 +2481,91 @@ The round trip is pinned by a new e2e test that paints a scatter of cells
 reopens, and asserts every cell came back identical — through the real editor
 and the real storage layer, not a synthetic canvas.
 
+**Home page UI/UX pass (2026-08-21).** Screenshotted the live page in both
+the first-run and returning-user states before changing anything, which turned
+up two outright bugs next to the layout problems.
+
+*The page's only identity affordance was illegible.* The `wizard-idle`
+decoration at (50, 34) was drawn straight over the `"{profile} · Switch
+profile"` text at (8, 6) — not subtly, right across it. The mascot moved to the
+footer and the profile line became a proper chip at the grid's own left margin.
+
+*A Drive failure hung both status lines forever.* `void
+levelStorage.list().then(...)` had no `.catch`, so an offline or consent
+failure was an unhandled rejection and the cards sat on "Checking…" with
+nothing explaining why and no way to retry. Both lists now catch, both cards
+say so, and the bar offers **Try again**, which re-runs the fetch.
+
+*The bottom third of the page was empty while the cards crowded the edges.*
+~90px of dead space sat between the last control and the footer line. It's now
+a full-width bar that adapts to who's looking: **Jump back in / <your most
+recent level> / Continue →** for a returning builder, **New here? / Play a
+ready-made level, then remix it into your own / Browse Templates →** for
+someone with nothing saved. Deliberately not a fifth card — the grid's four
+positions are hardcoded and sized so `GAME_HEIGHT` clears them, so a fifth
+would mean a third row cascading into `gameConfig.ts` constants every other
+scene reads; a bar fills the space without touching that math, and suits a
+"one thing, right now" prompt better than a peer of the four standing choices.
+Which level to resume is `pickResumeLevel` in `src/level/recentLevels.ts` —
+pure and unit-tested, treating an unparseable `updatedAt` as the epoch so NaN
+can't poison the ordering, and breaking ties deterministically so Continue
+doesn't point somewhere different between visits. While the list is still
+loading the bar is inert rather than clickable, so its destination can never
+change under a cursor mid-click.
+
+*Priorities were inverted.* The volume slider — bright green, centred,
+full-width at volume 1.0 — was the loudest graphic on the page, while **Skin
+Creator**, an actual destination, was a dim 13px text link *below* it. Skin
+Creator is a chip now; the slider narrowed to 150px and moved to the footer's
+right edge.
+
+*Cards didn't look clickable.* They were flat filled rectangles with no border
+and no affordance until you happened to hover one. Each now has a 4px accent
+stripe, a border and a `›` chevron, and **New Level** carries the page's one
+gold stripe — with nothing saved yet it's the only card leading anywhere with
+content in it, and once there is saved work the resume bar takes over as the
+loudest thing on the page.
+
+*Icons were doing double duty as decoration.* `wizard-idle` was both the My
+Levels icon and the top-left mascot; `goal-portal` was both the Worlds icon and
+a top-right decoration. Repeating the art stops the icons reading as
+identifiers. My Levels is a `chest` now, and the decorations are enemies only.
+`decor-bat` was tried there first and rejected from the screenshot — it renders
+as a near-black blob on the navy page.
+
+*Contrast.* The controls hint was `#666688` on `#1a1a2e` = **3.10:1**, under
+the 4.5:1 small-text threshold, on the one line explaining the controls to a
+first-time player. Now `#8a8ab0` = 5.15:1. The card subtitles measured 6.43:1
+and were left alone.
+
+*Keyboard access.* Everything here is drawn into a canvas, so there's no DOM
+tab order to inherit and the page was pointer-only. Targets now carry a
+row/column, so arrow keys move spatially — "down" means the thing visually
+below, even where one row is a full-width bar and its neighbour holds two
+cards — and Enter/Space opens. Hover and focus drive one shared highlight, so
+two things are never lit at once, and `GAME_OUT` clears a hover left stuck by a
+pointer leaving the canvas (Phaser never sees that move otherwise). The volume
+slider is still not keyboard-reachable, being a drag control — a real remaining
+gap.
+
+*One Phaser quirk, found by measurement.* Arrow keys initially over-stepped:
+three ArrowDown presses moved the ring four places. Logging DOM events, scene
+emissions and focus moves side by side showed Phaser 3.90 re-delivering
+already-handled keydowns — three DOM events, six scene emissions. Two fixes
+were tried and measured before the third stuck. `EditorScene`'s existing
+`onceThisFrame` guard also swallows a *genuine* second press in the same frame,
+which is fine for undo/redo but turned those three presses into one step.
+Remembering the last timestamp per key failed too, because the replays aren't
+in order — the trace caught an older ArrowDown re-delivered *after* a newer one
+had been handled, so a single slot ping-pongs and treats both as new. What
+works is a monotonic high-water mark: every key event carries a timestamp from
+one clock, so a real press is always strictly later than anything handled and a
+replay never is. Verified at both timings — 7 presses, exactly 7 moves, whether
+sent back to back or spaced out.
+
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
-from a plain text link under the Menu's card grid rather than a fifth
+from a chip in the Menu's footer row (a bare text link until the
+2026-08-21 home-page pass) rather than a fifth
 card or a mode nested inside the level Editor — it's a much lighter
 destination than New Level/World Maker/Templates/Continue (pick a brush,
 paint, save; no level state involved), and the card grid's layout
