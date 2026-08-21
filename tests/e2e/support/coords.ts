@@ -92,11 +92,22 @@ export async function clickByText(page: Page, sceneKey: string, text: string): P
       const game = window.__debugGame!;
       const scene = game.scene.getScene(sceneKey);
       if (!scene) return null;
-      type Listable = { list?: Listable[]; type?: string; text?: string; x?: number; y?: number };
+      type Bounds = { x: number; y: number; width: number; height: number };
+      type Listable = { list?: Listable[]; type?: string; text?: string; getBounds?: () => Bounds };
+      // The *centre of the rendered bounds*, not the object's own x/y —
+      // those coincide only for origin (0.5, 0.5). Several buttons here use
+      // origin (0, 0.5) or the default (0, 0), where x/y is an edge or a
+      // corner and a click there lands on the boundary and can miss
+      // entirely (SkinEditorScene's "+ New Skin" and "← Back" both did).
+      const centreOf = (child: Listable): { x: number; y: number } | null => {
+        const b = child.getBounds?.();
+        return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null;
+      };
       const search = (list: Listable[]): { x: number; y: number } | null => {
         for (const child of list) {
           if (child.type === "Text" && child.text === text) {
-            return { x: child.x ?? 0, y: child.y ?? 0 };
+            const centre = centreOf(child);
+            if (centre) return centre;
           }
           if (child.list) {
             const found = search(child.list);
@@ -125,13 +136,16 @@ export async function clickIconWithLabel(page: Page, sceneKey: string, label: st
     ({ sceneKey, label }) => {
       const scene = window.__debugGame!.scene.getScene(sceneKey);
       if (!scene) return null;
-      type Listable = { list?: Listable[]; type?: string; text?: string; x?: number; y?: number };
+      type Bounds = { x: number; y: number; width: number; height: number };
+      type Listable = { list?: Listable[]; type?: string; text?: string; getBounds?: () => Bounds };
       const search = (list: Listable[]): { x: number; y: number } | null => {
         for (let i = 0; i < list.length; i++) {
           const child = list[i];
           if (child.type === "Text" && child.text === label && i > 0 && list[i - 1].type === "Image") {
-            const icon = list[i - 1];
-            return { x: icon.x ?? 0, y: icon.y ?? 0 };
+            // Bounds centre rather than x/y, for the same origin reason
+            // documented in clickByText above.
+            const b = list[i - 1].getBounds?.();
+            if (b) return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
           }
           if (child.list) {
             const found = search(child.list);

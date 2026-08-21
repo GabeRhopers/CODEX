@@ -2,9 +2,11 @@ import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { Brush, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
-import { PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
+import { PIXEL_GRID_SIZE, PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { fitWithinTile } from "../editor/spriteFit";
 import { loadActiveProfile } from "../profile/Profile";
+import { SkinAsset } from "../skins/CustomSkins";
+import { cellsFromPngDataUrl } from "../skins/pixelSkinCells";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES } from "../skins/pixelPalettes";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
 import { listPixelSkins, removeCustomSkin, savePixelSkin } from "../skins/skinStorage";
@@ -234,19 +236,12 @@ export class SkinEditorScene extends Phaser.Scene {
       entries.forEach((entry, i) => {
         const brush = brushesById.get(entry.brushId);
         const textureKey = thumbsByBrush.get(entry.brushId)?.find((t) => t.id === entry.asset.id)?.textureKey;
-        this.addBrowseRow(ROW_START_Y + i * ROW_HEIGHT, brush, entry.brushId, entry.asset.id, entry.asset.pixelData?.cells, textureKey);
+        this.addBrowseRow(ROW_START_Y + i * ROW_HEIGHT, brush, entry.brushId, entry.asset, textureKey);
       });
     });
   }
 
-  private addBrowseRow(
-    y: number,
-    brush: Brush | undefined,
-    brushId: string,
-    skinId: string,
-    cells: (string | null)[] | undefined,
-    textureKey: string | undefined,
-  ): void {
+  private addBrowseRow(y: number, brush: Brush | undefined, brushId: string, asset: SkinAsset, textureKey: string | undefined): void {
     this.add.rectangle(40, y, GAME_WIDTH - 80, ROW_HEIGHT - 8, 0x16213e).setOrigin(0, 0);
     if (textureKey) {
       const icon = this.add.image(66, y + (ROW_HEIGHT - 8) / 2, textureKey).setOrigin(0.5);
@@ -258,12 +253,43 @@ export class SkinEditorScene extends Phaser.Scene {
 
     this.makeSmallButton(GAME_WIDTH - 280, y + (ROW_HEIGHT - 8) / 2, "Edit", () => {
       if (!brush) return;
-      this.target = { brush, existingId: skinId, paletteId: DEFAULT_PIXEL_PALETTE_ID, initialCells: cells };
-      this.goTo("canvas");
+      void this.openForEditing(brush, asset);
     });
     this.makeSmallButton(GAME_WIDTH - 200, y + (ROW_HEIGHT - 8) / 2, "Delete", () => {
-      void removeCustomSkin(brushId, skinId).then(() => this.rebuild());
+      void removeCustomSkin(brushId, asset.id).then(() => this.rebuild());
     });
+  }
+
+  /** Loads a saved skin back into the canvas. Skins written before
+   * 2026-08-21 carry their own `cells` array and open straight from it;
+   * everything since is decoded from the skin's PNG instead, which holds
+   * exactly the same grid (see PixelSkinData.cells). Async purely because
+   * decoding an image is — hence the guard against the user having
+   * navigated away in the meantime, matching how buildBrowse handles its
+   * own awaits.
+   *
+   * `paletteId` now comes from the skin itself rather than always
+   * defaulting: it was being written on every save and then never read, so
+   * re-opening a Game Boy skin silently presented PICO-8's swatches. */
+  private async openForEditing(brush: Brush, asset: SkinAsset): Promise<void> {
+    let initialCells = asset.pixelData?.cells;
+    if (!initialCells) {
+      try {
+        initialCells = await cellsFromPngDataUrl(asset.imageData, PIXEL_GRID_SIZE);
+      } catch (err) {
+        console.error("Couldn't rebuild that skin's pixels:", err);
+        this.statusText?.setText("Couldn't open that skin").setColor("#ff6666");
+        return;
+      }
+    }
+    if (this.mode !== "browse") return; // navigated away while decoding
+    this.target = {
+      brush,
+      existingId: asset.id,
+      paletteId: asset.pixelData?.paletteId ?? DEFAULT_PIXEL_PALETTE_ID,
+      initialCells,
+    };
+    this.goTo("canvas");
   }
 
   // --- mode: pick-brush ----------------------------------------------------
@@ -526,11 +552,13 @@ export class SkinEditorScene extends Phaser.Scene {
   private onSave(): void {
     const target = this.target;
     if (!target || !this.pixelCanvas) return;
-    const cells = this.pixelCanvas.getCells();
+    // Only the PNG is persisted — it already *is* the cell grid, one canvas
+    // pixel per cell (see PixelSkinData.cells for the measured reasoning
+    // behind dropping the second copy).
     const imageData = this.pixelCanvas.exportPngDataUrl();
     const uploadedBy = loadActiveProfile() ?? "unknown";
 
-    void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId, cells }, uploadedBy)
+    void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId }, uploadedBy)
       .then((id) => {
         this.target = { ...target, existingId: id };
         this.statusText?.setText(`Saved — ${target.brush.label} skin updated`).setColor("#4ade80");

@@ -76,7 +76,12 @@ function parseMultipart(contentType: string, body: string): { metadata: Record<s
   const boundaryMatch = contentType.match(/boundary=([^;]+)/);
   if (!boundaryMatch) throw new Error(`mockDrive: no boundary in Content-Type "${contentType}"`);
   const boundary = boundaryMatch[1].trim();
-  const marker = new RegExp(`--${escapeRegExpLiteral(boundary)}(--)?\\r?\\n?`, "g");
+  // `(?:--)?` must stay NON-capturing: String.split with a capturing
+  // group splices the captured text into the result, and inserts
+  // `undefined` wherever an optional group didn't match — which then
+  // blows up on the trim below. Cost me a confusing failure that looked
+  // like a malformed upload body rather than a regex mistake.
+  const marker = new RegExp(`--${escapeRegExpLiteral(boundary)}(?:--)?\\r?\\n?`, "g");
   const parts = body
     .split(marker)
     .map((part) => part.trim())

@@ -1,23 +1,36 @@
-/** A skin painted in the Skin Creator's pixel-art canvas (see
- * SkinEditorScene / PixelCanvasOverlay) rather than uploaded as a photo —
- * `cells` is the actual editable source of truth (a flat, row-major
- * 32x32 array of hex colors or `null` for transparent); `imageData` on
- * the enclosing SkinAsset is just this same grid rendered once to a PNG,
- * kept in lockstep so every existing consumer (resolveSkinTextureKeys,
- * PlayScene, EntityPlacer) needs zero changes — a pixel-drawn skin is
- * just an ordinary SkinAsset that happens to also carry its own
- * lossless, re-editable source. `paletteId` is only a convenience (which
- * palette tab to preselect on re-open); colors are stored as literal hex
- * strings, not palette indices, so re-editing an old skin still shows
- * its exact original colors even if PIXEL_PALETTES' own definitions
- * change later. Skins uploaded the ordinary way (a real photo/image
- * file) simply have no `pixelData` — the Skin Creator's "edit an
- * existing skin" list only ever shows entries that do, since importing
- * an arbitrary photo into a 5-color pixel grid would mean lossy
- * quantization that could badly mangle it. */
+/** Marks a skin as painted in the Skin Creator's pixel-art canvas (see
+ * SkinEditorScene / PixelCanvasOverlay) rather than uploaded as a photo.
+ * Skins uploaded the ordinary way (a real photo/image file) simply have
+ * no `pixelData` — the Skin Creator's "edit an existing skin" list only
+ * ever shows entries that do, since importing an arbitrary photo into a
+ * 16-color pixel grid would mean lossy quantization that could badly
+ * mangle it.
+ *
+ * `paletteId` records which palette tab was in use, so re-opening a skin
+ * restores it. Colors are never stored as palette indices — the PNG holds
+ * literal RGB — so re-editing an old skin still shows its exact original
+ * colors even if PIXEL_PALETTES' own definitions change later. */
 export interface PixelSkinData {
   paletteId: string;
-  cells: (string | null)[];
+  /** **Legacy only — no longer written.** Until 2026-08-21 every pixel
+   * skin persisted its grid twice: once as this flat, row-major array of
+   * hex colors (or `null` for transparent), and again as the `imageData`
+   * PNG on the enclosing SkinAsset, which is rendered from exactly the
+   * same grid one canvas pixel per cell.
+   *
+   * The PNG is a lossless, exactly-recoverable copy — verified in a real
+   * browser across 32 distinct palette colors, 0 mismatches over all 1024
+   * cells — and roughly 11x smaller (842 bytes against 9,506 for the same
+   * frame). So the array is pure redundancy, and it's the copy that grows
+   * fastest: the whole library is re-read whenever skins resolve.
+   *
+   * Still read when present, so skins saved before that date keep opening
+   * exactly as they did; anything without it is decoded straight from its
+   * own PNG (see cellsFromPngDataUrl). Migrates itself away on the next
+   * save of each skin — the same read-normalize, write-when-touched
+   * approach normalizeSkinsFile already uses for the pre-2026-08-16
+   * shape, rather than a risky eager rewrite of everyone's library. */
+  cells?: (string | null)[];
 }
 
 export interface SkinAsset {

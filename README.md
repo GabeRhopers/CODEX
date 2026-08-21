@@ -2425,6 +2425,57 @@ software WebGL, so the game loop runs behind wall-clock under load and a
 screenshot showed "You Lose" already on screen. That one is environmental,
 and the honest fix was headroom, not a workaround.
 
+**Skin storage: one cache and one copy (2026-08-21).** Two problems the
+character work measured but deliberately left alone, fixed together now that
+they were the next thing in the way.
+
+*The library was re-downloaded constantly.* `loadCustomSkins()` did a fresh
+`findFileByName` + `getFileContent` on every call with no memoization at all,
+and `PlayScene.enterArea` calls it on **every** area build — so each basket
+teleport re-fetched the whole skin library mid-play, and the Skin Creator's
+browse screen did one full round trip per distinct brush it listed. (A comment
+in `SkinEditorScene` even claimed those calls "replay `loadCustomSkins`' own
+in-memory result"; that cache did not exist.) It does now, with an in-flight
+promise dedupe alongside it for the same reason `driveClient` caches its
+in-flight app-folder promise: `MenuScene` fires several resolves without
+awaiting each other, so caching only the settled result would still let them
+all race past the check. Every caller gets an independent clone, never the
+cached object — the mutators here all read-mutate-write, so handing back the
+cache by reference would let a *failed* write leave it holding state that was
+never saved. A failed write leaves the cache showing what's really on Drive.
+
+*Every pixel skin stored its art twice.* A skin persisted both a PNG and the
+`cells` grid it was drawn from, even though `PixelCanvasOverlay` renders
+exactly one canvas pixel per cell and never scales — so the PNG already **is**
+the grid. Verified rather than assumed: reconstructing a cells array from its
+own PNG across 32 distinct palette colors gave **0 mismatches over all 1024
+cells**, at 842 bytes against the array's 9,506. Roughly 11x of pure
+redundancy, in the file that gets read whenever skins resolve. New saves write
+only the palette marker; `cellsFromPngDataUrl` rebuilds the grid on open.
+Legacy skins keep their `cells` and still open straight from them, and each
+one migrates itself the next time it's saved — the same read-normalize,
+write-when-touched approach `normalizeSkinsFile` already used for the
+pre-2026-08-16 shape, rather than an eager rewrite of everyone's library.
+
+Also fixed a real one-line bug found on the way: `paletteId` was written on
+every save and then never read, because re-opening a skin always passed
+`DEFAULT_PIXEL_PALETTE_ID` — so re-editing a Game Boy skin silently presented
+PICO-8's swatches.
+
+*Two bugs in the test tooling, not the app.* The Skin Creator's buttons use
+`setOrigin(0, 0.5)` (and `← Back` the default `0, 0`), but `clickByText`
+clicked the Text object's own `x`/`y` — an edge or a corner, not the middle —
+so the click landed on the boundary and missed entirely. It now clicks the
+centre of `getBounds()`, which is more robust for every existing spec too.
+And `mockDrive`'s multipart parser split on a regex with a **capturing** group,
+`(--)?`; `String.split` splices captured text into its result and inserts
+`undefined` for an optional group that didn't match, which then threw on
+`.trim()` and looked exactly like a malformed upload body. Non-capturing now.
+The round trip is pinned by a new e2e test that paints a scatter of cells
+(including all four corners, where an off-by-one would surface first), saves,
+reopens, and asserts every cell came back identical — through the real editor
+and the real storage layer, not a synthetic canvas.
+
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a plain text link under the Menu's card grid rather than a fifth
 card or a mode nested inside the level Editor — it's a much lighter

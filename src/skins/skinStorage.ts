@@ -29,12 +29,25 @@ const SKINS_FILE_NAME = "skins.json";
  * doesn't yet include the first. Not worth real optimistic-concurrency
  * handling for a 3-person household's occasional skin uploads.
  */
-export async function loadCustomSkins(): Promise<CustomSkinsFile> {
+/** The parsed file as of the last successful read or write, and the read
+ * currently in flight (if any) — see loadCustomSkins for why both exist.
+ * Module-level rather than per-caller: every consumer wants the same one
+ * shared library, exactly as they all previously wanted the same one file. */
+let cachedSkins: CustomSkinsFile | null = null;
+let inFlightRead: Promise<CustomSkinsFile> | null = null;
+
+async function fetchCustomSkins(): Promise<CustomSkinsFile> {
   const token = await getAccessToken();
   const folderId = await ensureAppFolder(token);
   const file = await findFileByName(token, folderId, SKINS_FILE_NAME);
-  if (!file) return {};
-  const content = await getFileContent(token, file.id);
+  const parsed = await readSkinsFile(token, file?.id);
+  cachedSkins = parsed;
+  return parsed;
+}
+
+async function readSkinsFile(token: string, fileId: string | undefined): Promise<CustomSkinsFile> {
+  if (!fileId) return {};
+  const content = await getFileContent(token, fileId);
   if (!content.trim()) return {};
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
@@ -42,6 +55,61 @@ export async function loadCustomSkins(): Promise<CustomSkinsFile> {
   } catch {
     return {};
   }
+}
+
+/** Every caller gets its own independent copy, never the cached object
+ * itself — the mutators below (addCustomSkin/savePixelSkin/…) all follow a
+ * read-mutate-write shape that writes straight into what this returns, so
+ * handing back the cache by reference would let a *failed* write leave the
+ * cache holding state that was never actually saved. Cloning preserves
+ * exactly the semantics every caller already had back when this re-parsed
+ * fresh JSON on each call. */
+function cloneSkins(skins: CustomSkinsFile): CustomSkinsFile {
+  return structuredClone(skins);
+}
+
+/**
+ * Reads the shared library, served from memory after the first call.
+ *
+ * Previously every call was two real Drive round trips (findFileByName +
+ * getFileContent) with no memoization at all, and `PlayScene.enterArea`
+ * calls this on *every* area build — so each basket teleport re-downloaded
+ * the whole library mid-play, and the Skin Creator's browse screen did one
+ * full read per distinct brush it showed. (A comment there even claimed
+ * these calls "replay loadCustomSkins' own in-memory result"; that cache
+ * did not exist until now.)
+ *
+ * `inFlightRead` dedupes concurrent first calls the same way driveClient's
+ * `appFolderPromise` does, and for the same reason: MenuScene kicks off
+ * several resolves without awaiting each other, so caching only the settled
+ * result would still let them all race past the check and each issue their
+ * own request. Cleared on failure so a later attempt genuinely retries
+ * rather than replaying a rejection forever (same shape as googleAuth's
+ * `gisReady`).
+ *
+ * Cache lifetime is one page load, invalidated on every successful write
+ * from this tab. It therefore won't observe a *different* tab's upload
+ * until reload — an extension of the concurrent-write limitation this
+ * module already documents above, and the same accepted trade for a
+ * 3-person household.
+ */
+export function loadCustomSkins(): Promise<CustomSkinsFile> {
+  if (cachedSkins) return Promise.resolve(cloneSkins(cachedSkins));
+  if (!inFlightRead) {
+    inFlightRead = fetchCustomSkins().finally(() => {
+      inFlightRead = null;
+    });
+  }
+  return inFlightRead.then(cloneSkins);
+}
+
+/** Drops the cached copy so the next read goes back to Drive. Exported for
+ * tests and for any future "someone else changed this" refresh path; the
+ * normal write path updates the cache in place instead (see
+ * writeCustomSkins). */
+export function invalidateSkinsCache(): void {
+  cachedSkins = null;
+  inFlightRead = null;
 }
 
 /** Upgrades a file written before 2026-08-16 (one `{imageData,
@@ -80,6 +148,13 @@ async function writeCustomSkins(skins: CustomSkinsFile): Promise<void> {
   const existing = await findFileByName(token, folderId, SKINS_FILE_NAME);
   if (existing) await updateFileContent(token, existing.id, content, appProperties);
   else await createFile(token, folderId, SKINS_FILE_NAME, content, appProperties);
+  // Only *after* the write actually lands: what we just persisted is now
+  // the truth, so the next read can serve it without a round trip. Cloned
+  // because `skins` belongs to the caller, who may keep mutating it.
+  // Deliberately not in a `finally` — a failed write must leave the cache
+  // showing the last state that really is on Drive, not the one we failed
+  // to save.
+  cachedSkins = cloneSkins(skins);
 }
 
 function entryFor(skins: CustomSkinsFile, brushId: string): SkinLibraryEntry {
@@ -156,9 +231,16 @@ export async function savePixelSkin(
   const now = new Date().toISOString();
   const targetId = existingId && entry.items.some((item) => item.id === existingId) ? existingId : undefined;
 
+  // Persist only the palette marker, never the cell grid — `imageData` is
+  // already a lossless copy of it (see PixelSkinData.cells for the measured
+  // reasoning). Rebuilt here rather than trusting the caller's object so a
+  // legacy `cells` array can't get written straight back out, which is what
+  // makes each save quietly migrate its own skin off the old shape.
+  const persisted: PixelSkinData = { paletteId: pixelData.paletteId };
+
   if (targetId) {
     const items = entry.items.map((item) =>
-      item.id === targetId ? { ...item, imageData, pixelData, uploadedBy, updatedAt: now } : item,
+      item.id === targetId ? { ...item, imageData, pixelData: persisted, uploadedBy, updatedAt: now } : item,
     );
     skins[brushId] = { activeId: targetId, items };
     await writeCustomSkins(skins);
@@ -166,7 +248,7 @@ export async function savePixelSkin(
   }
 
   const id = crypto.randomUUID();
-  const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: now, pixelData };
+  const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: now, pixelData: persisted };
   skins[brushId] = { activeId: id, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;
