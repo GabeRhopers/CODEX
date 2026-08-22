@@ -1,8 +1,12 @@
 import Phaser from "phaser";
 import { GameRect, positionOverlay } from "./domOverlay";
 
+/** The grid every skin was painted on before 2026-08-22, and still the
+ * default: entities are 32px art. The player character paints at 48 instead
+ * so it matches Grampa's own render height — see spriteFrames.ts's
+ * CHARACTER_GRID_SIZE for why that size specifically. The size is per-canvas
+ * rather than global for exactly that reason. */
 export const PIXEL_GRID_SIZE = 32;
-const CELL_COUNT = PIXEL_GRID_SIZE * PIXEL_GRID_SIZE;
 
 // Zoom range for setDisplaySize — MAX is sized to fit the Skin Creator's
 // fixed vertical layout (canvas top pinned at y=132, ~16px margin before
@@ -76,11 +80,17 @@ interface CellChange {
 // anything drawn onto it, so it's structurally impossible for it to leak
 // into exportPngDataUrl()'s output the way drawing it into the pixel
 // buffer itself would risk.
-const GRID_LINE_CSS = {
-  backgroundImage:
-    "linear-gradient(to right, rgba(255,255,255,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.18) 1px, transparent 1px)",
-  backgroundSize: `calc(100% / ${PIXEL_GRID_SIZE}) calc(100% / ${PIXEL_GRID_SIZE})`,
-};
+function gridLineCss(gridSize: number): Record<string, string> {
+  return {
+    backgroundImage:
+      "linear-gradient(to right, rgba(255,255,255,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.18) 1px, transparent 1px)",
+    // Derived from the canvas's own grid size rather than the module default,
+    // so a 48-cell character canvas draws 48 lines and not 32 — the whole
+    // point of the fraction-of-container sizing is that it stays aligned, and
+    // a hardcoded 32 there would misalign every line on any other size.
+    backgroundSize: `calc(100% / ${gridSize}) calc(100% / ${gridSize})`,
+  };
+}
 
 export class PixelCanvasOverlay {
   private readonly canvas: HTMLCanvasElement;
@@ -116,13 +126,16 @@ export class PixelCanvasOverlay {
     // has no concept of a palette/swatch UI of its own, so it can only
     // report what got sampled, not update any UI for it.
     private readonly onColorPicked?: (color: string | null) => void,
+    /** Cells per side. Defaults to PIXEL_GRID_SIZE so every existing call
+     * site keeps its exact previous behaviour. */
+    private readonly gridSize: number = PIXEL_GRID_SIZE,
   ) {
     this.rect = rect;
-    this.cells = initialCells ? [...initialCells] : new Array<string | null>(CELL_COUNT).fill(null);
+    this.cells = initialCells ? [...initialCells] : new Array<string | null>(gridSize * gridSize).fill(null);
 
     this.canvas = document.createElement("canvas");
-    this.canvas.width = PIXEL_GRID_SIZE;
-    this.canvas.height = PIXEL_GRID_SIZE;
+    this.canvas.width = gridSize;
+    this.canvas.height = gridSize;
     this.canvas.style.position = "fixed";
     this.canvas.style.imageRendering = "pixelated";
     this.canvas.style.cursor = "crosshair";
@@ -141,7 +154,7 @@ export class PixelCanvasOverlay {
     this.gridEl.style.zIndex = "1001"; // above the canvas
     this.gridEl.style.pointerEvents = "none"; // strokes still go to the canvas underneath
     this.gridEl.style.display = "none"; // off by default — see setGridVisible
-    Object.assign(this.gridEl.style, GRID_LINE_CSS);
+    Object.assign(this.gridEl.style, gridLineCss(gridSize));
     document.body.appendChild(this.gridEl);
 
     this.redrawAll();
@@ -218,7 +231,7 @@ export class PixelCanvasOverlay {
    * Clear/Delete Area — resets the undo/redo stacks too, rather than
    * leaving an undo history that could "revive" cells Clear just wiped. */
   clearAll(): void {
-    this.cells = new Array<string | null>(CELL_COUNT).fill(null);
+    this.cells = new Array<string | null>(this.gridSize * this.gridSize).fill(null);
     this.undoStack = [];
     this.redoStack = [];
     this.currentStrokeChanges = [];
@@ -263,12 +276,12 @@ export class PixelCanvasOverlay {
 
   private cellIndexFromEvent(e: PointerEvent): number | null {
     const box = this.canvas.getBoundingClientRect();
-    const cellW = box.width / PIXEL_GRID_SIZE;
-    const cellH = box.height / PIXEL_GRID_SIZE;
+    const cellW = box.width / this.gridSize;
+    const cellH = box.height / this.gridSize;
     const x = Math.floor((e.clientX - box.left) / cellW);
     const y = Math.floor((e.clientY - box.top) / cellH);
-    if (x < 0 || x >= PIXEL_GRID_SIZE || y < 0 || y >= PIXEL_GRID_SIZE) return null;
-    return y * PIXEL_GRID_SIZE + x;
+    if (x < 0 || x >= this.gridSize || y < 0 || y >= this.gridSize) return null;
+    return y * this.gridSize + x;
   }
 
   private onPointerDown(e: PointerEvent): void {
@@ -343,9 +356,9 @@ export class PixelCanvasOverlay {
   private setCellWithMirror(index: number, color: string | null): void {
     this.setCell(index, color);
     if (this.mirrorX) {
-      const x = index % PIXEL_GRID_SIZE;
-      const y = Math.floor(index / PIXEL_GRID_SIZE);
-      this.setCell(y * PIXEL_GRID_SIZE + (PIXEL_GRID_SIZE - 1 - x), color);
+      const x = index % this.gridSize;
+      const y = Math.floor(index / this.gridSize);
+      this.setCell(y * this.gridSize + (this.gridSize - 1 - x), color);
     }
   }
 
@@ -369,12 +382,12 @@ export class PixelCanvasOverlay {
 
       this.setCellWithMirror(index, color);
 
-      const x = index % PIXEL_GRID_SIZE;
-      const y = Math.floor(index / PIXEL_GRID_SIZE);
+      const x = index % this.gridSize;
+      const y = Math.floor(index / this.gridSize);
       if (x > 0) stack.push(index - 1);
-      if (x < PIXEL_GRID_SIZE - 1) stack.push(index + 1);
-      if (y > 0) stack.push(index - PIXEL_GRID_SIZE);
-      if (y < PIXEL_GRID_SIZE - 1) stack.push(index + PIXEL_GRID_SIZE);
+      if (x < this.gridSize - 1) stack.push(index + 1);
+      if (y > 0) stack.push(index - this.gridSize);
+      if (y < this.gridSize - 1) stack.push(index + this.gridSize);
     }
   }
 
@@ -386,8 +399,8 @@ export class PixelCanvasOverlay {
   }
 
   private redrawCell(index: number): void {
-    const x = index % PIXEL_GRID_SIZE;
-    const y = Math.floor(index / PIXEL_GRID_SIZE);
+    const x = index % this.gridSize;
+    const y = Math.floor(index / this.gridSize);
     const color = this.cells[index];
     if (color) {
       this.ctx.fillStyle = color;
@@ -398,7 +411,7 @@ export class PixelCanvasOverlay {
   }
 
   private redrawAll(): void {
-    this.ctx.clearRect(0, 0, PIXEL_GRID_SIZE, PIXEL_GRID_SIZE);
+    this.ctx.clearRect(0, 0, this.gridSize, this.gridSize);
     for (let i = 0; i < this.cells.length; i++) this.redrawCell(i);
   }
 

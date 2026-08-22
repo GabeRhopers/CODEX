@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { CustomSkinsFile } from "./CustomSkins";
+import { baseFrameOf, framePlanFor, loopLength, resolveFrame } from "./spriteFrames";
 import { loadCustomSkins } from "./skinStorage";
 
 /** Keyed by (brushId, skinId) — a skin's own uploaded imageData never
@@ -79,6 +80,74 @@ export async function resolveSkinTextureKeys(scene: Phaser.Scene): Promise<Map<s
     result.set(brushId, key);
   }
   return result;
+}
+
+function frameTextureKey(targetId: string, skinId: string, frame: string): string {
+  return `skin-frame-${targetId}-${skinId}-${frame}`;
+}
+
+/** Every frame of one skin, resolved to a live Phaser texture key and keyed
+ * by frame name — what the runtime animates through. */
+export type FrameTextureKeys = Map<string, string>;
+
+/**
+ * Registers every painted frame of `targetId`'s active skin and hands back a
+ * frame-name -> texture-key map, or null when that target has no active skin
+ * (the ordinary case: keep the built-in art).
+ *
+ * Separate from resolveSkinTextureKeys rather than folded into it because the
+ * two answer different questions — that one resolves *every* brush's single
+ * representative texture for the whole level build, this one resolves *one*
+ * target's whole frame set. Merging them would make every level build
+ * register five textures per animated skin whether or not anything on screen
+ * animates.
+ *
+ * Frames get the same permanent-key-per-(target, skin, frame) treatment
+ * activeSkinTextureKey's docstring explains at length: reusing a key across
+ * skins means freeing a texture while a live GameObject still points at it,
+ * which is a confirmed WebGL-loop-killing crash rather than a theoretical
+ * one. Every frame having its own never-reused key keeps that guarantee.
+ */
+export async function resolveFrameTextureKeys(
+  scene: Phaser.Scene,
+  targetId: string,
+): Promise<FrameTextureKeys | null> {
+  const plan = framePlanFor(targetId);
+  if (!plan) return null;
+  const skins = await loadCustomSkins();
+  const entry = skins[targetId];
+  if (!entry?.activeId) return null;
+  const active = entry.items.find((item) => item.id === entry.activeId);
+  if (!active) return null;
+
+  // A skin saved before multi-frame support has no `frames` at all; treat its
+  // single `imageData` as the base frame so it animates as a one-frame still
+  // rather than being skipped entirely.
+  const painted: Record<string, string> = active.frames ?? { [baseFrameOf(plan)]: active.imageData };
+
+  const keys: FrameTextureKeys = new Map();
+  for (const name of plan.frames) {
+    const dataUrl = resolveFrame(plan, painted, name);
+    if (!dataUrl) continue;
+    // Keyed by the frame that *supplied* the image, not the one being asked
+    // for, so five poses falling back to one idle share a single texture
+    // instead of registering the same PNG five times over.
+    const suppliedBy = painted[name] ? name : baseFrameOf(plan);
+    keys.set(name, await registerTexture(scene, frameTextureKey(targetId, active.id, suppliedBy), dataUrl));
+  }
+  return keys.size > 0 ? keys : null;
+}
+
+/** How many frames of an animated skin are actually painted and distinct —
+ * what the runtime loops through. See spriteFrames.loopLength. */
+export async function resolveLoopLength(targetId: string): Promise<number> {
+  const plan = framePlanFor(targetId);
+  if (!plan) return 0;
+  const skins = await loadCustomSkins();
+  const entry = skins[targetId];
+  const active = entry?.items.find((item) => item.id === entry.activeId);
+  if (!active) return 0;
+  return loopLength(plan, active.frames ?? { [baseFrameOf(plan)]: active.imageData });
 }
 
 /** One thumbnail-sized entry for a brush's skin picker submenu. */

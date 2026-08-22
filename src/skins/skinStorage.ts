@@ -225,6 +225,7 @@ export async function savePixelSkin(
   imageData: string,
   pixelData: PixelSkinData,
   uploadedBy: string,
+  frames?: Record<string, string>,
 ): Promise<string> {
   const skins = await loadCustomSkins();
   const entry = entryFor(skins, brushId);
@@ -237,10 +238,19 @@ export async function savePixelSkin(
   // legacy `cells` array can't get written straight back out, which is what
   // makes each save quietly migrate its own skin off the old shape.
   const persisted: PixelSkinData = { paletteId: pixelData.paletteId };
+  // Normalized rather than passed straight through, for the same reason: a
+  // caller handing over an empty map, or one holding nothing but blanks,
+  // should leave an ordinary single-frame skin behind rather than an empty
+  // `frames: {}` that every reader then has to special-case. Written whole
+  // (not merged into whatever was there) so deleting a frame in the editor
+  // actually deletes it.
+  const persistedFrames = frames && Object.keys(frames).length > 0 ? { ...frames } : undefined;
 
   if (targetId) {
     const items = entry.items.map((item) =>
-      item.id === targetId ? { ...item, imageData, pixelData: persisted, uploadedBy, updatedAt: now } : item,
+      item.id === targetId
+        ? { ...item, imageData, pixelData: persisted, frames: persistedFrames, uploadedBy, updatedAt: now }
+        : item,
     );
     skins[brushId] = { activeId: targetId, items };
     await writeCustomSkins(skins);
@@ -248,7 +258,7 @@ export async function savePixelSkin(
   }
 
   const id = crypto.randomUUID();
-  const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: now, pixelData: persisted };
+  const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: now, pixelData: persisted, frames: persistedFrames };
   skins[brushId] = { activeId: id, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;

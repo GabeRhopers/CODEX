@@ -39,6 +39,24 @@ export interface SkinAsset {
   uploadedBy: string;
   updatedAt: string;
   pixelData?: PixelSkinData;
+  /**
+   * Every painted frame of a multi-frame skin, keyed by frame name (see
+   * spriteFrames.ts — "idle"/"walk1"/… for the player character, "0".."3" for
+   * an enemy's loop), each a PNG data URL exactly like `imageData`.
+   *
+   * Absent for every ordinary skin, which is most of them and is also every
+   * skin saved before 2026-08-22 — so this is purely additive and nothing
+   * needs migrating. `imageData` stays the skin's *representative* frame
+   * whether or not this exists (the character's idle, or an enemy's frame 0),
+   * which is what lets the browse list, the picker thumbnails and
+   * EntityPlacer keep reading one field and needing no changes at all.
+   *
+   * Deliberately not an array: frames are addressed by meaning, not by
+   * position, and a character's poses have no meaningful ordering to be
+   * off-by-one about. A missing entry is a frame nobody painted yet, which
+   * resolveFrame answers by falling back to this skin's own base frame.
+   */
+  frames?: Record<string, string>;
 }
 
 /** Every skin ever uploaded for a brush, plus which one (if any) is

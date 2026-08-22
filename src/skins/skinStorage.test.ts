@@ -24,7 +24,10 @@ const { addCustomSkin, invalidateSkinsCache, listPixelSkins, loadCustomSkins, sa
   await import("./skinStorage");
 
 /** Reads back whatever the most recent write actually serialized to Drive. */
-function lastWrittenFile(): Record<string, { activeId: string | null; items: { id: string; pixelData?: { paletteId: string; cells?: unknown } }[] }> {
+function lastWrittenFile(): Record<
+  string,
+  { activeId: string | null; items: { id: string; imageData?: string; frames?: Record<string, string>; pixelData?: { paletteId: string; cells?: unknown } }[] }
+> {
   // Index arithmetic rather than Array.prototype.at — tsconfig targets
   // ES2020, where `.at` doesn't exist in the lib types.
   const updates = updateFileContent.mock.calls;
@@ -186,6 +189,63 @@ describe("pixel skins no longer persist a redundant cell grid", () => {
 
     const painted = await listPixelSkins();
     expect(painted.map((p) => p.asset.id)).toEqual(["painted"]);
+  });
+});
+
+describe("multi-frame skins", () => {
+  it("persists every painted frame alongside the representative image", async () => {
+    const frames = { idle: "data:image/png;base64,IDLE", walk1: "data:image/png;base64,WALK" };
+    await savePixelSkin("player", undefined, frames.idle, { paletteId: "pico8" }, "Gabriel", frames);
+
+    const saved = lastWrittenFile()["player"].items[0] as { frames?: Record<string, string>; imageData?: string };
+    expect(saved.frames).toEqual(frames);
+    // imageData stays the representative frame, which is what every existing
+    // reader (browse list, picker thumbnails, EntityPlacer) already uses.
+    expect(saved.imageData).toBe(frames.idle);
+  });
+
+  it("leaves an ordinary skin single-frame rather than writing an empty map", async () => {
+    await savePixelSkin("enemy-bat", undefined, "data:image/png;base64,AAAA", { paletteId: "pico8" }, "Mike");
+    expect(lastWrittenFile()["enemy-bat"].items[0]).not.toHaveProperty("frames");
+
+    await savePixelSkin("enemy-golem", undefined, "data:image/png;base64,BBBB", { paletteId: "pico8" }, "Mike", {});
+    expect(lastWrittenFile()["enemy-golem"].items[0]).not.toHaveProperty("frames");
+  });
+
+  it("replaces the frame set wholesale, so deleting a frame really deletes it", async () => {
+    invalidateSkinsCache();
+    getFileContent.mockResolvedValue(
+      JSON.stringify({
+        player: {
+          activeId: "p1",
+          items: [
+            {
+              id: "p1",
+              imageData: "data:image/png;base64,IDLE",
+              uploadedBy: "Mike",
+              updatedAt: "x",
+              pixelData: { paletteId: "pico8" },
+              frames: { idle: "data:image/png;base64,IDLE", jump: "data:image/png;base64,JUMP" },
+            },
+          ],
+        },
+      }),
+    );
+
+    await savePixelSkin("player", "p1", "data:image/png;base64,IDLE2", { paletteId: "pico8" }, "Mike", {
+      idle: "data:image/png;base64,IDLE2",
+    });
+
+    const saved = lastWrittenFile()["player"].items[0] as { frames?: Record<string, string> };
+    expect(saved.frames).toEqual({ idle: "data:image/png;base64,IDLE2" });
+  });
+
+  it("keeps a skin saved before multi-frame support readable and untouched", async () => {
+    invalidateSkinsCache();
+    const skins = await loadCustomSkins();
+    const legacy = skins["enemy-ghost"].items[0] as { frames?: unknown };
+    expect(legacy.frames).toBeUndefined();
+    expect(skins["enemy-ghost"].items[0].imageData).toBe("data:image/png;base64,AAAA");
   });
 });
 
