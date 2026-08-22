@@ -2575,6 +2575,53 @@ one clock, so a real press is always strictly later than anything handled and a
 replay never is. Verified at both timings — 7 presses, exactly 7 moves, whether
 sent back to back or spaced out.
 
+**Basket teleports could bounce you back and forth (2026-08-22).** A
+teleport lands the player standing exactly on the destination area's own
+basket, and the only thing stopping that pad firing again was
+`TELEPORT_COOLDOWN_MS` — 500ms. That guard turned out to be measured on a
+different clock from the thing it was guarding. `this.time.now` follows wall
+time whatever the frame rate (measured: 783ms of game time across 782ms of
+wall clock on a loaded box), while the player's position is integrated per
+physics step. On a starved loop those diverge: the timer lapses on schedule
+but the player has covered a fraction of the usual distance, so they are still
+standing on the pad and get sent straight back — ping-ponging for as long as a
+direction is held.
+
+Reproduced deterministically at 6x CPU throttling rather than waiting for a
+slow machine: the player oscillated around x=245 with the pad at x=238 for
+5-7 seconds and finished on the wrong outcome in a third of runs. This is not
+a test-only concern — the game ships touch controls and a rotate-to-landscape
+tip, so slow phones are exactly the audience, and a player holding a direction
+through a teleport on one would have hit it.
+
+The guard is now `latchedBasketTile`: a pad will not fire again until the
+player has genuinely left it, which is a question about position rather than
+about elapsed time and so cannot drift with frame rate. It is scoped to the
+one pad landed on rather than to baskets in general, so stepping straight onto
+a neighbouring basket still works — the case the cooldown's own comment called
+out. The timer stays for the job it is actually good at: keeping an *inert*
+basket from re-toasting every physics frame.
+
+`tests/e2e/basket-bounce.spec.ts` pins it, throttling the CPU to starve the
+loop on purpose; it was checked to fail with the fix reverted, so it is
+holding something real. The two round-trip tests in `basket-pairing.spec.ts`
+changed with it: they used to land on the pad, stand still for 600ms, and
+expect the return teleport — which was the bug. They now step off the pad and
+walk back onto it, which is the interaction a player actually performs.
+
+*Two wrong calls on the way, both worth recording.* First: the CI failure was
+called environmental because the same spec failed locally at a commit CI had
+passed. Then it was called a regression from the preceding harness commit,
+because CI had passed twice and then failed twice. A controlled comparison —
+the same throttled scenario against `coords.ts` at both commits — showed
+identical ping-ponging either way, so neither story was right; the product bug
+was, and CI had simply got slow enough to expose it. Third: the specific
+`Expected "sub", Received "main"` signature on CI turned out to be a dropped
+`keyboard.down("ArrowRight")` line, lost when a comment was inserted into that
+spec. The player was never told to walk. Worth the reminder that a scripted
+edit can quietly delete a line, and that a test failing for the reason you
+assume is itself an assumption.
+
 **Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
 from a chip in the Menu's footer row (a bare text link until the
 2026-08-21 home-page pass) rather than a fifth

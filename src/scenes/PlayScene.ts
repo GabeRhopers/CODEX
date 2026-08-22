@@ -84,12 +84,29 @@ const CHECKPOINT_TOAST_MS = 1200;
 const WARNING_TOAST_COLOR = "#facc15";
 // A basket teleport lands the player standing exactly on top of the
 // *destination* area's own matching basket (see enterArea/useBasket) —
-// without a brief cooldown, that new position immediately overlaps that
-// basket's own freshly-rebuilt trigger zone and bounces straight back
-// where they came from, forever. Long enough to clear one overlap check
-// after landing, short enough that using a *different* basket right after
-// arriving (e.g. basket-sub then immediately basket-up, both sitting in
-// Main) never feels blocked.
+// without a guard, that new position immediately overlaps that basket's
+// own freshly-rebuilt trigger zone and bounces straight back where they
+// came from, forever.
+//
+// This timer was that guard on its own until 2026-08-22, and it turned out
+// not to be enough, because it and the player's movement are measured on
+// two different clocks. `this.time.now` follows wall time whatever the
+// frame rate (measured: it advanced 783ms across 782ms of wall clock on a
+// loaded machine), but the player's position is integrated per physics
+// step, so a starved loop moves them a fraction of the usual distance in
+// the same 500ms. Reproduced deterministically under 6x CPU throttling:
+// they cover ~10px instead of ~100px, are therefore still standing on the
+// basket when the timer lapses, and ping-pong between the two areas for
+// as long as the direction is held. Real players on slow phones can hit
+// this — the game is built for phones — and CI hit it too.
+//
+// So the actual guard is now `latchedBasketTile`, which asks the
+// frame-rate-independent question ("has the player left that pad yet?") and
+// is scoped to the one pad they landed on, so a neighbouring basket still
+// works. The timer stays as a second line of defence: it keeps an *inert*
+// basket from re-toasting every physics frame. Long enough to clear one
+// overlap check after landing, short enough that using a different basket
+// right after arriving never feels blocked.
 const TELEPORT_COOLDOWN_MS = 500;
 
 // PJ Thunder Hat's shock — see Bolt.ts for the projectile itself.
@@ -313,6 +330,20 @@ export class PlayScene extends Phaser.Scene {
   private toast!: Phaser.GameObjects.Text;
   // See TELEPORT_COOLDOWN_MS — set by useBasket, checked at its own top.
   private teleportCooldownUntil = 0;
+  // The tile of the one basket that is currently refusing to fire, because
+  // the player is still standing on it having just arrived. Scoped to that
+  // single pad rather than to baskets in general, so that stepping straight
+  // from one onto a neighbouring one still works — the case
+  // TELEPORT_COOLDOWN_MS's own comment calls out (basket-sub then
+  // immediately basket-up, both in Main). Cleared by update() on the first
+  // frame the player is off it. See TELEPORT_COOLDOWN_MS for why a timer
+  // alone was not enough.
+  private latchedBasketTile?: { x: number; y: number };
+  // Set by the basket overlap callbacks, which Arcade Physics runs after
+  // update() each frame — so update() reads the previous frame's value,
+  // which is exactly the "were they still on that pad last frame" question
+  // being asked, and asks it without reference to any clock.
+  private touchedLatchedBasket = false;
   // Every goal/chest/enemy/item/decor sprite spawned below, grouped by
   // its Palette brush id (equal to its EntityType for every one of these
   // — only Spawn's id/type differ, "spawn"/"player-spawn", and Spawn has
@@ -344,6 +375,12 @@ export class PlayScene extends Phaser.Scene {
     this.jumpWasDown = false;
     this.bolts = [];
     this.attackWasDown = false;
+    // Phaser reuses the scene instance across restart(), so these have to be
+    // cleared here rather than relying on their field initialisers — a run
+    // that ended while standing on a basket would otherwise start the next
+    // one latched.
+    this.latchedBasketTile = undefined;
+    this.touchedLatchedBasket = false;
     this.castFlashUntil = 0;
     // Phaser reuses this same PlayScene instance across every Test Play/
     // World/Template run rather than constructing a fresh one each time —
@@ -730,7 +767,9 @@ export class PlayScene extends Phaser.Scene {
         const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
         this.physics.add.existing(zone, true);
         this.areaZones.push(zone);
-        this.areaColliders.push(this.physics.add.overlap(this.player, zone, () => this.useBasket(basketType)));
+        this.areaColliders.push(
+          this.physics.add.overlap(this.player, zone, () => this.useBasket(basketType, { x: entity.x, y: entity.y })),
+        );
       }
     }
 
@@ -851,11 +890,24 @@ export class PlayScene extends Phaser.Scene {
    * result). The cooldown is claimed up front for *both* outcomes so
    * standing on an inert basket doesn't retrigger the toast every physics
    * frame of continued overlap. */
-  private useBasket(basketType: "basket-sub" | "basket-up"): void {
+  private useBasket(basketType: "basket-sub" | "basket-up", tile: { x: number; y: number }): void {
+    // Only the pad the player is standing on from a previous teleport is
+    // latched; any other basket is free to fire.
+    if (this.latchedBasketTile && this.latchedBasketTile.x === tile.x && this.latchedBasketTile.y === tile.y) {
+      this.touchedLatchedBasket = true;
+      return;
+    }
     if (this.time.now < this.teleportCooldownUntil) return;
     const destinationKey = basketDestination(basketType, this.currentAreaKey);
     if (!destinationKey) return;
     this.teleportCooldownUntil = this.time.now + TELEPORT_COOLDOWN_MS;
+    // Latched up front for *both* outcomes, same reasoning as the cooldown
+    // above: standing on an inert basket should surface the toast once, not
+    // once per frame of continued overlap. For a successful teleport the
+    // latch is re-pointed at the destination pad below, which is the one the
+    // player actually ends up standing on.
+    this.latchedBasketTile = tile;
+    this.touchedLatchedBasket = true;
     const destinationArea = this.resolveArea(destinationKey);
     const matchingBasket = destinationArea?.entities.find((e) => e.type === basketType);
     if (!destinationArea || !matchingBasket) {
@@ -863,6 +915,10 @@ export class PlayScene extends Phaser.Scene {
       this.showToast(`No matching basket in ${areaLabel}`, WARNING_TOAST_COLOR);
       return;
     }
+    // Re-point the latch at the pad being landed on, which is the one that
+    // would otherwise fire again the instant the destination area's zones are
+    // rebuilt underneath the player.
+    this.latchedBasketTile = { x: matchingBasket.x, y: matchingBasket.y };
     this.enterArea(destinationKey, { x: matchingBasket.x, y: matchingBasket.y });
   }
 
@@ -900,6 +956,15 @@ export class PlayScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     if (this.outcome !== "playing") return;
+
+    // Re-arm the latched pad only once the player has actually stepped off
+    // it. Arcade Physics runs its overlap callbacks after this method, so the
+    // flag read here was set (or not) by the previous frame — "were they
+    // still on that pad last frame", which is the question that matters and
+    // does not depend on frame rate. See TELEPORT_COOLDOWN_MS for what this
+    // replaced and why.
+    if (!this.touchedLatchedBasket) this.latchedBasketTile = undefined;
+    this.touchedLatchedBasket = false;
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     const touch = this.touch.get();
