@@ -2548,6 +2548,18 @@ pointer leaving the canvas (Phaser never sees that move otherwise). The volume
 slider is still not keyboard-reachable, being a drag control — a real remaining
 gap.
 
+*A harness race the home page work exposed.* CI failed the skin round-trip
+spec that had passed the run before: `clickByText` asserted its target existed
+at the instant it was called, but `SkinEditorScene`'s browse list paints from
+`listPixelSkins().then(async ...)` with a further `await resolveSkinThumbnails`
+per brush inside it, so the Edit buttons appear some way after the `← Back`
+that asks for them. Fast enough to win locally, not on CI. `clickByText` and
+`clickIconWithLabel` now wait for their target instead of demanding it already
+be there — Playwright's own rAF polling, still throwing the same "no Text X in
+scene Y" message once the wait expires, so a genuinely wrong label still fails
+loudly rather than silently clicking (0,0). Verified that directly: a
+deliberately absent label still rejects with the right message.
+
 *One Phaser quirk, found by measurement.* Arrow keys initially over-stepped:
 three ArrowDown presses moved the ring four places. Logging DOM events, scene
 emissions and focus moves side by side showed Phaser 3.90 re-delivering

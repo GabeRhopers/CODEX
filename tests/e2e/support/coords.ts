@@ -79,15 +79,31 @@ export function tileCenter(tileX: number, tileY: number): { x: number; y: number
   };
 }
 
+/** How long a target may take to appear before a click gives up. Generous
+ * because CI runs the game on software WebGL, where every build step —
+ * scene rebuilds, image decodes, texture uploads — takes several times
+ * longer than it does locally. */
+const TARGET_TIMEOUT_MS = 15_000;
+
 /** Finds a Phaser Text GameObject anywhere in `sceneKey`'s display list
  * (recursing into Containers, since EditorUI's palette icon grid is one)
  * whose rendered `.text` exactly matches, and clicks its center. This is
  * how every header/palette button gets clicked — by its rendered label,
  * not a hardcoded x/y — so specs survive future EditorUI.ts layout
- * changes. Throws if no match, so a spec fails loudly (wrong label, wrong
- * scene) instead of silently clicking (0,0). */
+ * changes.
+ *
+ * Waits for the target rather than demanding it already exist. Several of
+ * these screens paint themselves from an async chain — SkinEditorScene's
+ * browse list is `listPixelSkins().then(async ...)` with a further
+ * `await resolveSkinThumbnails(...)` per brush inside it, so its rows (and
+ * their Edit/Delete buttons) appear some way after the click that asked
+ * for them. Asserting existence at the instant of the call passed locally
+ * and failed on CI, which is a race in the observation, not in the app.
+ * Still throws with the same message once the wait expires, so a genuinely
+ * wrong label or scene fails loudly instead of silently clicking (0,0). */
 export async function clickByText(page: Page, sceneKey: string, text: string): Promise<void> {
-  const point = await page.evaluate(
+  const point = await waitForScenePoint(
+    page,
     ({ sceneKey, text }) => {
       const game = window.__debugGame!;
       const scene = game.scene.getScene(sceneKey);
@@ -119,9 +135,28 @@ export async function clickByText(page: Page, sceneKey: string, text: string): P
       return search((scene.children.list as unknown as Listable[]) ?? []);
     },
     { sceneKey, text },
+    `clickByText: no Text "${text}" found in scene "${sceneKey}"`,
   );
-  if (!point) throw new Error(`clickByText: no Text "${text}" found in scene "${sceneKey}"`);
   await clickScenePoint(page, point.x, point.y);
+}
+
+/** Polls `predicate` inside the page until it returns a point, then hands
+ * it back — Playwright's own rAF-driven waiting rather than a sleep loop.
+ * On expiry it throws `message`, the same text the callers used to throw
+ * immediately, so failures still name the label and scene rather than
+ * surfacing as an anonymous timeout. */
+async function waitForScenePoint<A>(
+  page: Page,
+  predicate: (arg: A) => { x: number; y: number } | null,
+  arg: A,
+  message: string,
+): Promise<{ x: number; y: number }> {
+  try {
+    const handle = await page.waitForFunction(predicate, arg, { timeout: TARGET_TIMEOUT_MS });
+    return await handle.jsonValue();
+  } catch {
+    throw new Error(message);
+  }
 }
 
 /** Finds an Image immediately paired with a Text label (EditorUI's
@@ -132,7 +167,8 @@ export async function clickByText(page: Page, sceneKey: string, text: string): P
  * brushes (Grass, Spawn, Goal, Checkpoint, Basket (Down)/(Up), enemies,
  * items) get selected by their real, clickable target. */
 export async function clickIconWithLabel(page: Page, sceneKey: string, label: string): Promise<void> {
-  const point = await page.evaluate(
+  const point = await waitForScenePoint(
+    page,
     ({ sceneKey, label }) => {
       const scene = window.__debugGame!.scene.getScene(sceneKey);
       if (!scene) return null;
@@ -157,8 +193,8 @@ export async function clickIconWithLabel(page: Page, sceneKey: string, label: st
       return search((scene.children.list as unknown as Listable[]) ?? []);
     },
     { sceneKey, label },
+    `clickIconWithLabel: no icon+label "${label}" found in scene "${sceneKey}"`,
   );
-  if (!point) throw new Error(`clickIconWithLabel: no icon+label "${label}" found in scene "${sceneKey}"`);
   await clickScenePoint(page, point.x, point.y);
 }
 

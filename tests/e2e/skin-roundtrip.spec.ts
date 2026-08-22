@@ -45,6 +45,15 @@ async function readCells(page: Page): Promise<(string | null)[]> {
 }
 
 test("a painted skin survives save and reopen with every pixel intact", async ({ page }) => {
+  // The slowest spec in the suite by some way, and legitimately so: it
+  // paints nine cells through real clicks, saves through the mocked Drive,
+  // rebuilds the browse list, and then decodes a PNG back into a 32x32 grid
+  // through an Image element and a canvas. On CI that all runs on software
+  // WebGL. The default 30s budget was enough locally and not on CI — this
+  // is headroom for work that really does take longer there, not a slackened
+  // assertion.
+  test.slow();
+
   await gotoApp(page);
 
   await clickByText(page, "Menu", "Skin Creator");
@@ -90,10 +99,19 @@ test("a painted skin survives save and reopen with every pixel intact", async ({
   // the path that decodes the PNG back into cells.
   await clickByText(page, "SkinEditor", "← Back");
   await clickByText(page, "SkinEditor", "Edit");
-  await page.waitForFunction(() => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { pixelCanvas?: unknown };
-    return !!scene.pixelCanvas;
-  });
+  // Opening a saved skin decodes its PNG back into cells before the canvas
+  // exists (see SkinEditorScene.openForEditing), so this genuinely has to
+  // wait. Explicitly bounded rather than inheriting the whole test budget,
+  // so a real failure here reports as "the canvas never opened" instead of
+  // as an anonymous test timeout — which is exactly how it first surfaced.
+  await page.waitForFunction(
+    () => {
+      const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { pixelCanvas?: unknown };
+      return !!scene.pixelCanvas;
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
 
   const after = await readCells(page);
   expect(after).toEqual(before);
