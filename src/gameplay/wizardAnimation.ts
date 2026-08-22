@@ -64,6 +64,25 @@ export interface WizardAnimContext {
   outcome: "playing" | "won" | "lost";
   swimming: boolean;
   casting: boolean;
+  /**
+   * A custom character skin's frames, keyed by frame name ("idle", "walk1",
+   * …) — see spriteFrames.ts. Absent (the ordinary case) means Grampa's own
+   * built-in art, exactly as before this existed.
+   *
+   * The names line up with the `wizard-*` texture keys by construction, which
+   * is why the lookup below is a prefix strip rather than a second mapping
+   * table that could drift out of step with FRAME_BY_SITUATION.
+   */
+  frameKeys?: ReadonlyMap<string, string>;
+}
+
+/** The frame *name* a built-in texture key corresponds to — "wizard-walk1"
+ * becomes "walk1". */
+const WIZARD_KEY_PREFIX = "wizard-";
+
+function textureKeyFor(builtIn: WizardFrameKey, frameKeys?: ReadonlyMap<string, string>): string {
+  if (!frameKeys) return builtIn;
+  return frameKeys.get(builtIn.slice(WIZARD_KEY_PREFIX.length)) ?? builtIn;
 }
 
 /**
@@ -106,6 +125,6 @@ export function updateWizardAnimation(
     state.walkTimer = 0;
   }
 
-  applyWizardTexture(player, frameFor(situation, state.walkFrame));
+  applyWizardTexture(player, textureKeyFor(frameFor(situation, state.walkFrame), context.frameKeys));
   return situation;
 }

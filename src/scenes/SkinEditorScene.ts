@@ -2,11 +2,12 @@ import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { Brush, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
-import { PIXEL_GRID_SIZE, PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
+import { PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { fitWithinTile } from "../editor/spriteFit";
 import { loadActiveProfile } from "../profile/Profile";
 import { SkinAsset } from "../skins/CustomSkins";
-import { cellsFromPngDataUrl } from "../skins/pixelSkinCells";
+import { cellsFromPngDataUrl, cellsToPngDataUrl, hasPaintedCells } from "../skins/pixelSkinCells";
+import { baseFrameOf, CHARACTER_SKIN_ID, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES } from "../skins/pixelPalettes";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
 import { listPixelSkins, removeCustomSkin, savePixelSkin } from "../skins/skinStorage";
@@ -37,7 +38,40 @@ interface EditingTarget {
   brush: Brush;
   existingId?: string;
   paletteId: string;
-  initialCells?: (string | null)[];
+  /** Every frame's cells, keyed by frame name (see spriteFrames.ts). A
+   * single-frame skin has exactly one entry under SINGLE_FRAME. Held here
+   * rather than on the canvas because the canvas only ever holds the *one*
+   * frame being painted, while Save has to write them all. */
+  frameCells: Record<string, (string | null)[] | undefined>;
+  /** Which frame the canvas is currently showing. */
+  activeFrame: string;
+}
+
+/** The frame name a single-frame skin's cells live under — an internal
+ * placeholder, never persisted, so the same target shape covers animated and
+ * ordinary skins without a second code path through buildCanvas/onSave. */
+const SINGLE_FRAME = "single";
+
+/**
+ * The player character as a skin target. Shaped as a Brush so it flows through
+ * the pick grid, the canvas header and the browse list with no special-casing,
+ * but deliberately *not* added to PALETTE: the character isn't something you
+ * paint into a level, and putting it there would give the level editor a
+ * brush that places nothing. Its textureKey is Grampa's own idle frame, so the
+ * pick grid shows the thing you'd be replacing.
+ */
+const CHARACTER_BRUSH: Brush = {
+  id: CHARACTER_SKIN_ID,
+  category: "markers",
+  kind: "entity",
+  label: "Grampa",
+  textureKey: "wizard-idle",
+};
+
+/** Every target the Skin Creator can paint: the character first, since it's
+ * the one most people are looking for, then every skinnable brush. */
+function skinTargets(): Brush[] {
+  return [CHARACTER_BRUSH, ...PALETTE.filter((b) => b.entityType)];
 }
 
 /**
@@ -222,7 +256,10 @@ export class SkinEditorScene extends Phaser.Scene {
         return;
       }
 
-      const brushesById = new Map(PALETTE.map((b) => [b.id, b]));
+      // skinTargets(), not PALETTE, so a character skin's row resolves to a
+      // real target and its Edit button works — the character deliberately
+      // isn't a Palette brush (see CHARACTER_BRUSH).
+      const brushesById = new Map(skinTargets().map((b) => [b.id, b]));
       // Thumbnails resolved once per distinct brush (each just replays
       // loadCustomSkins' own in-memory result, not a fresh Drive read)
       // rather than once per skin, mirroring resolveSkinThumbnails' own
@@ -251,6 +288,18 @@ export class SkinEditorScene extends Phaser.Scene {
       .text(90, y + (ROW_HEIGHT - 8) / 2, brush?.label ?? brushId, { fontSize: "15px", color: "#ffffff" })
       .setOrigin(0, 0.5);
 
+    // Frame count for animated skins only, so an ordinary one-off skin's row
+    // is unchanged rather than gaining a redundant "1 frame".
+    const frameCount = Object.keys(asset.frames ?? {}).length;
+    if (frameCount > 0) {
+      this.add
+        .text(GAME_WIDTH - 340, y + (ROW_HEIGHT - 8) / 2, `${frameCount} frame${frameCount === 1 ? "" : "s"}`, {
+          fontSize: "11px",
+          color: "#a6a6c8",
+        })
+        .setOrigin(0, 0.5);
+    }
+
     this.makeSmallButton(GAME_WIDTH - 280, y + (ROW_HEIGHT - 8) / 2, "Edit", () => {
       if (!brush) return;
       void this.openForEditing(brush, asset);
@@ -272,22 +321,38 @@ export class SkinEditorScene extends Phaser.Scene {
    * defaulting: it was being written on every save and then never read, so
    * re-opening a Game Boy skin silently presented PICO-8's swatches. */
   private async openForEditing(brush: Brush, asset: SkinAsset): Promise<void> {
-    let initialCells = asset.pixelData?.cells;
-    if (!initialCells) {
-      try {
-        initialCells = await cellsFromPngDataUrl(asset.imageData, PIXEL_GRID_SIZE);
-      } catch (err) {
-        console.error("Couldn't rebuild that skin's pixels:", err);
-        this.statusText?.setText("Couldn't open that skin").setColor("#ff6666");
-        return;
+    const gridSize = gridSizeFor(brush.id);
+    const plan = framePlanFor(brush.id);
+    const frameCells: Record<string, (string | null)[] | undefined> = {};
+
+    try {
+      if (!plan) {
+        // Single-frame skin, unchanged: the legacy `cells` array when a skin
+        // predates 2026-08-21, otherwise decoded straight from its own PNG.
+        frameCells[SINGLE_FRAME] = asset.pixelData?.cells ?? (await cellsFromPngDataUrl(asset.imageData, gridSize));
+      } else {
+        // Only frames that were actually painted are decoded. Leaving the rest
+        // undefined is what keeps "unpainted" distinguishable from "painted
+        // blank" all the way through to Save.
+        const painted = asset.frames ?? { [baseFrameOf(plan)]: asset.imageData };
+        for (const name of plan.frames) {
+          const dataUrl = painted[name];
+          if (dataUrl) frameCells[name] = await cellsFromPngDataUrl(dataUrl, gridSize);
+        }
       }
+    } catch (err) {
+      console.error("Couldn't rebuild that skin's pixels:", err);
+      this.statusText?.setText("Couldn't open that skin").setColor("#ff6666");
+      return;
     }
+
     if (this.mode !== "browse") return; // navigated away while decoding
     this.target = {
       brush,
       existingId: asset.id,
       paletteId: asset.pixelData?.paletteId ?? DEFAULT_PIXEL_PALETTE_ID,
-      initialCells,
+      frameCells,
+      activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
     };
     this.goTo("canvas");
   }
@@ -300,7 +365,7 @@ export class SkinEditorScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, 24, "Choose an entity to paint a skin for", { fontSize: "18px", color: "#ffffff" })
       .setOrigin(0.5, 0);
 
-    const skinnable = PALETTE.filter((b) => b.entityType);
+    const skinnable = skinTargets();
     const columns = 6;
     const cellW = 150;
     const cellH = 64;
@@ -324,7 +389,14 @@ export class SkinEditorScene extends Phaser.Scene {
       const label = this.add.text(cx, cy + 46, brush.label, { fontSize: "11px", color: "#c8c8e0" }).setOrigin(0.5, 0);
 
       const onClick = () => {
-        this.target = { brush, existingId: undefined, paletteId: DEFAULT_PIXEL_PALETTE_ID };
+        const plan = framePlanFor(brush.id);
+        this.target = {
+          brush,
+          existingId: undefined,
+          paletteId: DEFAULT_PIXEL_PALETTE_ID,
+          frameCells: {},
+          activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
+        };
         this.goTo("canvas");
       };
       icon.on("pointerdown", onClick);
@@ -373,15 +445,15 @@ export class SkinEditorScene extends Phaser.Scene {
       bg.on("pointerdown", () => {
         if (!this.target || !this.pixelCanvas || p.id === this.target.paletteId) return;
         // Capture the live in-progress drawing before switching, so
-        // changing which palette is offered doesn't discard unsaved
-        // strokes the way reloading target.initialCells's *original*
-        // (pre-edit) value would.
-        const liveCells = this.pixelCanvas.getCells();
-        this.target = { ...this.target, paletteId: p.id, initialCells: liveCells };
+        // changing which palette is offered doesn't discard unsaved strokes
+        // the way reloading the frame's *original* (pre-edit) cells would.
+        this.target = { ...this.captureActiveFrame(), paletteId: p.id };
         this.goTo("canvas");
       });
       px += paletteButtonWidth + 8;
     }
+
+    this.buildFrameStrip(target);
 
     // --- tool-mode buttons (Paint / Fill / Pick), right-aligned on the
     // swatch row's own y — declared before the swatch row below since a
@@ -471,7 +543,7 @@ export class SkinEditorScene extends Phaser.Scene {
     this.pixelCanvas = new PixelCanvasOverlay(
       this,
       canvasRect,
-      target.initialCells,
+      target.frameCells[target.activeFrame],
       () => {
         /* live strokes need no per-cell UI feedback beyond the canvas's own redraw */
       },
@@ -484,6 +556,7 @@ export class SkinEditorScene extends Phaser.Scene {
         refreshSwatchHighlight();
         setTool("paint");
       },
+      gridSizeFor(target.brush.id),
     );
     this.pixelCanvas.setCurrentColor(this.currentColor);
     this.pixelCanvas.setTool(this.currentTool);
@@ -549,19 +622,114 @@ export class SkinEditorScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * One button per frame for an animated target, drawn under the palette row.
+   * A painted frame is filled and labelled plainly; an unpainted one is dimmed
+   * and marked with a dot, so "which poses have I actually done" is answerable
+   * at a glance rather than by clicking through all five.
+   *
+   * Nothing at all for a single-frame skin — no strip, no layout shift, so an
+   * ordinary coin skin looks exactly as it did before this feature.
+   */
+  private buildFrameStrip(target: EditingTarget): void {
+    const plan = framePlanFor(target.brush.id);
+    if (!plan) return;
+
+    // Stacked down the empty band left of the canvas rather than as a
+    // horizontal row above it: the rows between the palette selector (y=62)
+    // and the canvas (y=132) are already taken by the swatches, and a strip
+    // squeezed in there rendered straight through them. The canvas is centred
+    // from x=385 at its default size, so this column is clear at every zoom
+    // level rather than only the smallest.
+    const buttonWidth = 96;
+    const rowHeight = 34;
+    const x = 150;
+    let y = 152;
+
+    this.add.text(x, 130, "Frames", { fontSize: "11px", color: "#a6a6c8" });
+
+    for (const name of plan.frames) {
+      const painted = hasPaintedCells(target.frameCells[name]);
+      const active = name === target.activeFrame;
+      const bg = this.add
+        .rectangle(x, y, buttonWidth, 26, active ? BUTTON_HOVER_COLOR : painted ? BUTTON_COLOR : 0x16213e)
+        .setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true });
+      // An unpainted frame is dimmed and dotted, so "which poses have I
+      // actually drawn" is answerable at a glance instead of by clicking
+      // through all five.
+      this.add
+        .text(x + 10, y + 13, painted ? name : `${name} ·`, {
+          fontSize: "12px",
+          color: painted ? "#ffffff" : "#8a8ab0",
+        })
+        .setOrigin(0, 0.5);
+      bg.on("pointerdown", () => this.switchFrame(name));
+      y += rowHeight;
+    }
+  }
+
+  /** Folds whatever is on the live canvas back into the target's own frame
+   * map. Every path that tears the canvas down — switching frame, switching
+   * palette, saving — has to go through this first, or that frame's unsaved
+   * strokes die with the canvas. */
+  private captureActiveFrame(): EditingTarget {
+    const target = this.target!;
+    if (!this.pixelCanvas) return target;
+    return {
+      ...target,
+      frameCells: { ...target.frameCells, [target.activeFrame]: this.pixelCanvas.getCells() },
+    };
+  }
+
+  private switchFrame(name: string): void {
+    if (!this.target || name === this.target.activeFrame) return;
+    this.target = { ...this.captureActiveFrame(), activeFrame: name };
+    this.goTo("canvas");
+  }
+
   private onSave(): void {
-    const target = this.target;
-    if (!target || !this.pixelCanvas) return;
-    // Only the PNG is persisted — it already *is* the cell grid, one canvas
-    // pixel per cell (see PixelSkinData.cells for the measured reasoning
-    // behind dropping the second copy).
-    const imageData = this.pixelCanvas.exportPngDataUrl();
+    if (!this.target || !this.pixelCanvas) return;
+    const target = this.captureActiveFrame();
+    this.target = target;
+    const plan = framePlanFor(target.brush.id);
     const uploadedBy = loadActiveProfile() ?? "unknown";
 
-    void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId }, uploadedBy)
+    // Only PNGs are persisted — a PNG already *is* the cell grid, one canvas
+    // pixel per cell (see PixelSkinData.cells for the measured reasoning
+    // behind dropping the second copy). Frames other than the one on screen
+    // have no live canvas to export from, so they're rendered from their
+    // cells instead; the two paths produce byte-identical output by
+    // construction (see cellsToPngDataUrl).
+    let imageData: string;
+    let frames: Record<string, string> | undefined;
+
+    if (!plan) {
+      imageData = this.pixelCanvas.exportPngDataUrl();
+    } else {
+      const gridSize = gridSizeFor(target.brush.id);
+      const base = baseFrameOf(plan);
+      frames = {};
+      for (const name of plan.frames) {
+        const cells = target.frameCells[name];
+        // An all-blank frame is "not painted yet", not "painted invisible" —
+        // writing it would give the skin a blank pose and make resolveFrame's
+        // fallback unreachable for it.
+        if (!hasPaintedCells(cells)) continue;
+        frames[name] = cellsToPngDataUrl(cells!, gridSize);
+      }
+      if (!frames[base]) {
+        this.statusText?.setText(`Paint the ${base} frame first — the others fall back to it`).setColor("#ffeb3b");
+        return;
+      }
+      imageData = frames[base];
+    }
+
+    void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId }, uploadedBy, frames)
       .then((id) => {
         this.target = { ...target, existingId: id };
-        this.statusText?.setText(`Saved — ${target.brush.label} skin updated`).setColor("#4ade80");
+        const painted = frames ? ` (${Object.keys(frames).length} frame${Object.keys(frames).length === 1 ? "" : "s"})` : "";
+        this.statusText?.setText(`Saved — ${target.brush.label} skin updated${painted}`).setColor("#4ade80");
       })
       .catch((err: unknown) => {
         console.error("Pixel skin save failed:", err);

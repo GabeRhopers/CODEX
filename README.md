@@ -169,7 +169,11 @@ Open the dev server URL in a browser. Controls:
   the last level shows "World Complete!"; **Esc** at any point returns to
   My Worlds (not the editor, since a World isn't edited through it).
 - **Skin Creator** (a chip in the home page's footer row, not a
-  5th card — see "Skin Creator" under Art for why): pick an existing
+  5th card — see "Skin Creator" under Art for why): pick **Grampa** to paint
+  the player character across its five poses (idle, walk1, walk2, jump, cast),
+  or an enemy to paint a looping animation of up to four frames — the frame
+  list sits beside the canvas, and any pose you skip falls back to that skin's
+  own idle. Otherwise: pick an existing
   pixel-drawn skin to re-edit, or **+ New Skin** and choose which of the
   ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
   skin library and makes it active immediately, same as an ordinary
@@ -2574,6 +2578,65 @@ works is a monotonic high-water mark: every key event carries a timestamp from
 one clock, so a real press is always strictly later than anything handled and a
 replay never is. Verified at both timings — 7 presses, exactly 7 moves, whether
 sent back to back or spaced out.
+
+**Multi-frame sprite editor: a paintable character and animated enemies
+(2026-08-22).** The Skin Creator can now paint *several* frames per skin —
+five poses for the player character, a loop of up to four for each enemy —
+which is the half of the original sprite-editor request that the 2026-08-20
+character-situations work deliberately left for later.
+
+*The player was not skinnable at all.* Not "skinnable but unused": `PlayScene`
+created the sprite with the literal `wizard-idle` and never registered it with
+`trackSprite`, so the skin-resolve pass never saw it. The `spawn` brush that
+looks like the obvious home is the placement arrow, so skinning it reskins the
+marker. The character now has its own storage key, deliberately not a Palette
+brush — it is not something you paint into a level, and putting it there would
+give the level editor a brush that places nothing.
+
+*Grampa's own art still cannot be imported*, and this does not pretend
+otherwise: ~950-1010 distinct colours per frame with about a third of pixels
+at partial alpha, against a 16-colour binary-alpha canvas. A character skin is
+painted from scratch and replaces him wholesale. Poses you have not painted
+fall back to that skin's **own idle**, never to Grampa — a half-finished
+16-colour character turning into hand-drawn art mid-jump would read as a bug
+rather than as unfinished work. So one painted frame is already a usable skin;
+it just doesn't animate yet.
+
+*The character paints at 48x48, everything else stays at 32.* Grampa renders
+48px tall, so a 32-grid character would be scaled up 1.5x and read visibly
+chunkier than every other sprite. It also keeps the physics honest:
+`applyWizardTexture` offsets the body by `FRAME_HEIGHT - BODY_HEIGHT`, so a
+48-tall painted frame drops into exactly the geometry Grampa uses and **the
+body stays 22x40 whatever anyone paints**. That is not incidental — the
+2026-08-19 gravity retune verified every bundled template against that fixed
+body, Desert Canyon's pillar down to about a tile of margin, so a skin that
+could change the hitbox would let someone painting a character silently make
+shipped levels uncompletable. An e2e assertion pins it.
+
+*Additive storage.* `SkinAsset` gains an optional `frames` map;
+`imageData` stays the representative frame either way, which is what lets the
+browse list, the picker thumbnails and `EntityPlacer` keep reading one field
+and need no changes at all. Every skin saved before this is a valid
+single-frame skin with nothing to migrate. An empty frame map normalises back
+to absent so readers never special-case it, and the set is written wholesale
+so deleting a frame really deletes it. An all-blank frame is treated as "not
+painted yet" rather than "painted invisible", which is what keeps the fallback
+reachable.
+
+*Frames animate by `setTexture`, not Phaser animations*, matching how every
+other sprite in this game changes frame: a custom skin's frames arrive at
+runtime as separately-registered textures, so there is no sprite sheet to
+define an animation against. The loop timer accumulates rather than resetting
+on each step, so a stalled frame cannot quietly drift the cycle slow — the
+same wall-clock-versus-frame-rate trap the basket teleport fell into.
+
+*Two layout things worth recording.* `PixelCanvasOverlay` hardcoded its grid
+size in twenty places; it now takes one, defaulting to 32 so every existing
+call site is byte-identical. The CSS grid-line overlay derives its spacing
+from that size too — hardcoding 32 there would misalign every line on a 48
+canvas. And the frame list sits in the empty band *beside* the canvas, not
+above it: tried there first, and it rendered straight through the colour
+swatches, which the screenshot caught immediately.
 
 **Basket teleports could bounce you back and forth (2026-08-22).** A
 teleport lands the player standing exactly on the destination area's own

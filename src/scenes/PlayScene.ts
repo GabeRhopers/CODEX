@@ -46,7 +46,9 @@ import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../leve
 import { AreaKey, DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
-import { resolveSkinTextureKeys } from "../skins/skinLoader";
+import { FrameTextureKeys, resolveFrameTextureKeys, resolveLoopLength, resolveSkinTextureKeys } from "../skins/skinLoader";
+import { CHARACTER_SKIN_ID, framePlanFor } from "../skins/spriteFrames";
+import { advanceLoop, createLoopState, LoopState } from "../gameplay/spriteLoop";
 
 // Raised from -650 alongside GRAVITY_Y's 900→1100 bump (2026-08-19, see
 // its own comment in gameConfig.ts) — v scales by sqrt(1100/900) to keep
@@ -338,6 +340,15 @@ export class PlayScene extends Phaser.Scene {
   // immediately basket-up, both in Main). Cleared by update() on the first
   // frame the player is off it. See TELEPORT_COOLDOWN_MS for why a timer
   // alone was not enough.
+  /** A custom character skin's frames, once resolved — null while nothing is
+   * active (the ordinary case: Grampa's own art) and until the async resolve
+   * lands, which update() handles by simply passing undefined through. */
+  private characterFrameKeys?: FrameTextureKeys;
+  /** Per animated enemy brush: its skin's frames, how many of them actually
+   * loop, and one shared timer. Shared per brush rather than per sprite so
+   * every ghost in an area flaps together — cheaper, and it reads as
+   * deliberate rather than as a crowd out of sync. */
+  private enemyLoops = new Map<string, { keys: FrameTextureKeys; length: number; state: LoopState }>();
   private latchedBasketTile?: { x: number; y: number };
   // Set by the basket overlap callbacks, which Arcade Physics runs after
   // update() each frame — so update() reads the previous frame's value,
@@ -381,6 +392,8 @@ export class PlayScene extends Phaser.Scene {
     // one latched.
     this.latchedBasketTile = undefined;
     this.touchedLatchedBasket = false;
+    this.characterFrameKeys = undefined;
+    this.enemyLoops = new Map();
     this.castFlashUntil = 0;
     // Phaser reuses this same PlayScene instance across every Test Play/
     // World/Template run rather than constructing a fresh one each time —
@@ -854,6 +867,15 @@ export class PlayScene extends Phaser.Scene {
     // just in the editor's own palette/grid preview). Guarded the same way
     // as background/music above against a stale result landing after the
     // player has already teleported elsewhere.
+    // The character's own skin, resolved separately from the brush pass below
+    // because the player isn't a placed entity and so isn't in
+    // spritesByBrushId at all — it's the one sprite the whole skin system
+    // never reached before this.
+    void resolveFrameTextureKeys(this, CHARACTER_SKIN_ID).then((keys) => {
+      if (this.currentAreaKey !== key) return;
+      this.characterFrameKeys = keys ?? undefined;
+    });
+
     void resolveSkinTextureKeys(this).then((skinTextureKeys) => {
       if (this.currentAreaKey !== key) return;
       for (const [brushId, sprites] of this.spritesByBrushId) {
@@ -873,7 +895,40 @@ export class PlayScene extends Phaser.Scene {
       }
     });
 
+    // Animated enemy skins: one resolve per brush that has any sprites in this
+    // area, not per sprite, since every ghost shares one skin and one timer.
+    for (const brushId of this.spritesByBrushId.keys()) {
+      if (!framePlanFor(brushId)) continue;
+      void Promise.all([resolveFrameTextureKeys(this, brushId), resolveLoopLength(brushId)]).then(([keys, length]) => {
+        if (this.currentAreaKey !== key || !keys) return;
+        this.enemyLoops.set(brushId, { keys, length, state: createLoopState() });
+      });
+    }
+
     this.areaBuilt = true;
+  }
+
+  /**
+   * Steps every animated enemy skin's frame. Only brushes with a resolved
+   * multi-frame skin appear in `enemyLoops`, so a level with no custom enemy
+   * art does nothing here beyond one empty-map iteration.
+   *
+   * `setTexture` rather than a Phaser animation, matching how every other
+   * sprite in this game changes frame (see spriteLoop.ts for why). No
+   * applyEnemySize call afterwards: all of one skin's frames are painted on
+   * the same grid, so the frame dimensions this sizes from never change
+   * between them — unlike the built-in-to-custom swap in the resolve pass,
+   * where they do.
+   */
+  private updateEnemyAnimation(deltaMs: number): void {
+    for (const [brushId, loop] of this.enemyLoops) {
+      const frame = advanceLoop(loop.state, deltaMs, loop.length);
+      const key = loop.keys.get(String(frame));
+      if (!key) continue;
+      for (const sprite of this.spritesByBrushId.get(brushId) ?? []) {
+        if (sprite.texture.key !== key) sprite.setTexture(key);
+      }
+    }
   }
 
   /** Called on overlap with a basket zone (see the loop above) — teleports
@@ -1012,9 +1067,11 @@ export class PlayScene extends Phaser.Scene {
       outcome: this.outcome,
       swimming,
       casting: time < this.castFlashUntil,
+      frameKeys: this.characterFrameKeys,
     });
     this.updateCharacterVisuals(situation, time);
     this.updateAccessoryVisuals();
+    this.updateEnemyAnimation(delta);
     this.background?.update(this.player.x);
 
     for (const enemy of this.enemies) {

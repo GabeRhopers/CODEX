@@ -63,3 +63,38 @@ export async function cellsFromPngDataUrl(dataUrl: string, gridSize: number): Pr
   }
   return cells;
 }
+
+/**
+ * The inverse: renders a cell grid to a PNG data URL, one canvas pixel per
+ * cell, exactly as PixelCanvasOverlay does for the frame you're looking at.
+ *
+ * Needed because a multi-frame skin saves frames you are *not* currently
+ * editing. Those exist only as cell arrays in the editor's own state — there
+ * is no live canvas to call exportPngDataUrl on — so they have to be rendered
+ * here instead. Deliberately mirrors cellsFromPngDataUrl's conventions (fully
+ * opaque for a painted cell, fully cleared for null) so a frame written by
+ * this and one exported from the live canvas decode back identically; the
+ * round-trip test covers both paths for that reason.
+ */
+export function cellsToPngDataUrl(cells: readonly (string | null)[], gridSize: number): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = gridSize;
+  canvas.height = gridSize;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D canvas context unavailable");
+
+  for (let i = 0; i < gridSize * gridSize; i++) {
+    const color = cells[i];
+    if (!color) continue; // left cleared, which is what transparent means here
+    ctx.fillStyle = color;
+    ctx.fillRect(i % gridSize, Math.floor(i / gridSize), 1, 1);
+  }
+  return canvas.toDataURL("image/png");
+}
+
+/** True when a frame has at least one painted cell. An all-empty frame is
+ * "not painted yet" rather than "painted blank" — saving it would give the
+ * skin an invisible pose and make resolveFrame's fallback unreachable. */
+export function hasPaintedCells(cells: readonly (string | null)[] | undefined): boolean {
+  return !!cells?.some((cell) => cell !== null);
+}
