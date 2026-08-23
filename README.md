@@ -2586,6 +2586,41 @@ one clock, so a real press is always strictly later than anything handled and a
 replay never is. Verified at both timings — 7 presses, exactly 7 moves, whether
 sent back to back or spaced out.
 
+**The grid was invisible on light art (2026-08-23).** Noticed while
+screenshotting the zoom rework and nearly waved through as a matter of taste. It
+was not. The lines were `rgba(255,255,255,0.18)`; measuring the rendered result
+against painted bands gave line-to-neighbour contrast out of 255:
+
+| art | white 0.18 | white 0.35 | black 0.35 | difference 0.55 |
+|---|---|---|---|---|
+| near-white PICO-8 | **1.3** | 2.7 | 60.0 | 88.6 |
+| light grey | 7.3 | 14.5 | 48.2 | 51.9 |
+| mid brown | 21.2 | 40.6 | 22.1 | 29.6 |
+| black | 32.7 | 62.6 | **0.0** | 97.4 |
+| checkerboard | 33.6 | 37.4 | 37.7 | 19.6 |
+
+1.3 is not faint, it is absent — and absent on light art, where cell boundaries
+matter most because the art itself gives you nothing to count by. The obvious
+fix does not work: turning the line up scores 2.7, still nothing, because *no*
+fixed colour can survive art of that colour. Darkening it, the other obvious
+fix, just moves the blind spot onto black, where it measures exactly **0.0**.
+
+`mix-blend-mode: difference` inverts whatever is underneath instead, so there is
+no colour it can vanish against — worst case 19.6. At 0.55 rather than a full
+inversion: full strength scores 155-171 on white and black, which reads as a
+cage laid over the drawing, and buys nothing, since its worst case (17.8) is the
+same. On saturated art the line takes a complementary tint, which is inherent to
+the mechanism and the price of never disappearing. Still CSS on a sibling
+element, so the "cannot reach `exportPngDataUrl`" guarantee is untouched.
+
+`tests/e2e/skin-grid.spec.ts` measures the rendered pixels rather than the
+stylesheet: it floods the canvas through the real swatch and Fill buttons,
+screenshots it, and compares each grid-line column with its neighbours — both
+extremes, since each fixed-colour candidate passes one and fails the other.
+Verified to fail on both (1.28 and 0.00) before being accepted. Playwright hands
+back a PNG and Node has no decoder, so the page decodes its own screenshot
+through an offscreen canvas rather than adding a dependency for one measurement.
+
 **Zoom is a window now, not a bigger canvas (2026-08-23).** Zoom +/− grew the
 canvas itself, clamped to `[200, 320]` px in 40px steps. That is a **1.6x range
 in three clicks**, and on the 48-cell character grid it spans 4.2 to 6.7 screen
@@ -2927,7 +2962,10 @@ each into the UI):
   32)`, so it self-aligns to cell boundaries at any zoom level with no JS
   math) rather than anything drawn into the pixel buffer itself — keeps
   it structurally impossible to leak into `exportPngDataUrl()`'s output,
-  same reasoning the checkerboard background already used.
+  same reasoning the checkerboard background already used. Its lines were
+  `rgba(255,255,255,0.18)`, **changed 2026-08-23** after measuring 1.3/255
+  of contrast against light art — see "The grid was invisible on light
+  art" above.
 - *Eyedropper + right-click erase* — Pick samples `cells[index]` back into
   the current color and auto-reverts to Paint immediately (a momentary
   "sample and get back to work" gesture, matching every other pixel-art

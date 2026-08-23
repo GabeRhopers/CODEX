@@ -142,16 +142,42 @@ const REFERENCE_CSS = {
   opacity: REFERENCE_OPACITY,
 };
 
-// Pure-CSS grid lines, one per cell boundary, sized as a fraction of the
-// container rather than a fixed pixel spacing so it stays exactly aligned
-// with cells at any zoom level with no JS math. A sibling element layered
-// above the canvas rather than anything drawn onto it, so it's structurally
-// impossible for it to leak into exportPngDataUrl()'s output the way drawing
-// it into the pixel buffer itself would risk.
+/**
+ * Pure-CSS grid lines, one per cell boundary, sized as a fraction of the
+ * container rather than a fixed pixel spacing so it stays exactly aligned with
+ * cells at any zoom level with no JS math. A sibling element layered above the
+ * canvas rather than anything drawn onto it, so it's structurally impossible
+ * for it to leak into exportPngDataUrl()'s output the way drawing it into the
+ * pixel buffer itself would risk.
+ *
+ * `difference` rather than a fixed colour (2026-08-23). The lines were
+ * `rgba(255,255,255,0.18)`, and measuring the rendered result against painted
+ * bands gave the line-to-neighbour contrast, out of 255:
+ *
+ *     art             white 0.18  white 0.35  black 0.35  difference 0.55
+ *     near-white PICO-8      1.3         2.7        60.0             88.6
+ *     light grey             7.3        14.5        48.2             51.9
+ *     mid brown             21.2        40.6        22.1             29.6
+ *     black                 32.7        62.6         0.0             97.4
+ *     checkerboard          33.6        37.4        37.7             19.6
+ *
+ * 1.3 is invisible, and it is invisible on light art — where cell boundaries
+ * matter most, since the art itself gives you nothing to count by. Turning the
+ * line up doesn't fix it (2.7 is still invisible): no fixed colour can, because
+ * whatever it is, some art is that colour. A dark line just moves the blind
+ * spot onto black, where it measures exactly 0.0.
+ *
+ * Blending inverts whatever is underneath instead, so there is no colour it can
+ * disappear against — worst case 19.6, against 1.3. 0.55 rather than a full
+ * inversion: full strength measures 155-171 on white and black, which reads as
+ * a cage over the drawing, and buys nothing (its worst case, 17.8, is the same).
+ * Still CSS on a sibling element, so the export guarantee is untouched.
+ */
 function gridLineCss(gridSize: number): Record<string, string> {
   return {
+    mixBlendMode: "difference",
     backgroundImage:
-      "linear-gradient(to right, rgba(255,255,255,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.18) 1px, transparent 1px)",
+      "linear-gradient(to right, rgba(255,255,255,0.55) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.55) 1px, transparent 1px)",
     // Derived from the canvas's own grid size rather than the module default,
     // so a 48-cell character canvas draws 48 lines and not 32 — the whole
     // point of the fraction-of-container sizing is that it stays aligned, and
