@@ -173,7 +173,10 @@ Open the dev server URL in a browser. Controls:
   the player character across its five poses (idle, walk1, walk2, jump, cast),
   or an enemy to paint a looping animation of up to four frames — the frame
   list sits beside the canvas, and any pose you skip falls back to that skin's
-  own idle. Otherwise: pick an existing
+  own idle. **Copy** on a browse row starts a new skin from an existing one
+  without touching it; **Trace** shows any existing art faintly behind the
+  canvas to draw over, and **Trace in** stamps it in as a starting point.
+  Otherwise: pick an existing
   pixel-drawn skin to re-edit, or **+ New Skin** and choose which of the
   ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
   skin library and makes it active immediately, same as an ordinary
@@ -2578,6 +2581,50 @@ works is a monotonic high-water mark: every key event carries a timestamp from
 one clock, so a real press is always strictly later than anything handled and a
 replay never is. Verified at both timings — 7 presses, exactly 7 moves, whether
 sent back to back or spaced out.
+
+**Reuse existing art: Copy as a base, and trace over a reference
+(2026-08-23).** Two ways to start from art that already exists instead of an
+empty grid.
+
+**Copy** sits beside Edit on every browse row. It opens the same decoded
+frames Edit does — all of them, for a multi-frame skin — but forgets which
+skin they came from, so Save adds a new library entry and the one you copied
+is left exactly as it was. That "forgets the id" is the entire difference
+between the two buttons.
+
+**Trace** shows a chosen image faintly behind the canvas as a guide, and
+**Trace in** stamps it into the frame you're editing as a starting point. The
+picker offers Grampa's five poses, the four enemies, and every saved pixel
+skin — plus the built-in art of whatever you're currently editing, so
+reskinning the Coin can still trace the coin.
+
+*This is the answer to a limitation hit three times now.* Grampa's hand-drawn
+frames cannot be imported into a 16-colour canvas — ~950-1010 colours each at
+about a third partial alpha. Tracing goes around it: you can't convert his
+art, but you can draw over it and end up with a pixel version that matches the
+original silhouette.
+
+*Layering, which is the fiddly part.* The canvas used to carry the
+checkerboard as its own CSS background. A reference has to sit under your
+pixels (so it can't wash them out) and over the checkerboard (so it's
+legible), and fading it with `opacity` on the canvas would fade the artwork
+too. So there are four identically-positioned layers now: checkerboard at 998,
+reference at 999, canvas at 1000, grid lines at 1001.
+
+*A reference can never end up in a saved skin.* It is a CSS layer, and
+`exportPngDataUrl` is `canvas.toDataURL`, which serializes only the drawn
+bitmap — the same guarantee the checkerboard already relied on. True by
+construction, which is exactly why it now has its own test rather than a
+comment: save with a reference showing, reopen, and the cell count is still
+what you painted rather than several hundred.
+
+*Two things measurement changed.* Built-in art is **not square** — measured
+29x48 for Grampa's idle, 30x48 for walk1, 40x40 for the ghost — so both the
+underlay (`background-size: contain`) and the trace decode fit and centre
+rather than stretching; a plain scale-to-fill widened him by more than half
+again. And the first version listed every skinnable brush: the screenshot
+showed ~30 entries running off the bottom of the canvas with their labels
+colliding, so the list became the animated cast plus whatever you're editing.
 
 **Multi-frame sprite editor: a paintable character and animated enemies
 (2026-08-22).** The Skin Creator can now paint *several* frames per skin —

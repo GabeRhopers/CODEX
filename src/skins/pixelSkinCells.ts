@@ -98,3 +98,59 @@ export function cellsToPngDataUrl(cells: readonly (string | null)[], gridSize: n
 export function hasPaintedCells(cells: readonly (string | null)[] | undefined): boolean {
   return !!cells?.some((cell) => cell !== null);
 }
+
+/**
+ * Decodes any image into a cell grid **without distorting it** — the tracing
+ * path, as opposed to cellsFromPngDataUrl above.
+ *
+ * The two differ deliberately. A saved skin is always exactly gridSize square,
+ * so that function's straight stretch to gridSize is a 1:1 blit and its
+ * explicit destination size is a guard against a malformed entry. A tracing
+ * source is arbitrary art: the built-in frames measure 29x48, 30x48 and 40x40,
+ * so stretching one to fill a square grid would widen Grampa by more than half
+ * again and make him worthless as a guide. This scales to fit and centres,
+ * matching what the on-screen reference layer shows (`background-size:
+ * contain`), so what you trace over is what you get.
+ */
+export async function cellsFromImageFitted(dataUrl: string, gridSize: number): Promise<(string | null)[]> {
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("That image couldn't be decoded"));
+    image.src = dataUrl;
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = gridSize;
+  canvas.height = gridSize;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("2D canvas context unavailable");
+
+  const scale = Math.min(gridSize / image.width, gridSize / image.height);
+  const drawWidth = Math.max(1, Math.round(image.width * scale));
+  const drawHeight = Math.max(1, Math.round(image.height * scale));
+  ctx.drawImage(
+    image,
+    Math.floor((gridSize - drawWidth) / 2),
+    Math.floor((gridSize - drawHeight) / 2),
+    drawWidth,
+    drawHeight,
+  );
+
+  const { data } = ctx.getImageData(0, 0, gridSize, gridSize);
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < gridSize * gridSize; i++) {
+    const offset = i * 4;
+    // Hand-drawn art is full of partial alpha (about a third of Grampa's
+    // pixels), and the canvas has no such thing — a cell is painted or it is
+    // not. Anything at least half opaque becomes a solid cell; the rest is
+    // dropped, which is what keeps a traced silhouette crisp instead of
+    // fringed with near-invisible edge pixels.
+    cells.push(
+      data[offset + 3] < 128
+        ? null
+        : `#${toHexByte(data[offset])}${toHexByte(data[offset + 1])}${toHexByte(data[offset + 2])}`,
+    );
+  }
+  return cells;
+}

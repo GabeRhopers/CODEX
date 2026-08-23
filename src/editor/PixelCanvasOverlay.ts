@@ -19,12 +19,13 @@ export const MAX_DISPLAY_SIZE = 320;
 
 export type PixelTool = "paint" | "fill" | "eyedropper";
 
-// Pure-CSS checkerboard so transparent cells read as "empty" while
-// editing, rather than looking identical to the page behind the canvas —
-// applied as the canvas element's own CSS background, never touched by
-// exportPngDataUrl() (canvas.toDataURL only ever serializes the canvas's
-// own drawn bitmap, not its CSS styling), so it never leaks into a saved
-// skin's actual transparency.
+// Pure-CSS checkerboard so transparent cells read as "empty" while editing,
+// rather than looking identical to the page behind the canvas. Lives on its
+// own element *under* the canvas rather than as the canvas's own background,
+// because a tracing reference has to sit between the two — see the layer
+// table in the constructor. Either way it is CSS, and exportPngDataUrl()
+// (canvas.toDataURL) only ever serializes the canvas's own drawn bitmap, so
+// no styling here can leak into a saved skin's transparency.
 const CHECKERBOARD_CSS = {
   backgroundImage:
     "linear-gradient(45deg, #666 25%, transparent 25%), linear-gradient(-45deg, #666 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #666 75%), linear-gradient(-45deg, transparent 75%, #666 75%)",
@@ -80,6 +81,23 @@ interface CellChange {
 // anything drawn onto it, so it's structurally impossible for it to leak
 // into exportPngDataUrl()'s output the way drawing it into the pixel
 // buffer itself would risk.
+/** How strongly a tracing reference shows through. Faint enough that your own
+ * strokes stay clearly the foreground, strong enough to actually follow — a
+ * judgement call, checked by eye against both grid sizes rather than derived. */
+const REFERENCE_OPACITY = "0.38";
+
+const REFERENCE_CSS = {
+  // `contain`, not `cover` or a plain stretch: the built-in art is not square
+  // (measured: wizard-idle is 29x48, wizard-walk1 30x48, ghost-pillow 40x40),
+  // so filling a square canvas with it would stretch Grampa 1.66x sideways and
+  // make him useless as a guide.
+  backgroundSize: "contain",
+  backgroundPosition: "center",
+  backgroundRepeat: "no-repeat",
+  imageRendering: "pixelated",
+  opacity: REFERENCE_OPACITY,
+};
+
 function gridLineCss(gridSize: number): Record<string, string> {
   return {
     backgroundImage:
@@ -96,6 +114,8 @@ export class PixelCanvasOverlay {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly gridEl: HTMLDivElement;
+  private readonly checkerEl: HTMLDivElement;
+  private readonly referenceEl: HTMLDivElement;
   private cells: (string | null)[];
   private currentColor: string | null = null;
   private tool: PixelTool = "paint";
@@ -133,6 +153,33 @@ export class PixelCanvasOverlay {
     this.rect = rect;
     this.cells = initialCells ? [...initialCells] : new Array<string | null>(gridSize * gridSize).fill(null);
 
+    // Four stacked, identically-positioned layers. The order is the whole
+    // reason the checkerboard is no longer the canvas's own CSS background:
+    //
+    //   998  checkerboard   what "transparent" looks like
+    //   999  reference      the tracing guide, faint
+    //   1000 canvas         your actual pixels, fully opaque, transparent-backed
+    //   1001 grid lines     on top, non-interactive
+    //
+    // The reference has to be *under* your strokes so it can't wash them out,
+    // and *over* the checkerboard so it's legible. Fading it with `opacity` on
+    // the canvas itself would fade the artwork with it, hence a layer of its
+    // own. reposition() and destroy() below walk all four.
+    this.checkerEl = document.createElement("div");
+    this.checkerEl.style.position = "fixed";
+    this.checkerEl.style.zIndex = "998";
+    this.checkerEl.style.pointerEvents = "none";
+    Object.assign(this.checkerEl.style, CHECKERBOARD_CSS);
+    document.body.appendChild(this.checkerEl);
+
+    this.referenceEl = document.createElement("div");
+    this.referenceEl.style.position = "fixed";
+    this.referenceEl.style.zIndex = "999";
+    this.referenceEl.style.pointerEvents = "none";
+    this.referenceEl.style.display = "none"; // nothing to trace until one is picked
+    Object.assign(this.referenceEl.style, REFERENCE_CSS);
+    document.body.appendChild(this.referenceEl);
+
     this.canvas = document.createElement("canvas");
     this.canvas.width = gridSize;
     this.canvas.height = gridSize;
@@ -142,7 +189,6 @@ export class PixelCanvasOverlay {
     this.canvas.style.touchAction = "none"; // a finger-drag paints; it must not also scroll the page
     this.canvas.style.border = "1px solid #444444";
     this.canvas.style.zIndex = "1000";
-    Object.assign(this.canvas.style, CHECKERBOARD_CSS);
 
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("2D canvas context unavailable");
@@ -221,6 +267,40 @@ export class PixelCanvasOverlay {
     this.redoStack = [];
     this.currentStrokeChanges = [];
     this.redrawAll();
+  }
+
+  /**
+   * Shows `dataUrl` faintly behind the pixels as a tracing guide, or clears it
+   * with null. Purely a view state — it is never read back, never saved, and
+   * cannot reach exportPngDataUrl, which serializes the canvas bitmap alone.
+   */
+  setReferenceImage(dataUrl: string | null): void {
+    if (!dataUrl) {
+      this.referenceEl.style.display = "none";
+      this.referenceEl.style.backgroundImage = "";
+      return;
+    }
+    this.referenceEl.style.backgroundImage = `url("${dataUrl}")`;
+    this.referenceEl.style.display = "block";
+  }
+
+  /**
+   * Stamps a whole grid over the current one as a single undoable step — the
+   * "trace this in as a starting point" action.
+   *
+   * Deliberately *not* loadCells: that resets the undo history because it means
+   * "a different skin is now open". Stamping is an edit like any other, and
+   * being able to take it back is most of the point — you try tracing
+   * something in, decide you preferred your own version, and press Undo.
+   */
+  stampCells(cells: readonly (string | null)[]): void {
+    for (let i = 0; i < this.cells.length; i++) {
+      // setCell already skips a no-op and records the previous value, so a
+      // stamp that changes nothing leaves the undo stack alone.
+      this.setCell(i, cells[i] ?? null);
+    }
+    this.commitStroke();
+    this.onPaint();
   }
 
   getCells(): (string | null)[] {
@@ -416,8 +496,9 @@ export class PixelCanvasOverlay {
   }
 
   private reposition(): void {
-    positionOverlay(this.scene, this.canvas, this.rect);
-    positionOverlay(this.scene, this.gridEl, this.rect);
+    for (const el of [this.checkerEl, this.referenceEl, this.canvas, this.gridEl]) {
+      positionOverlay(this.scene, el, this.rect);
+    }
   }
 
   destroy(): void {
@@ -428,5 +509,7 @@ export class PixelCanvasOverlay {
     window.removeEventListener("pointerup", this.boundWindowPointerUp);
     this.canvas.remove();
     this.gridEl.remove();
+    this.checkerEl.remove();
+    this.referenceEl.remove();
   }
 }

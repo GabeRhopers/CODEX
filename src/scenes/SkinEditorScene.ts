@@ -1,16 +1,24 @@
 import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
+import { AssetPickerItem, AssetPickerMenu } from "../editor/AssetPickerMenu";
 import { Brush, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
 import { PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { fitWithinTile } from "../editor/spriteFit";
 import { loadActiveProfile } from "../profile/Profile";
 import { SkinAsset } from "../skins/CustomSkins";
-import { cellsFromPngDataUrl, cellsToPngDataUrl, hasPaintedCells } from "../skins/pixelSkinCells";
+import { cellsFromImageFitted, cellsFromPngDataUrl, cellsToPngDataUrl, hasPaintedCells } from "../skins/pixelSkinCells";
+import {
+  builtInReferenceSources,
+  NO_REFERENCE_ID,
+  parseReferenceId,
+  ReferenceSource,
+  skinReferenceId,
+} from "../skins/referenceSources";
 import { baseFrameOf, CHARACTER_SKIN_ID, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES } from "../skins/pixelPalettes";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
-import { listPixelSkins, removeCustomSkin, savePixelSkin } from "../skins/skinStorage";
+import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin } from "../skins/skinStorage";
 
 const BUTTON_COLOR = 0x0f3460;
 const BUTTON_HOVER_COLOR = 0x3a5a9c;
@@ -107,6 +115,14 @@ export class SkinEditorScene extends Phaser.Scene {
   private mirrorEnabled = false;
   private gridVisible = false;
   private canvasSize = 280;
+  // Which reference is showing, and the data URL behind it. Both are *tool*
+  // state like the fields above — deliberately kept across frame and skin
+  // switches, since you generally trace the same guide across several frames
+  // of one animation.
+  private referenceId: string = NO_REFERENCE_ID;
+  private referenceDataUrl: string | null = null;
+  private referencePicker?: AssetPickerMenu;
+  private referenceSources: ReferenceSource[] = [];
   // Phaser's keyboard queue can re-emit one physical keydown more than
   // once within a single rendered frame under frame stalls — see
   // EditorScene's onceThisFrame for the same guard and why.
@@ -161,6 +177,11 @@ export class SkinEditorScene extends Phaser.Scene {
   private rebuild(): void {
     this.pixelCanvas?.destroy();
     this.pixelCanvas = undefined;
+    // AssetPickerMenu owns Phaser objects the display-list clear below would
+    // orphan rather than destroy (see the comment there) — its own destroy()
+    // is what actually unhooks them.
+    this.referencePicker?.destroy();
+    this.referencePicker = undefined;
     this.clearArmTimer?.remove(false);
     this.clearArmed = false;
     // NOT `this.children.removeAll(true)` — that looks right but isn't:
@@ -293,18 +314,25 @@ export class SkinEditorScene extends Phaser.Scene {
     const frameCount = Object.keys(asset.frames ?? {}).length;
     if (frameCount > 0) {
       this.add
-        .text(GAME_WIDTH - 340, y + (ROW_HEIGHT - 8) / 2, `${frameCount} frame${frameCount === 1 ? "" : "s"}`, {
+        .text(GAME_WIDTH - 380, y + (ROW_HEIGHT - 8) / 2, `${frameCount} frame${frameCount === 1 ? "" : "s"}`, {
           fontSize: "11px",
           color: "#a6a6c8",
         })
         .setOrigin(0, 0.5);
     }
 
-    this.makeSmallButton(GAME_WIDTH - 280, y + (ROW_HEIGHT - 8) / 2, "Edit", () => {
+    const midY = y + (ROW_HEIGHT - 8) / 2;
+    this.makeSmallButton(GAME_WIDTH - 290, midY, "Edit", () => {
       if (!brush) return;
       void this.openForEditing(brush, asset);
     });
-    this.makeSmallButton(GAME_WIDTH - 200, y + (ROW_HEIGHT - 8) / 2, "Delete", () => {
+    // Opens the same decoded frames as Edit but forgets which skin they came
+    // from, so Save writes a new entry and this one is left exactly as it is.
+    this.makeSmallButton(GAME_WIDTH - 240, midY, "Copy", () => {
+      if (!brush) return;
+      void this.openForEditing(brush, asset, { asCopy: true });
+    });
+    this.makeSmallButton(GAME_WIDTH - 178, midY, "Delete", () => {
       void removeCustomSkin(brushId, asset.id).then(() => this.rebuild());
     });
   }
@@ -320,7 +348,7 @@ export class SkinEditorScene extends Phaser.Scene {
    * `paletteId` now comes from the skin itself rather than always
    * defaulting: it was being written on every save and then never read, so
    * re-opening a Game Boy skin silently presented PICO-8's swatches. */
-  private async openForEditing(brush: Brush, asset: SkinAsset): Promise<void> {
+  private async openForEditing(brush: Brush, asset: SkinAsset, options?: { asCopy?: boolean }): Promise<void> {
     const gridSize = gridSizeFor(brush.id);
     const plan = framePlanFor(brush.id);
     const frameCells: Record<string, (string | null)[] | undefined> = {};
@@ -349,12 +377,18 @@ export class SkinEditorScene extends Phaser.Scene {
     if (this.mode !== "browse") return; // navigated away while decoding
     this.target = {
       brush,
-      existingId: asset.id,
+      // Dropping the id is the entire difference between Edit and Copy: Save
+      // adds a new library entry instead of overwriting, so the skin this was
+      // based on survives untouched.
+      existingId: options?.asCopy ? undefined : asset.id,
       paletteId: asset.pixelData?.paletteId ?? DEFAULT_PIXEL_PALETTE_ID,
       frameCells,
       activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
     };
     this.goTo("canvas");
+    if (options?.asCopy) {
+      this.statusText?.setText("Copy — saving adds a new skin, the original is untouched").setColor("#4ade80");
+    }
   }
 
   // --- mode: pick-brush ----------------------------------------------------
@@ -562,6 +596,9 @@ export class SkinEditorScene extends Phaser.Scene {
     this.pixelCanvas.setTool(this.currentTool);
     this.pixelCanvas.setMirrorX(this.mirrorEnabled);
     this.pixelCanvas.setGridVisible(this.gridVisible);
+    // The canvas is thrown away and rebuilt on every frame and palette switch,
+    // so the reference has to be re-applied rather than set once.
+    this.pixelCanvas.setReferenceImage(this.referenceDataUrl);
 
     // --- left column beside the canvas: viewing aids (Zoom, Grid) — a
     // fixed x=40 regardless of canvasDisplaySize, since even the largest
@@ -590,6 +627,8 @@ export class SkinEditorScene extends Phaser.Scene {
     );
     // Clear (two-tap confirm, same shape as EditorUI's Clear/Delete Area)
     this.clearButton = this.makeSmallButton(GAME_WIDTH - 24 - 130, canvasRect.y + 80, "Clear", () => this.onClearClicked());
+
+    this.buildReferenceControls(target, canvasRect.y + 130);
   }
 
   /** Zoom just resizes PixelCanvasOverlay's on-screen CSS box (see its own
@@ -620,6 +659,128 @@ export class SkinEditorScene extends Phaser.Scene {
       this.clearArmed = false;
       this.clearButton?.setText("Clear").setStyle({ backgroundColor: "#0f3460" });
     });
+  }
+
+  /**
+   * The tracing controls: a picker of everything available to trace, and a
+   * button that stamps the chosen one in as a starting point.
+   *
+   * Reuses AssetPickerMenu — the same trigger-plus-thumbnail-grid the level
+   * editor already uses for skins, backgrounds and music — so this needs no
+   * new UI vocabulary and behaves exactly like the pickers next door.
+   */
+  private buildReferenceControls(target: EditingTarget, y: number): void {
+    // Wide enough that four tiles' labels ("Grampa walk1") don't run into each
+    // other, and far enough left to clear the canvas's own right edge at every
+    // zoom level. A narrow trigger was tried first: the dropdown inherits the
+    // trigger's width, so its labels collided and its rows ran off the bottom.
+    const width = 260;
+    const x = GAME_WIDTH - 24 - width;
+
+    this.referencePicker = new AssetPickerMenu({
+      scene: this,
+      trigger: { x, y: y - 13, width, height: 26 },
+      columns: 4,
+      itemSize: 30,
+      triggerDepth: 10,
+      dropdownDepth: 20,
+      onSelect: (id) => void this.selectReference(id),
+    });
+    this.setReferenceLabel();
+
+    // Resolved when the dropdown is built rather than up front: the saved-skin
+    // half needs a Drive read, and canvas mode is rebuilt on every frame and
+    // palette switch.
+    void this.refreshReferenceItems();
+
+    this.makeSmallButton(x, y + 32, "Trace in", () => void this.traceReferenceIn(target));
+  }
+
+  private setReferenceLabel(): void {
+    const source = this.referenceSources.find((candidate) => candidate.id === this.referenceId);
+    this.referencePicker?.setTriggerLabel(`Trace: ${source?.label ?? "None"} ▾`);
+  }
+
+  /** Built-in art first, then every saved pixel skin. Thumbnails for the
+   * built-ins are their own already-loaded textures; saved skins reuse
+   * resolveSkinThumbnails, exactly as the browse list does. */
+  private async refreshReferenceItems(): Promise<void> {
+    const sources: ReferenceSource[] = [...builtInReferenceSources(this.target?.brush.id)];
+    try {
+      const saved = await listPixelSkins();
+      const thumbsByBrush = new Map<string, Awaited<ReturnType<typeof resolveSkinThumbnails>>>();
+      for (const brushId of new Set(saved.map((entry) => entry.brushId))) {
+        thumbsByBrush.set(brushId, await resolveSkinThumbnails(this, brushId));
+      }
+      for (const { brushId, asset } of saved) {
+        const textureKey = thumbsByBrush.get(brushId)?.find((thumb) => thumb.id === asset.id)?.textureKey;
+        if (!textureKey) continue;
+        const label = skinTargets().find((brush) => brush.id === brushId)?.label ?? brushId;
+        sources.push({ id: skinReferenceId(brushId, asset.id), label: `${label} skin`, textureKey, kind: "skin" });
+      }
+    } catch (err) {
+      // The built-in half still works offline, which is the half that matters
+      // most, so this degrades rather than failing the whole picker.
+      console.error("Couldn't list saved skins for tracing:", err);
+    }
+    if (this.mode !== "canvas") return;
+
+    this.referenceSources = sources;
+    const items: AssetPickerItem[] = [
+      { id: NO_REFERENCE_ID, label: "None", textureKey: "marker-spawn" },
+      ...sources.map((source) => ({ id: source.id, label: source.label, textureKey: source.textureKey })),
+    ];
+    this.referencePicker?.setItems(items, this.referenceId);
+    this.setReferenceLabel();
+  }
+
+  /** Resolves a picked source to a data URL and shows it under the canvas. */
+  private async selectReference(id: string): Promise<void> {
+    this.referenceId = id;
+    this.referenceDataUrl = await this.resolveReferenceDataUrl(id);
+    this.pixelCanvas?.setReferenceImage(this.referenceDataUrl);
+    this.setReferenceLabel();
+    this.referencePicker?.setItems(
+      [
+        { id: NO_REFERENCE_ID, label: "None", textureKey: "marker-spawn" },
+        ...this.referenceSources.map((s) => ({ id: s.id, label: s.label, textureKey: s.textureKey })),
+      ],
+      this.referenceId,
+    );
+  }
+
+  private async resolveReferenceDataUrl(id: string): Promise<string | null> {
+    const parsed = parseReferenceId(id);
+    if (!parsed) return null;
+    if (parsed.kind === "builtin") {
+      // Phaser can hand back a data URL for any loaded texture, which is what
+      // makes the built-in art usable here at all — verified against the real
+      // frames before this was built on.
+      return this.textures.exists(parsed.parts[0]) ? this.textures.getBase64(parsed.parts[0]) : null;
+    }
+    const [brushId, assetId] = parsed.parts;
+    const skins = await loadCustomSkins();
+    const asset = skins[brushId]?.items.find((item) => item.id === assetId);
+    return asset?.imageData ?? null;
+  }
+
+  private async traceReferenceIn(target: EditingTarget): Promise<void> {
+    if (!this.referenceDataUrl || !this.pixelCanvas) {
+      this.statusText?.setText("Pick something to trace first").setColor("#ffeb3b");
+      return;
+    }
+    try {
+      // Fitted, not stretched: the built-in art isn't square (29x48 for
+      // Grampa's idle), so a plain scale-to-fill would distort what you traced
+      // relative to what the reference layer showed you.
+      const cells = await cellsFromImageFitted(this.referenceDataUrl, gridSizeFor(target.brush.id));
+      if (this.mode !== "canvas") return;
+      this.pixelCanvas.stampCells(cells);
+      this.statusText?.setText("Traced in — Undo to take it back").setColor("#4ade80");
+    } catch (err) {
+      console.error("Couldn't trace that reference in:", err);
+      this.statusText?.setText("Couldn't trace that in").setColor("#ff6666");
+    }
   }
 
   /**
