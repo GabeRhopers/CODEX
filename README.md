@@ -181,12 +181,16 @@ Open the dev server URL in a browser. Controls:
   ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
   skin library and makes it active immediately, same as an ordinary
   upload — see the Custom skins bullet below. Its own canvas has **Undo/
-  Redo** (buttons or Ctrl+Z/Ctrl+Y), **Paint/Fill/Pick** tools (Fill
+  Redo** (buttons or Ctrl+Z/Ctrl+Y), **Paint/Fill/Pick/Pan** tools (Fill
   flood-fills a same-color region; Pick samples a color already on the
-  canvas and resumes painting with it), a **Mirror** toggle (paints the
-  horizontal-mirror cell too), a **Grid** overlay, and **Zoom +/−** —
-  right-click (or a right-button drag) always erases regardless of the
-  selected tool or color, no swatch-switching needed. See "Skin Creator
+  canvas and resumes painting with it; Pan drags the view when you're
+  zoomed in), a **Mirror** toggle (paints the horizontal-mirror cell too),
+  a **Grid** overlay, and **Zoom +/− / Fit** — the drawing scales from half
+  the window up to eight times it, and once it's bigger than the window you
+  scroll to pan, Ctrl+scroll to zoom at the pointer, or drag with Pan (or
+  the middle mouse button, or two fingers). Right-click (or a right-button
+  drag) always erases regardless of the selected tool or color, no
+  swatch-switching needed. See "Skin Creator
   tools" under Art for the full 2026-08-17 pass that added all of this.
 - **Palette** (left panel): a **category chip** at the top (e.g. "Blocks
   ▾") expands into the 5 categories — Blocks, Markers, Enemies, Items,
@@ -2582,6 +2586,56 @@ one clock, so a real press is always strictly later than anything handled and a
 replay never is. Verified at both timings — 7 presses, exactly 7 moves, whether
 sent back to back or spaced out.
 
+**Zoom is a window now, not a bigger canvas (2026-08-23).** Zoom +/− grew the
+canvas itself, clamped to `[200, 320]` px in 40px steps. That is a **1.6x range
+in three clicks**, and on the 48-cell character grid it spans 4.2 to 6.7 screen
+pixels per cell — neither end enough to place one pixel with confidence, which
+is the job.
+
+The ceiling was not a bad number to be tuned. The canvas is square, its top is
+pinned at y=132, and the scene is a fixed 468px tall, so there are **336
+vertical pixels and no more**; 320 already spent them. Reclaiming every row
+above the canvas would have bought about 10%. So the model had to change: the
+window is now fixed at 320x320 and the *drawing* scales inside it, clipped by
+it, panned within it. Fit zoom is exactly the old maximum, so nothing got
+smaller — the ceiling just stopped existing.
+
+`canvasZoom.ts` holds the arithmetic, pure and unit-tested away from the DOM:
+a ladder of multipliers over fit (`[0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8]` — **16x
+against the old 1.6x**, and 53px per cell at the top instead of 6.7), a pan
+clamp with two regimes (centre it when it fits, otherwise never leave a gutter),
+and an anchor calculation that keeps the content point under the pointer fixed
+across a zoom change. Geometric steps rather than the old flat +40px, which was
+a 20% change at the bottom of its range and 12% at the top.
+
+*Panning without a gesture collision.* Left paints and right erases, so the free
+mouse gestures are the wheel and the middle button; both pan, and Ctrl/Cmd+wheel
+zooms at the pointer. Two fingers pan and pinch. A **Pan** tool joins
+Paint/Fill/Pick for touch and for a mouse with neither wheel nor middle button.
+Deliberately *not* space-drag, standard though it is — this session had already
+spent three attempts on Phaser re-delivering one physical keydown out of order
+(see the home page entry above), and a global keyboard listener owned by a DOM
+overlay is exactly that shape again.
+
+*What did not change, and why that is the point.* `cellIndexFromEvent` still
+derives the cell from `canvas.getBoundingClientRect()`, so it was already
+correct for a scaled, offset, clipped canvas without knowing either exists. The
+load-bearing e2e test zooms to 4x, pans off-centre with a real drag, and then
+asserts that clicking three spread-out points paints exactly those three cells —
+because "a click paints the pixel under it" stopped being obvious the moment the
+canvas box stopped being the window.
+
+*Layout.* Four DOM layers became a `viewportEl` (`overflow: hidden`, the border
+as an inset box-shadow so it costs no layout — a real 1px border shifts an
+absolutely-positioned child by a pixel) wrapping one `contentEl` that scales and
+moves, with the checkerboard, reference, canvas and grid filling it. Pan/zoom is
+then one position write rather than four kept in step. The checkerboard stays a
+fixed 16px on screen rather than scaling with the drawing: it answers "is this
+transparent", a question about what you can see. Grid lines stop drawing below
+4px per cell without switching the toggle off, so zooming back in restores them.
+The left column gained Fit and a `x2` readout — without it, three clicks of
+Zoom + and three of Zoom - are indistinguishable from having done nothing.
+
 **Reuse existing art: Copy as a base, and trace over a reference
 (2026-08-23).** Two ways to start from art that already exists instead of an
 empty grid.
@@ -2856,16 +2910,18 @@ each into the UI):
   region, so painting a hollow border first and then filling its interior
   never bleeds past the border. One `pointerdown` — dragging with Fill
   active doesn't repeatedly re-flood-fill every cell the pointer crosses.
-- *Zoom* — `PixelCanvasOverlay.setDisplaySize` (clamped to `[200, 320]`)
-  resizes the on-screen CSS box only, re-centered on its previous middle
-  so zooming never shifts the drawing — the 32x32 pixel buffer, `cells`,
-  and undo history are all completely untouched, unlike routing this
-  through a `goTo("canvas")` scene rebuild the way the palette switcher
-  does (which would have wiped the undo stack via `loadCells`). This
-  needed a layout change to have room to matter: v1 put Clear in a row
-  below the canvas, leaving only ~6px of vertical slack in the scene's
-  fixed 468px height — Clear (and the new Mirror toggle) moved to a
-  column beside the canvas instead, freeing the space Zoom needed.
+- *Zoom* — `setDisplaySize`, clamped to `[200, 320]`, resizing the
+  on-screen CSS box only, re-centered on its previous middle so zooming
+  never shifts the drawing; the pixel buffer, `cells` and undo history all
+  untouched, unlike routing this through a `goTo("canvas")` scene rebuild
+  the way the palette switcher does (which would have wiped the undo stack
+  via `loadCells`). This needed a layout change to have room to matter: v1
+  put Clear in a row below the canvas, leaving only ~6px of vertical slack
+  in the scene's fixed 468px height — Clear (and the new Mirror toggle)
+  moved to a column beside the canvas instead, freeing the space Zoom
+  needed. **Superseded 2026-08-23** — that range was only 1.6x end to end,
+  and no layout change could have made it more, since the canvas grew
+  inside a 336px band. See "Zoom is a window now" above.
 - *Grid overlay* — a second, sibling `<div>` layered above the canvas
   with a pure-CSS repeating-gradient grid (`background-size: calc(100% /
   32)`, so it self-aligns to cell boundaries at any zoom level with no JS

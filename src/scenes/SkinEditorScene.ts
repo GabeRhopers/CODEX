@@ -3,7 +3,8 @@ import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { AssetPickerItem, AssetPickerMenu } from "../editor/AssetPickerMenu";
 import { Brush, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
-import { PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
+import { CanvasView, PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
+import { FIT_INDEX, formatZoom, VIEWPORT_SIZE } from "../editor/canvasZoom";
 import { fitWithinTile } from "../editor/spriteFit";
 import { loadActiveProfile } from "../profile/Profile";
 import { SkinAsset } from "../skins/CustomSkins";
@@ -25,10 +26,10 @@ const BUTTON_HOVER_COLOR = 0x3a5a9c;
 const ARM_TIMEOUT_MS = 3000;
 const ROW_START_Y = 90;
 const ROW_HEIGHT = 44;
-// How much a single Zoom +/- click changes the canvas's on-screen size —
-// see PixelCanvasOverlay.setDisplaySize for the [MIN_DISPLAY_SIZE,
-// MAX_DISPLAY_SIZE] clamp this steps within.
-const ZOOM_STEP = 40;
+// Where the painting window sits. Fixed for the life of the scene: zoom moves
+// the drawing inside this box, never the box itself, so no button can be pushed
+// off the scene's 468px floor however far someone zooms in. 132 + 320 = 452.
+const CANVAS_TOP_Y = 132;
 
 type Mode = "browse" | "pick-brush" | "canvas";
 
@@ -114,7 +115,14 @@ export class SkinEditorScene extends Phaser.Scene {
   private currentTool: PixelTool = "paint";
   private mirrorEnabled = false;
   private gridVisible = false;
-  private canvasSize = 280;
+  // Zoom level and where the drawing sits inside the window. A tool preference
+  // like the fields above, and persisted for a sharper reason than the others:
+  // canvas mode is torn down and rebuilt on every frame and palette switch, so
+  // without this, zooming into a character's face and stepping to the next
+  // frame would dump you back at fit zoom every time — during tracing, which is
+  // exactly when you are stepping through frames.
+  private view: CanvasView = { zoomIndex: FIT_INDEX, panX: 0, panY: 0 };
+  private zoomReadout?: Phaser.GameObjects.Text;
   // Which reference is showing, and the data URL behind it. Both are *tool*
   // state like the fields above — deliberately kept across frame and skin
   // switches, since you generally trace the same guide across several frames
@@ -516,7 +524,19 @@ export class SkinEditorScene extends Phaser.Scene {
     fillButton.setX(pickButton.x - 6 - fillButton.width);
     const paintButton = this.makeSmallButton(0, sy + 12, "Paint", () => setTool("paint"));
     paintButton.setX(fillButton.x - 6 - paintButton.width);
-    toolButtons.push({ tool: "paint", button: paintButton }, { tool: "fill", button: fillButton }, { tool: "eyedropper", button: pickButton });
+    // Pan belongs with its siblings rather than beside Zoom, mutually exclusive
+    // with them as it is. It exists for touch and for a mouse with no wheel or
+    // middle button; everyone else pans by scrolling without switching mode.
+    // The widest palette's swatch row ends at x~777 and this row now starts at
+    // x~824, so the clearance is real but no longer generous.
+    const panButton = this.makeSmallButton(0, sy + 12, "Pan", () => setTool("pan"));
+    panButton.setX(paintButton.x - 6 - panButton.width);
+    toolButtons.push(
+      { tool: "paint", button: paintButton },
+      { tool: "fill", button: fillButton },
+      { tool: "eyedropper", button: pickButton },
+      { tool: "pan", button: panButton },
+    );
     refreshToolHighlight();
 
     // --- color swatch row (palette colors + a transparent "eraser") ---
@@ -565,23 +585,24 @@ export class SkinEditorScene extends Phaser.Scene {
     }
     refreshSwatchHighlight();
 
-    // --- the 32x32 pixel canvas itself — size is a persisted tool
-    // preference (see canvasSize's own field docstring), not always 280 ---
-    const canvasDisplaySize = this.canvasSize;
+    // --- the painting window itself. Fixed size and position: at fit zoom the
+    // drawing fills it exactly, and zooming in grows the drawing inside it
+    // rather than the window (see canvasZoom.ts for why the old grow-the-canvas
+    // model could never exceed a 1.6x range in a 468px-tall scene). ---
     const canvasRect: GameRect = {
-      x: (GAME_WIDTH - canvasDisplaySize) / 2,
-      y: 132,
-      width: canvasDisplaySize,
-      height: canvasDisplaySize,
+      x: (GAME_WIDTH - VIEWPORT_SIZE) / 2,
+      y: CANVAS_TOP_Y,
+      width: VIEWPORT_SIZE,
+      height: VIEWPORT_SIZE,
     };
-    this.pixelCanvas = new PixelCanvasOverlay(
-      this,
-      canvasRect,
-      target.frameCells[target.activeFrame],
-      () => {
+    this.pixelCanvas = new PixelCanvasOverlay({
+      scene: this,
+      viewport: canvasRect,
+      initialCells: target.frameCells[target.activeFrame],
+      onPaint: () => {
         /* live strokes need no per-cell UI feedback beyond the canvas's own redraw */
       },
-      (picked) => {
+      onColorPicked: (picked) => {
         // Eyedropper is momentary — sampling a color resumes Paint with
         // it immediately rather than requiring a manual switch back, same
         // "pick a color, keep working" flow every other pixel-art tool
@@ -590,8 +611,15 @@ export class SkinEditorScene extends Phaser.Scene {
         refreshSwatchHighlight();
         setTool("paint");
       },
-      gridSizeFor(target.brush.id),
-    );
+      gridSize: gridSizeFor(target.brush.id),
+      initialView: this.view,
+      // Fires for the wheel and drag gestures too, not just the buttons, so the
+      // readout can never disagree with what is on screen.
+      onViewChange: (view) => {
+        this.view = view;
+        this.zoomReadout?.setText(formatZoom(view.zoomIndex));
+      },
+    });
     this.pixelCanvas.setCurrentColor(this.currentColor);
     this.pixelCanvas.setTool(this.currentTool);
     this.pixelCanvas.setMirrorX(this.mirrorEnabled);
@@ -600,13 +628,24 @@ export class SkinEditorScene extends Phaser.Scene {
     // so the reference has to be re-applied rather than set once.
     this.pixelCanvas.setReferenceImage(this.referenceDataUrl);
 
-    // --- left column beside the canvas: viewing aids (Zoom, Grid) — a
-    // fixed x=40 regardless of canvasDisplaySize, since even the largest
-    // canvas (MAX_DISPLAY_SIZE, centered) still leaves this column clear
-    // (its left edge never comes closer than ~365px from x=0). ---
-    this.makeSmallButton(40, canvasRect.y + 40, "Zoom +", () => this.adjustZoom(ZOOM_STEP));
-    this.makeSmallButton(40, canvasRect.y + 80, "Zoom −", () => this.adjustZoom(-ZOOM_STEP));
-    const gridButton = this.makeSmallButton(40, canvasRect.y + 120, this.gridVisible ? "Grid: On" : "Grid: Off", () => {
+    // --- left column beside the canvas: viewing aids. Fixed at x=40, which the
+    // window's left edge (x=365) never comes near, and clear of the frame strip
+    // at x=150..246. ---
+    this.add.text(40, canvasRect.y + 6, "View", { fontSize: "11px", color: "#a6a6c8" });
+    this.makeSmallButton(40, canvasRect.y + 40, "Zoom +", () => this.adjustZoom(1));
+    this.makeSmallButton(40, canvasRect.y + 80, "Zoom −", () => this.adjustZoom(-1));
+    this.makeSmallButton(40, canvasRect.y + 120, "Fit", () => {
+      this.pixelCanvas?.fitToViewport();
+    });
+    // Where you are on the ladder, in plain multiples of "the whole sprite" —
+    // without it, three clicks of Zoom + and three of Zoom − are indistinguishable
+    // from having done nothing.
+    this.zoomReadout = this.add
+      .text(40, canvasRect.y + 152, formatZoom(this.view.zoomIndex), { fontSize: "13px", color: "#ffffff" })
+      .setOrigin(0, 0.5);
+    this.add.text(40, canvasRect.y + 172, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
+    this.add.text(40, canvasRect.y + 186, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
+    const gridButton = this.makeSmallButton(40, canvasRect.y + 220, this.gridVisible ? "Grid: On" : "Grid: Off", () => {
       this.gridVisible = !this.gridVisible;
       this.pixelCanvas?.setGridVisible(this.gridVisible);
       gridButton.setText(this.gridVisible ? "Grid: On" : "Grid: Off").setStyle({ backgroundColor: this.gridVisible ? "#3a5a9c" : "#0f3460" });
@@ -631,17 +670,15 @@ export class SkinEditorScene extends Phaser.Scene {
     this.buildReferenceControls(target, canvasRect.y + 130);
   }
 
-  /** Zoom just resizes PixelCanvasOverlay's on-screen CSS box (see its own
-   * setDisplaySize docstring) — no scene rebuild, so it can't disturb the
+  /** One step on the zoom ladder, about the middle of the window. Pure CSS
+   * inside PixelCanvasOverlay — no scene rebuild, so it can't disturb the
    * undo/redo history or drop an in-progress stroke the way routing this
-   * through goTo("canvas") (like the palette switcher does) would.
-   * `getDisplaySize()` reads back the *clamped* result so `canvasSize`
-   * only ever persists a value already known to fit the layout, however
-   * many times Zoom + is clicked past the ceiling. */
+   * through goTo("canvas") (like the palette switcher does) would. `this.view`
+   * is updated by the overlay's own onViewChange rather than here, so the
+   * persisted copy reflects the *clamped* result and matches what the wheel and
+   * drag gestures produce. */
   private adjustZoom(delta: number): void {
-    if (!this.pixelCanvas) return;
-    this.pixelCanvas.setDisplaySize(this.pixelCanvas.getDisplaySize() + delta);
-    this.canvasSize = this.pixelCanvas.getDisplaySize();
+    this.pixelCanvas?.zoomBy(delta);
   }
 
   private onClearClicked(): void {
