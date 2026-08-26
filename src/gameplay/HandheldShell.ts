@@ -61,6 +61,88 @@ const TRIM_DEPTH = 20;
 const START_WIDTH = 74;
 const START_HEIGHT = 22;
 
+/** Where PlayScene mounts its volume control, and therefore where the shell
+ * puts the recess it sits in. Kept here rather than in PlayScene so the plate
+ * and the control cannot drift apart. */
+export const VOLUME_CONTROL = { x: GAME_WIDTH / 2 - 90, y: 20, width: 180 };
+const VOLUME_HOUSING = {
+  x: VOLUME_CONTROL.x - 10,
+  y: VOLUME_CONTROL.y - 14,
+  width: VOLUME_CONTROL.width + 20,
+  height: 28,
+};
+
+/**
+ * The moulded-plastic look, in one place.
+ *
+ * Start, the Back button and the volume control all used to carry their own
+ * copies of these — Back and the volume were still wearing the old flat
+ * `#0f3460` web-panel blue while everything around them had become console
+ * hardware. Exported so a restyle moves all of them at once instead of leaving
+ * one behind, which is exactly how they drifted apart the first time.
+ */
+export const CONSOLE_BUTTON = {
+  face: 0x3a3d55,
+  faceDown: 0x5a6088,
+  edge: 0x161826,
+  label: "#c8cbe0",
+  labelDown: "#ffffff",
+};
+
+export interface ConsoleButtonOptions {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  depth: number;
+  fontSize?: string;
+  /** Degrees. Start is tilted the way a real one is; Back sits square. */
+  angle?: number;
+  onPress: () => void;
+}
+
+/**
+ * A pressable console button: filled rect, dark edge, centred label, and the
+ * fill/colour swap on press. The rect is the hit area rather than the text, so
+ * the target is the whole button — the Back button used to be a bare Text, so
+ * only the glyphs themselves were clickable.
+ */
+export function makeConsoleButton(
+  scene: Phaser.Scene,
+  options: ConsoleButtonOptions,
+): { rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text } {
+  const { x, y, width, height, label, depth, angle = 0, onPress } = options;
+
+  const rect = scene.add
+    .rectangle(x, y, width, height, CONSOLE_BUTTON.face)
+    .setStrokeStyle(2, CONSOLE_BUTTON.edge, 0.8)
+    .setAngle(angle)
+    .setScrollFactor(0)
+    .setDepth(depth)
+    .setInteractive({ useHandCursor: true });
+  const text = scene.add
+    .text(x, y, label, { fontSize: options.fontSize ?? "10px", color: CONSOLE_BUTTON.label, fontStyle: "bold" })
+    .setOrigin(0.5)
+    .setAngle(angle)
+    .setScrollFactor(0)
+    .setDepth(depth + 1);
+
+  const release = (): void => {
+    rect.setFillStyle(CONSOLE_BUTTON.face);
+    text.setColor(CONSOLE_BUTTON.label);
+  };
+  rect.on("pointerdown", () => {
+    rect.setFillStyle(CONSOLE_BUTTON.faceDown);
+    text.setColor(CONSOLE_BUTTON.labelDown);
+    onPress();
+  });
+  rect.on("pointerup", release);
+  rect.on("pointerout", release);
+
+  return { rect, text };
+}
+
 export interface HandheldShellOptions {
   /** Fired by the Start button. PlayScene pauses on it. */
   onStart: () => void;
@@ -123,6 +205,19 @@ export class HandheldShell {
       .setScrollFactor(0)
       .setDepth(TRIM_DEPTH);
 
+    // Recessed housing for the volume control PlayScene mounts in the top
+    // bezel (see its VolumeControl call) — without it the slider floats on the
+    // shell instead of reading as moulded into it. Sized to the control, at
+    // TRIM_DEPTH so it sits under the control's own depth 30.
+    scene.add
+      .graphics()
+      .fillStyle(SURROUND_COLOR, 1)
+      .fillRoundedRect(VOLUME_HOUSING.x, VOLUME_HOUSING.y, VOLUME_HOUSING.width, VOLUME_HOUSING.height, 9)
+      .lineStyle(1, BODY_EDGE_COLOR, 0.9)
+      .strokeRoundedRect(VOLUME_HOUSING.x, VOLUME_HOUSING.y, VOLUME_HOUSING.width, VOLUME_HOUSING.height, 9)
+      .setScrollFactor(0)
+      .setDepth(TRIM_DEPTH);
+
     // Speaker grille, angled the way a handheld's usually is.
     for (let i = 0; i < 4; i++) {
       scene.add
@@ -132,36 +227,27 @@ export class HandheldShell {
     }
   }
 
-  /** Start, below the face buttons — a pill, angled slightly like the real
-   * thing. Pauses the game; see PlayScene.togglePause. */
+  /**
+   * Start, at the top of the right band — angled slightly, like the real thing.
+   * Pauses the game; see PlayScene.togglePause.
+   *
+   * It used to sit *below* the face buttons, which put its top edge 7px from
+   * the bottom jump button: to a thumb that is one control, not two. The band
+   * between the Score HUD (bottom ~29) and the face diamond (top 218) is
+   * otherwise empty, so moving up buys ~87px of clearance for free. Under the
+   * screen would be the authentic spot, but FOOTER_HEIGHT leaves only 16px
+   * between the screen's bottom edge and the body's — not enough for a control.
+   */
   private drawStartButton(scene: Phaser.Scene, onStart: () => void): void {
-    const x = RIGHT_BAND.x + RIGHT_BAND.width / 2;
-    const y = CONTROL_ROW_Y + 88;
-
-    const pill = scene.add
-      .rectangle(x, y, START_WIDTH, START_HEIGHT, 0x3a3d55)
-      .setStrokeStyle(2, 0x161826, 0.8)
-      .setAngle(-12)
-      .setScrollFactor(0)
-      .setDepth(TRIM_DEPTH)
-      .setInteractive({ useHandCursor: true });
-    const label = scene.add
-      .text(x, y, "START", { fontSize: "10px", color: "#c8cbe0", fontStyle: "bold" })
-      .setOrigin(0.5)
-      .setAngle(-12)
-      .setScrollFactor(0)
-      .setDepth(TRIM_DEPTH + 1);
-
-    pill.on("pointerdown", () => {
-      pill.setFillStyle(0x5a6088);
-      label.setColor("#ffffff");
-      onStart();
+    makeConsoleButton(scene, {
+      x: RIGHT_BAND.x + RIGHT_BAND.width / 2,
+      y: SCREEN_RECT.y + 64,
+      width: START_WIDTH,
+      height: START_HEIGHT,
+      label: "START",
+      depth: TRIM_DEPTH,
+      angle: -12,
+      onPress: onStart,
     });
-    const release = (): void => {
-      pill.setFillStyle(0x3a3d55);
-      label.setColor("#c8cbe0");
-    };
-    pill.on("pointerup", release);
-    pill.on("pointerout", release);
   }
 }

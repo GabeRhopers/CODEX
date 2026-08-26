@@ -280,14 +280,16 @@ Open the dev server URL in a browser. Controls:
 - In Play mode the level sits in a **handheld console shell** — a rounded body
   with the screen recessed into a darker surround, a **D-pad** to its left, four
   **face buttons** in a SNES-style diamond to its right, and a **Start** button
-  under them. The two face buttons nearest the thumb jump; the far pair fires the
+  at the top of the right band. The two face buttons nearest the thumb jump; the far pair fires the
   PJ Thunder Hat and stay faded until you've collected one. **Start** (or **P**)
   pauses — the physics world freezes and a PAUSED card sits on the glass; press
   it again to carry on. It's refused once you've won or lost, so a pause can't
   land on top of the win screen. Around all that are the details you'd expect on
   a real one: a power LED beside the glass, a speaker grille and a RHOPERS
-  wordmark under the D-pad. Everything is clickable with a mouse too, and none of
-  it covers the level. Keyboard is unchanged:
+  wordmark under the D-pad. The **Back** button and the **volume slider** are
+  moulded to match — Back is a console button in the top-left, and the volume
+  sits in a recess in the top bezel. Everything is clickable with a mouse too,
+  and none of it covers the level. Keyboard is unchanged:
   **arrow keys / WASD** to move, **Up/W/Space** to jump
   (press again mid-air for a second jump if you've collected a Chicken
   Slipper), **X** (or the ⚡ on-screen button) to fire the PJ Thunder
@@ -2671,7 +2673,8 @@ can't do anything says so rather than reporting a press that goes nowhere.
 
 `handheld-controls.spec.ts` covers what matters: the controls drive the player,
 the shock pair is inert before the pickup and live after, Start pauses and
-resumes, Start is refused after the run ends, and **no control's bounding box
+resumes, Start is refused after the run ends, the three control clusters clear
+each other by at least 16px, and **no control's bounding box
 overlaps the screen rect** — that last one is what keeps the framing free,
 because a control creeping back over the playfield is exactly the regression
 this replaced.
@@ -2695,6 +2698,36 @@ the D-pad, and an angled **Start** pill under the face buttons. `CONTROL_ROW_Y`
 is exported from `HandheldShell` and used by *both* control clusters as well as
 by the trim, so the D-pad and the diamond can't drift apart and the shell always
 knows what its lower details have to clear.
+
+**Start moves up, and the trim catches up (2026-08-26).** Start shipped below
+the face buttons, which put its top edge **7px** from the lower jump button —
+to a thumb that is one control, not two. It now sits at the top of the right
+band (`SCREEN_RECT.y + 64`), which buys **87px** of clearance from the face
+diamond and 91px below the Score HUD; that band was empty between y=36 and
+y=218 anyway. Under the screen would be the authentic spot, but `FOOTER_HEIGHT`
+leaves only 16px between the screen's bottom edge and the body's.
+
+The suite did not catch this, because its only spatial check was against the
+*screen* — nothing compared controls to each other, and Start was not even in
+the set being checked. The new clearance test compares the three clusters
+pairwise and reports the offending gap by name; run against the old layout it
+fails with "the face and start clusters are only 7px apart". It checks
+*clusters*, not every pair, because the D-pad's five squares deliberately touch
+(that is what makes it read as one cross) and the face diamond's buttons sit a
+deliberate ~10px apart — those are single physical parts.
+
+Back and the volume slider were still wearing the flat `#0f3460` web-panel blue
+while everything around them had become moulded plastic. Both now use
+`CONSOLE_BUTTON`, exported from `HandheldShell` so Start, Back and the D-pad
+cannot drift apart again — they each carried their own copy of the same four
+colours before. Back's hit area is now the rect rather than the glyphs, so the
+whole button is clickable.
+
+The volume control is the one thing here that is **shared with MenuScene** (one
+control, two scenes, deliberately kept in sync), so the console look is an
+optional style argument PlayScene passes and the home page does not; the default
+is the original palette, byte for byte. Verified by screenshotting MenuScene
+before and after: the diff bounding box is empty.
 
 Start pauses. `togglePause` calls `physics.pause()` as well as short-circuiting
 `update()`, because Arcade integrates gravity on its own timer — a "pause" that

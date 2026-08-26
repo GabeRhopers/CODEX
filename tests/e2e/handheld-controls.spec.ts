@@ -38,7 +38,7 @@ const LEVEL = () =>
   );
 
 interface ControlBox {
-  kind: "dpad" | "face";
+  kind: "dpad" | "face" | "start";
   x: number;
   y: number;
   halfWidth: number;
@@ -50,7 +50,7 @@ interface ControlBox {
  * instead of pinning it. */
 async function controls(page: Page): Promise<ControlBox[]> {
   return page.evaluate(
-    ({ arm, radius }) => {
+    ({ arm, radius, start }) => {
       const scene = window.__debugGame!.scene.getScene("Play");
       const out: ControlBox[] = [];
       for (const child of scene.children.list) {
@@ -68,11 +68,13 @@ async function controls(page: Page): Promise<ControlBox[]> {
           out.push({ kind: "dpad", x: o.x!, y: o.y!, halfWidth: o.width! / 2, halfHeight: o.height! / 2 });
         } else if (o.type === "Arc" && o.radius === radius) {
           out.push({ kind: "face", x: o.x!, y: o.y!, halfWidth: o.radius, halfHeight: o.radius });
+        } else if (o.type === "Rectangle" && o.width === start) {
+          out.push({ kind: "start", x: o.x!, y: o.y!, halfWidth: o.width! / 2, halfHeight: o.height! / 2 });
         }
       }
       return out;
     },
-    { arm: DPAD_ARM, radius: FACE_RADIUS },
+    { arm: DPAD_ARM, radius: FACE_RADIUS, start: START_WIDTH },
   ) as Promise<ControlBox[]>;
 }
 
@@ -186,6 +188,51 @@ test("no control overlaps the screen, which is what makes the framing free", asy
     // Entirely to one side of the screen rect, or entirely above/below it.
     const clear = right <= SCREEN.x || left >= screenRight || bottom <= SCREEN.y || top >= screenBottom;
     expect(clear, `control at (${c.x}, ${c.y}) overlaps the screen`).toBe(true);
+  }
+});
+
+test("Start clears the button clusters, so a thumb can tell them apart", async ({ page }) => {
+  test.slow();
+  await startPlay(page);
+
+  // Start used to sit below the face buttons with a 7px gap to the lower jump
+  // button — close enough that one thumb press hit both. Nothing in the suite
+  // noticed, because the only spatial check was against the *screen*.
+  //
+  // The check is between *clusters*, not between every pair of controls: the
+  // D-pad's five squares deliberately touch (that is what makes it read as one
+  // cross) and the face diamond's buttons sit a deliberate ~10px apart. Those
+  // are single physical parts. What must not crowd is one part against another.
+  const MIN_GAP = 16;
+  const all = await controls(page);
+  expect(all.length).toBeGreaterThanOrEqual(8); // 3 live D-pad arms + 4 face + Start
+
+  const bounds = (kind: ControlBox["kind"]) => {
+    const group = all.filter((c) => c.kind === kind);
+    expect(group.length, `no ${kind} controls found`).toBeGreaterThan(0);
+    return {
+      kind,
+      left: Math.min(...group.map((c) => c.x - c.halfWidth)),
+      right: Math.max(...group.map((c) => c.x + c.halfWidth)),
+      top: Math.min(...group.map((c) => c.y - c.halfHeight)),
+      bottom: Math.max(...group.map((c) => c.y + c.halfHeight)),
+    };
+  };
+
+  const clusters = [bounds("dpad"), bounds("face"), bounds("start")];
+  for (let i = 0; i < clusters.length; i++) {
+    for (let j = i + 1; j < clusters.length; j++) {
+      const a = clusters[i];
+      const b = clusters[j];
+      // Positive on either axis means they are genuinely apart.
+      const gap = Math.max(
+        Math.max(a.left - b.right, b.left - a.right),
+        Math.max(a.top - b.bottom, b.top - a.bottom),
+      );
+      expect(gap, `the ${a.kind} and ${b.kind} clusters are only ${gap.toFixed(0)}px apart`).toBeGreaterThanOrEqual(
+        MIN_GAP,
+      );
+    }
   }
 });
 

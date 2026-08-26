@@ -39,7 +39,7 @@ import {
   speedMultiplierAt,
   useDoubleJump,
 } from "../gameplay/PlayerStats";
-import { HandheldShell, SCREEN_RECT } from "../gameplay/HandheldShell";
+import { HandheldShell, LEFT_BAND, makeConsoleButton, SCREEN_RECT, VOLUME_CONTROL } from "../gameplay/HandheldShell";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
@@ -540,17 +540,20 @@ export class PlayScene extends Phaser.Scene {
       void this.nextLevel(),
     );
 
-    const backLabel = this.add
-      .text(8, 8, `← Back to ${this.backDestinationLabel()} (Esc)`, {
-        fontSize: "13px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 8, y: 6 },
-      })
-      .setDepth(30)
-      .setScrollFactor(0)
-      .setInteractive({ useHandCursor: true });
-    backLabel.on("pointerdown", () => this.backToEditor());
+    // Moulded like the rest of the console rather than the flat web-panel blue
+    // it used to wear. Centred in the left band's top strip, above the D-pad —
+    // and the rect is the hit area now, so the whole button is clickable
+    // instead of only the glyphs.
+    makeConsoleButton(this, {
+      x: LEFT_BAND.x + LEFT_BAND.width / 2,
+      y: 21,
+      width: 164,
+      height: 26,
+      label: `◀ ${this.backDestinationLabel().toUpperCase()} (ESC)`,
+      depth: 30,
+      fontSize: "11px",
+      onPress: () => this.backToEditor(),
+    });
 
     // Centred on the *screen*, not the canvas — the console's glass is what
     // the message belongs on, and the canvas centre happens to be the same
@@ -572,7 +575,17 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-R", () => this.restart());
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
 
-    new VolumeControl(this, this.scale.width / 2 - 90, 20, 180, 30);
+    // Console palette, passed in rather than baked into VolumeControl: the same
+    // control is the home page's, and restyling it there was not the ask. The
+    // recess it sits in is drawn by HandheldShell, from the same constants.
+    new VolumeControl(this, VOLUME_CONTROL.x, VOLUME_CONTROL.y, VOLUME_CONTROL.width, 30, {
+      button: "#3a3d55",
+      buttonHover: "#5a6088",
+      track: 0x14161f,
+      fill: 0x4ade80, // the power LED's green, so the console reads as one piece
+      fillMuted: 0x4a4e68,
+      thumb: 0xc8cbe0,
+    });
 
     // A checkpoint carried forward by Restart (see CheckpointCoord's
     // docstring) wins outright over startingAreaKey's own Spawn-based

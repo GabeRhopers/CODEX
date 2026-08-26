@@ -4,8 +4,30 @@ import { loadAudioPrefs, saveAudioPrefs } from "./audioPrefs";
 const TRACK_HEIGHT = 6;
 const THUMB_RADIUS = 8;
 const MUTE_BUTTON_OFFSET = 34; // approximate width budgeted for the mute icon button
-const BUTTON_COLOR = "#0f3460";
-const BUTTON_HOVER_COLOR = "#3a5a9c";
+
+export interface VolumeControlStyle {
+  button: string;
+  buttonHover: string;
+  track: number;
+  fill: number;
+  fillMuted: number;
+  thumb: number;
+}
+
+/**
+ * The original look, kept as the default so MenuScene is unaffected by the
+ * console variant below — this control is shared between the two scenes (see
+ * the class comment) and restyling it outright would have quietly restyled the
+ * home page too.
+ */
+const DEFAULT_STYLE: VolumeControlStyle = {
+  button: "#0f3460",
+  buttonHover: "#3a5a9c",
+  track: 0x0f3460,
+  fill: 0x4caf50,
+  fillMuted: 0x666688,
+  thumb: 0xffffff,
+};
 
 /**
  * A small mute-toggle + draggable volume slider, reused as-is by both
@@ -38,33 +60,34 @@ export class VolumeControl {
     y: number,
     width: number,
     depth = 0,
+    private readonly style: VolumeControlStyle = DEFAULT_STYLE,
   ) {
     const prefs = loadAudioPrefs();
 
     this.muteButton = scene.add
       .text(x, y, prefs.muted ? "\u{1F507}" : "\u{1F50A}", {
         fontSize: "15px",
-        backgroundColor: BUTTON_COLOR,
+        backgroundColor: style.button,
         padding: { x: 6, y: 5 },
       })
       .setOrigin(0, 0.5)
       .setDepth(depth)
       .setInteractive({ useHandCursor: true });
     this.muteButton.on("pointerdown", () => this.toggleMute());
-    this.muteButton.on("pointerover", () => this.muteButton.setStyle({ backgroundColor: BUTTON_HOVER_COLOR }));
-    this.muteButton.on("pointerout", () => this.muteButton.setStyle({ backgroundColor: BUTTON_COLOR }));
+    this.muteButton.on("pointerover", () => this.muteButton.setStyle({ backgroundColor: style.buttonHover }));
+    this.muteButton.on("pointerout", () => this.muteButton.setStyle({ backgroundColor: style.button }));
 
     this.sliderX = x + MUTE_BUTTON_OFFSET;
     this.sliderWidth = Math.max(20, width - MUTE_BUTTON_OFFSET);
     this.trackY = y;
 
     this.track = scene.add
-      .rectangle(this.sliderX, this.trackY, this.sliderWidth, TRACK_HEIGHT, 0x0f3460)
+      .rectangle(this.sliderX, this.trackY, this.sliderWidth, TRACK_HEIGHT, style.track)
       .setOrigin(0, 0.5)
       .setDepth(depth)
       .setInteractive({ useHandCursor: true });
-    this.fill = scene.add.rectangle(this.sliderX, this.trackY, 1, TRACK_HEIGHT, 0x4caf50).setOrigin(0, 0.5).setDepth(depth);
-    this.thumb = scene.add.circle(this.sliderX, this.trackY, THUMB_RADIUS, 0xffffff).setDepth(depth + 1).setInteractive({ useHandCursor: true });
+    this.fill = scene.add.rectangle(this.sliderX, this.trackY, 1, TRACK_HEIGHT, style.fill).setOrigin(0, 0.5).setDepth(depth);
+    this.thumb = scene.add.circle(this.sliderX, this.trackY, THUMB_RADIUS, style.thumb).setDepth(depth + 1).setInteractive({ useHandCursor: true });
 
     const startDrag = (pointer: Phaser.Input.Pointer) => {
       this.dragging = true;
@@ -106,7 +129,7 @@ export class VolumeControl {
     this.muteButton.setText(muted ? "\u{1F507}" : "\u{1F50A}");
     const fillWidth = Math.max(1, this.sliderWidth * volume);
     this.fill.width = fillWidth;
-    this.fill.setFillStyle(muted ? 0x666688 : 0x4caf50);
+    this.fill.setFillStyle(muted ? this.style.fillMuted : this.style.fill);
     this.thumb.setPosition(this.sliderX + fillWidth, this.trackY);
   }
 
