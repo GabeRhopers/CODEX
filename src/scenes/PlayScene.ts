@@ -40,6 +40,7 @@ import {
   useDoubleJump,
 } from "../gameplay/PlayerStats";
 import { HandheldShell, LEFT_BAND, makeConsoleButton, SCREEN_RECT, VOLUME_CONTROL } from "../gameplay/HandheldShell";
+import { recordCompletion } from "../world/worldProgress";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
@@ -174,6 +175,11 @@ interface ActiveEnemy {
 interface WorldPlayContext {
   levelIds: string[];
   index: number;
+  /** Which world this run belongs to. Needed so a win can be banked against
+   * it and Esc can return to *that* world's map rather than the browser —
+   * optional so an older launch path (or a test) that only knows the id list
+   * still plays, it just lands back on the list. */
+  worldId?: string;
 }
 
 /** Tile coordinates (plus which area they're in — see "Sub/Up areas"
@@ -1043,13 +1049,13 @@ export class PlayScene extends Phaser.Scene {
    * backDestinationPhrase for the lowercase, mid-sentence form used in the
    * win/lose hint text. */
   private backDestinationLabel(): string {
-    if (this.world) return "Worlds";
+    if (this.world) return this.world.worldId ? "Map" : "Worlds";
     if (this.returnScene === "Templates") return "Templates";
     return "Editor";
   }
 
   private backDestinationPhrase(): string {
-    if (this.world) return "Worlds";
+    if (this.world) return this.world.worldId ? "the map" : "Worlds";
     if (this.returnScene === "Templates") return "Templates";
     return "the editor";
   }
@@ -1418,6 +1424,11 @@ export class PlayScene extends Phaser.Scene {
   private onWin(): void {
     if (this.outcome !== "playing") return;
     this.outcome = "won";
+    // Recorded here rather than on the map, because N (next level) skips the
+    // map entirely — banking it there would quietly lose every completion of
+    // anyone who plays a world straight through. recordCompletion is
+    // monotonic, so the map re-reporting the same win is harmless.
+    if (this.world?.worldId) recordCompletion(this.world.worldId, this.world.index);
     this.player.setVelocity(0, 0);
     this.applyTerminalPose("win");
     this.physics.pause();
@@ -1456,7 +1467,10 @@ export class PlayScene extends Phaser.Scene {
       this.world = undefined;
       return;
     }
-    this.scene.start("Play", { level: nextLevel, world: { levelIds: this.world.levelIds, index: nextIndex } });
+    this.scene.start("Play", {
+      level: nextLevel,
+      world: { levelIds: this.world.levelIds, index: nextIndex, worldId: this.world.worldId },
+    });
   }
 
   private onLose(): void {
@@ -1476,7 +1490,15 @@ export class PlayScene extends Phaser.Scene {
 
   private backToEditor(): void {
     this.scene.stop();
-    if (this.world) this.scene.start("WorldBrowser");
+    if (this.world?.worldId) {
+      // The index is passed only so the map can walk the marker off the node
+      // just beaten; the completion itself was banked in onWin.
+      this.scene.start("WorldMap", {
+        worldId: this.world.worldId,
+        justCompletedIndex: this.outcome === "won" ? this.world.index : undefined,
+      });
+    }
+    else if (this.world) this.scene.start("WorldBrowser");
     else if (this.returnScene) this.scene.start(this.returnScene);
     else this.scene.resume("Editor");
   }

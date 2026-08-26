@@ -68,3 +68,13 @@ export function nextStaticBackgroundId(id: StaticBackgroundId): BuiltinStaticBac
   const index = STATIC_BACKGROUNDS.findIndex((bg) => bg.id === id);
   return STATIC_BACKGROUNDS[(index + 1) % STATIC_BACKGROUNDS.length].id;
 }
+
+/** A world's backdrop, falling back the same way a level's does. Separate from
+ * `resolveStaticBackground` because a world can never be "custom" — it has
+ * nowhere to keep an uploaded image — so this is typed to return a built-in and
+ * callers get a real textureKey without a cast. */
+export function resolveWorldBackground(world: { background?: BuiltinStaticBackgroundId }): BuiltinStaticBackgroundId {
+  return world.background && STATIC_BACKGROUNDS.some((bg) => bg.id === world.background)
+    ? world.background
+    : DEFAULT_STATIC_BACKGROUND;
+}

@@ -152,22 +152,30 @@ Open the dev server URL in a browser. Controls:
 - **My Levels**: every saved level as a row (name + last-updated time)
   with **Edit** (opens it in the editor) and **Delete**. **New Level**
   and **← Back** (to the home page) are also here.
-- **Worlds** (course maker): **My Worlds** lists every saved World (name +
+- **Worlds** (world-map maker): **My Worlds** lists every saved World (name +
   level count) with **Play**, **Edit**, and **Delete**; **New World**
-  opens **World Maker** — click a saved level on the left to append it to
-  the world's play order on the right, click an entry on the right to
-  remove it, then **Save World**. World Maker has the same autosave and
+  opens **World Maker** — click a saved level on the left to drop it on the
+  **map** on the right, **drag a node** to move it to another cell, **click a
+  node** to remove it, cycle the **Map backdrop** through the four painted
+  backgrounds, then **Save World**. Paths are drawn automatically between
+  consecutive nodes, so the order you add levels *is* the route and there is
+  nothing separate to reorder. World Maker has the same autosave and
   persistent save-state indicator as the level editor (see "Autosave &
-  save-state tracking" under Art) — adding/removing a level marks it
+  save-state tracking" under Art) — adding/removing/moving a node marks it
   unsaved and autosaves a couple seconds later, and **← Back** flushes an
   unsaved change first, same as the editor's Menu button — with one
   difference: an empty world (no levels yet) never autosaves or gets a
   storage entry, matching **Save World**'s own "add at least one level
-  first" validation. **Play** runs the first level; winning a
-  level that isn't the last one shows "Level Complete!" — press **N** to
-  advance to the next level, or **R** to replay the current one; winning
-  the last level shows "World Complete!"; **Esc** at any point returns to
-  My Worlds (not the editor, since a World isn't edited through it).
+  first" validation.
+- **Play** opens the world's **map**: numbered nodes on the chosen backdrop,
+  Grampa standing on the level you are up to, beaten levels ticked and their
+  path lit, and later levels **locked** until the one before them is beaten.
+  Click the lit node to play it. Winning returns you to the map, where the
+  marker walks on to the next node — or press **N** on the win screen to skip
+  straight to the next level, and **R** to replay the current one. Progress is
+  remembered per world, so leaving and coming back resumes where you were
+  rather than restarting. **Esc** returns to the map from a level, and to My
+  Worlds from the map.
 - **Skin Creator** (a chip in the home page's footer row, not a
   5th card — see "Skin Creator" under Art for why): pick **Grampa** to paint
   the player character across its five poses (idle, walk1, walk2, jump, cast),
@@ -2747,6 +2755,49 @@ holding Right moves nothing, rather than just reading the flag. It refuses to
 engage unless `outcome === "playing"`, so a PAUSED card can never end up sitting
 on the win or lose screen, and Start can never un-pause the physics that `onWin`
 deliberately froze. **P** does the same thing from the keyboard.
+
+**Worlds become a world map (2026-08-26).** Worlds was a list — `WorldData`
+was `{id, name, levelIds[]}`, the maker was two text columns, and playing one
+chained levels back to back on **N**. Its own docstring said the quiet part:
+*"No branching paths, no visual world map, no per-level unlocking — those are
+explicitly out of scope for v1."* This is v2 of that, kept to an MVP: a grid of
+nodes, linear gating with saved progress, and a per-world backdrop.
+
+*The schema change is additive.* `levelIds` stays the source of truth for both
+content and order — paths are drawn between consecutive entries, which is why
+arranging nodes never has to also mean reordering them, and why there is no
+drag-to-reorder UI to build. `layout` and `background` join as **optional**
+fields, the same migration-free shape as `SkinAsset.name?` and
+`LevelData.skins?`: a world saved before the map existed has neither and still
+opens, auto-arranged. `layout` is keyed by **level id rather than a parallel
+array**, because a parallel array desyncs from `levelIds` on every add and
+remove — and `WorldMakerScene` already guarantees ids are unique within a world.
+
+*Only deliberate placements are stored*, and that took a bug to learn. Writing
+the resolved layout back on every refresh froze each intermediate
+auto-arrangement: adding a second level pinned the first where it had been
+centred alone, so by the third the newcomer had nowhere sensible left, fell back
+to a corner, and the path cut diagonally across the whole map. Keeping `layout`
+to what the user actually dragged lets `autoArrange` see the whole set every
+time — which is what "absent means auto" was supposed to mean.
+
+*Progress lives in localStorage*, not in the world document: two people opening
+the same world have different progress, and an author editing a world should not
+be publishing their own save file with it. `completedCount` clamps to the levels
+the world *currently* has, so editing a finished world down doesn't leave the
+marker off the end of the map.
+
+*The backdrop is drawn by the map scene rather than `StaticBackground`.* That
+class masks to the **level grid** rect specifically to stop a level's background
+bleeding into the editor's header — a problem this screen doesn't have, and a
+mask four other call sites depend on. Generalising it to earn one reuse would
+have been the worse trade.
+
+Worlds had **zero tests of any kind** before this — the Priority Matrix's
+`01 · TEST NEXT` card. It now has 38 unit tests (`worldLayout`, `worldProgress`)
+and 5 e2e covering the round trip: build and reopen, a layout-less world still
+opening and playing, the lock gate, progress surviving a trip out to the browser,
+and a world whose level was deleted elsewhere still opening.
 
 **The palette gets shades, and a place for your own colours (2026-08-26).**
 Three changes that turned out to be one problem.

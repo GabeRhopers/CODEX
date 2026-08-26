@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
-import { getLevelStorage, getWorldStorage } from "../persistence/storage";
-import { StorageAdapter } from "../persistence/StorageAdapter";
+import { getWorldStorage } from "../persistence/storage";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { WorldSummary } from "../world/WorldSchema";
 
@@ -13,9 +12,7 @@ const ROW_HEIGHT = 44;
  * one family rather than two different UIs. */
 export class WorldBrowserScene extends Phaser.Scene {
   private worldStorage: WorldStorageAdapter = getWorldStorage();
-  private levelStorage: StorageAdapter = getLevelStorage();
   private listContainer!: Phaser.GameObjects.Container;
-  private statusText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("WorldBrowser");
@@ -44,10 +41,6 @@ export class WorldBrowserScene extends Phaser.Scene {
       .on("pointerdown", () => this.scene.start("WorldMaker"));
 
     this.add.text(GAME_WIDTH / 2, 24, "My Worlds", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
-
-    this.statusText = this.add
-      .text(GAME_WIDTH / 2, ROW_START_Y - 24, "", { fontSize: "11px", color: "#a6a6c8" })
-      .setOrigin(0.5);
 
     this.listContainer = this.add.container(0, 0);
     void this.refresh();
@@ -85,7 +78,7 @@ export class WorldBrowserScene extends Phaser.Scene {
       .setOrigin(0, 0.5);
 
     const playBtn = this.makeSmallButton(GAME_WIDTH - 320, y + (ROW_HEIGHT - 8) / 2, "Play", () =>
-      void this.playWorld(world.id),
+      this.playWorld(world.id),
     );
     const editBtn = this.makeSmallButton(GAME_WIDTH - 240, y + (ROW_HEIGHT - 8) / 2, "Edit", () =>
       void this.editWorld(world.id),
@@ -113,15 +106,17 @@ export class WorldBrowserScene extends Phaser.Scene {
     return text;
   }
 
-  private async playWorld(id: string): Promise<void> {
-    const world = await this.worldStorage.load(id);
-    if (!world || world.levelIds.length === 0) return;
-    const firstLevel = await this.levelStorage.load(world.levelIds[0]);
-    if (!firstLevel) {
-      this.statusText.setText("This world's first level was deleted — edit it to fix the order.");
-      return;
-    }
-    this.scene.start("Play", { level: firstLevel, world: { levelIds: world.levelIds, index: 0 } });
+  /**
+   * Opens the world's map rather than launching its first level directly.
+   *
+   * The map is where progress lives, so entering through it is also what makes
+   * "resume where I left off" work — going straight to level 1 would restart
+   * every world on every visit, which is what this used to do. The map itself
+   * handles an empty world and a since-deleted level, so neither needs checking
+   * twice.
+   */
+  private playWorld(id: string): void {
+    this.scene.start("WorldMap", { worldId: id });
   }
 
   private async editWorld(id: string): Promise<void> {

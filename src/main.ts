@@ -10,6 +10,7 @@ import { SkinEditorScene } from "./scenes/SkinEditorScene";
 import { TemplateBrowserScene } from "./scenes/TemplateBrowserScene";
 import { WorldBrowserScene } from "./scenes/WorldBrowserScene";
 import { WorldMakerScene } from "./scenes/WorldMakerScene";
+import { WorldMapScene } from "./scenes/WorldMapScene";
 import { installTextDefaults } from "./ui/textDefaults";
 
 // Must run before any scene's create() can call scene.add.text(...) — see
@@ -56,6 +57,7 @@ const config: Phaser.Types.Core.GameConfig = {
     PlayScene,
     WorldBrowserScene,
     WorldMakerScene,
+    WorldMapScene,
     TemplateBrowserScene,
     SkinEditorScene,
   ],
