@@ -92,7 +92,10 @@ async function selectGhostBrush(page: Page): Promise<void> {
 async function chooseFirstGhostSkin(page: Page): Promise<void> {
   await selectGhostBrush(page);
   await clickByText(page, "Editor", "Skin: Built-in ▾");
-  await clickIconWithLabel(page, "Editor", "Skin 1");
+  // Skins are labelled by name now, not counted off as "Skin 1" — paintGhostSkin
+  // accepts the offered default, which for a brush with no other skins is
+  // "Ghost 1" (see skinNames.defaultSkinName).
+  await clickIconWithLabel(page, "Editor", "Ghost 1");
   await expect.poll(() => ghostIsSkinned(page)).toBe(true);
 }
 

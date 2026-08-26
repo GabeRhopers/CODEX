@@ -172,11 +172,19 @@ function entryFor(skins: CustomSkinsFile, brushId: string): SkinLibraryEntry {
  * look, and there was no way to add a skin without making that decision. Only
  * setActiveSkin moves a default now.
  */
-export async function addCustomSkin(brushId: string, imageData: string, uploadedBy: string): Promise<string> {
+export async function addCustomSkin(
+  brushId: string,
+  imageData: string,
+  uploadedBy: string,
+  /** Usually the uploaded file's own name, exactly as addBackgroundAsset and
+   * addMusicAsset already do it. Omitted leaves the skin nameless, which
+   * displaySkinName renders as the brush label. */
+  name?: string,
+): Promise<string> {
   const skins = await loadCustomSkins();
   const entry = entryFor(skins, brushId);
   const id = crypto.randomUUID();
-  const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: new Date().toISOString() };
+  const asset: SkinAsset = { id, name, imageData, uploadedBy, updatedAt: new Date().toISOString() };
   skins[brushId] = { ...entry, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;
@@ -245,6 +253,9 @@ export async function savePixelSkin(
   pixelData: PixelSkinData,
   uploadedBy: string,
   frames?: Record<string, string>,
+  /** Already sanitized by the caller (see skinNames.sanitizeSkinName) — this
+   * layer stores what it is handed rather than deciding what a blank means. */
+  name?: string,
 ): Promise<string> {
   const skins = await loadCustomSkins();
   const entry = entryFor(skins, brushId);
@@ -266,9 +277,21 @@ export async function savePixelSkin(
   const persistedFrames = frames && Object.keys(frames).length > 0 ? { ...frames } : undefined;
 
   if (targetId) {
+    // Re-saving in place keeps the same id, which is what makes a rename a
+    // rename rather than a second skin appearing beside the first. `name ??`
+    // rather than a plain assignment so a caller that doesn't handle names
+    // (there are none today, but the parameter is optional) can't blank one.
     const items = entry.items.map((item) =>
       item.id === targetId
-        ? { ...item, imageData, pixelData: persisted, frames: persistedFrames, uploadedBy, updatedAt: now }
+        ? {
+            ...item,
+            name: name ?? item.name,
+            imageData,
+            pixelData: persisted,
+            frames: persistedFrames,
+            uploadedBy,
+            updatedAt: now,
+          }
         : item,
     );
     skins[brushId] = { ...entry, items };
@@ -277,7 +300,7 @@ export async function savePixelSkin(
   }
 
   const id = crypto.randomUUID();
-  const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: now, pixelData: persisted, frames: persistedFrames };
+  const asset: SkinAsset = { id, name, imageData, uploadedBy, updatedAt: now, pixelData: persisted, frames: persistedFrames };
   skins[brushId] = { ...entry, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;

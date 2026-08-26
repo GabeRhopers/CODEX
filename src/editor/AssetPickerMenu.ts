@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { GAME_HEIGHT } from "../config/gameConfig";
 import { GameRect } from "./domOverlay";
 import { FileInputOverlay } from "./FileInputOverlay";
 
@@ -166,7 +167,24 @@ export class AssetPickerMenu {
     const totalSlots = this.items.length + (uploadAccept ? 1 : 0);
     const rows = Math.max(1, Math.ceil(totalSlots / columns));
     const panelHeight = rows * cellHeight + PANEL_PADDING * 2;
-    const panelY = trigger.y + trigger.height + 2;
+    // Below the trigger by default, but flipped above it when that would run
+    // off the bottom of the scene.
+    //
+    // This is not hypothetical tidiness. The skin picker's trigger sits at
+    // y=384 in a 468px-tall scene, so its panel starts at 412 and each row is
+    // 52px: the *second* row lands at y=472, entirely below the canvas, where
+    // it renders nowhere and cannot be clicked. One row is three slots, and the
+    // skin picker spends two of them on "Use default" and "Built-in art" — so
+    // from the moment a brush had two skins, the second was unreachable, which
+    // is exactly when naming them starts to matter. Found by an e2e test that
+    // picked a skin by name and watched nothing happen.
+    const below = trigger.y + trigger.height + 2;
+    const above = trigger.y - panelHeight - 2;
+    // Prefer below; use above when below overflows and above actually fits;
+    // otherwise clamp to the bottom edge so a panel too tall for either side
+    // still shows as much as it can rather than dropping rows into the void.
+    const panelY =
+      below + panelHeight <= GAME_HEIGHT ? below : above >= 0 ? above : Math.max(0, GAME_HEIGHT - panelHeight);
 
     const bg = this.scene.add
       .rectangle(trigger.x, panelY, trigger.width, panelHeight, PANEL_BG_COLOR)

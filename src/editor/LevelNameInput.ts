@@ -48,19 +48,30 @@ export class LevelNameInput {
   };
   private committedValue: string;
 
+  /** What a blank commit becomes, and what the field advertises itself as.
+   * Parameterised (2026-08-26) so the Skin Creator's name field can reuse this
+   * class rather than copy it — the capture-phase blur and keydown
+   * stopPropagation above are subtle enough that a second copy would mean
+   * re-introducing both bugs the next time one of them was touched. */
+  private readonly fallback: string;
+
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly rect: GameRect,
     initialValue: string,
     private readonly onChange: (value: string) => void,
+    options?: { fallback?: string; placeholder?: string },
   ) {
-    this.committedValue = initialValue.trim() || "Untitled Level";
+    this.fallback = options?.fallback ?? "Untitled Level";
+    this.committedValue = initialValue.trim() || this.fallback;
 
     this.input = document.createElement("input");
     this.input.type = "text";
     this.input.value = this.committedValue;
     this.input.maxLength = MAX_NAME_LENGTH;
-    this.input.placeholder = "Level name";
+    // Doubles as the e2e selector (getByPlaceholder), so the two fields must
+    // stay distinguishable.
+    this.input.placeholder = options?.placeholder ?? "Level name";
     this.input.style.position = "fixed";
     this.input.style.boxSizing = "border-box";
     this.input.style.background = "#0f3460";
@@ -100,7 +111,7 @@ export class LevelNameInput {
   }
 
   private commit(): void {
-    const value = this.input.value.trim() || "Untitled Level";
+    const value = this.input.value.trim() || this.fallback;
     this.input.value = value;
     if (value === this.committedValue) return;
     this.committedValue = value;

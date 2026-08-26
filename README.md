@@ -259,9 +259,10 @@ Open the dev server URL in a browser. Controls:
   edit.
 - **Custom skins**: select any Marker/Enemy/Item/Decor brush in the left
   panel, then click the **Skin** trigger below the icon grid to open a
-  submenu of small thumbnails — every skin ever uploaded for that brush,
-  plus two non-deletable entries, **Use default** and **Built-in art** —
-  or use the submenu's own **+ Upload** tile to add a new one. **The
+  submenu of small thumbnails — every skin ever made for that brush, **each
+  under its own name**, plus two non-deletable entries, **Use default** and
+  **Built-in art** — or use the submenu's own **+ Upload** tile to add a new
+  one (an upload takes the file's name). **The
   choice belongs to this level** and is saved with it, exactly like
   Background and Music: it applies to the brush's palette icon, every
   already-placed instance and gameplay *here*, and leaves your other
@@ -2629,6 +2630,52 @@ extremes, since each fixed-colour candidate passes one and fails the other.
 Verified to fail on both (1.28 and 0.00) before being accepted. Playwright hands
 back a PNG and Node has no decoder, so the page decodes its own screenshot
 through an offscreen canvas rather than adding a dependency for one measurement.
+
+**Skins get names (2026-08-26).** Skins were the only asset library without
+one. `BackgroundAsset` and `MusicAsset` have carried `name` since they were
+built and their pickers show it; a skin had `{id, imageData, uploadedBy,
+updatedAt}` and nothing else. So the level editor labelled every skin `Skin 1`,
+`Skin 2`, the Skin Creator's browse list showed the *brush* label on every row —
+three Ghost skins were three rows all reading "Ghost" — and an upload threw
+`file.name` away. Choosing between two skins meant picking one and looking at
+what happened, which made the per-level selection added three days earlier much
+less useful than it should have been.
+
+`SkinAsset.name` is **optional**, unlike the other two libraries', because those
+never existed without it and skins have real data that has none: a nameless skin
+falls back to its brush label (`displaySkinName`), which is exactly what every
+row showed before, so nothing migrates and no library entry changes appearance.
+A skin picks up a name the first time it is saved. New skins are born
+`Ghost 1`, `Ghost 2` — lowest free number, not count-plus-one, so deleting
+`Ghost 1` and drawing another doesn't produce a second `Ghost 2`. A copy becomes
+`Ghost 1 copy`, keeping the lineage readable.
+
+The name field **reuses `LevelNameInput`** rather than adding a second DOM input.
+That class carries the capture-phase `pointerdown` that makes clicking Save
+commit an in-progress edit instead of saving the previous name, and the keydown
+`stopPropagation` that stops a space in a name reaching Phaser's shortcuts — both
+found the hard way, and a copy would have quietly lost them. It gained
+`fallback` and `placeholder` options; the placeholder doubles as the e2e
+selector.
+
+*A real bug the tests found.* Picking a skin by name in the level editor did
+nothing, and the cause was mine from three days earlier. `AssetPickerMenu` always
+opened its dropdown *below* the trigger. The skin picker's trigger sits at y=384
+in a 468px-tall scene, so its panel starts at 412 and each row is 52px — **the
+second row lands at y=472, below the canvas**, rendering nowhere and clicking
+nothing. One row is three slots, and adding the second built-in entry ("Use
+default" *and* "Built-in art", which had to stop being one option) spent the
+third. From that moment a brush's second skin was unreachable — invisible until
+skins were worth having several of, which is precisely what naming them enables.
+The dropdown now flips above the trigger when below would overflow, and clamps
+to the bottom edge if neither side fits. The same overflow was waiting for the
+background and music pickers as their libraries grew.
+
+Eight e2e tests in `skin-names.spec.ts` cover create, name-and-pixels round trip,
+**rename** (asserting one entry with the same id afterwards — a rename that
+quietly forks a second skin is the likeliest silent failure), blank-name
+fallback, two skins for one brush, Copy, picking by name in a level, and a
+pre-name skin still opening under its brush label and migrating itself on save.
 
 **A level owns its skins, and a default only moves when you say so
 (2026-08-23).** A review of the whole skin path turned up three things, and the

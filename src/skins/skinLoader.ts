@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { CustomSkinsFile, SkinAsset } from "./CustomSkins";
+import { displaySkinName } from "./skinNames";
 import { LevelSkins, resolveSkinId } from "./skinSelection";
 import { baseFrameOf, framePlanFor, loopLength, resolveFrame } from "./spriteFrames";
 import { loadCustomSkins } from "./skinStorage";
@@ -173,9 +174,15 @@ export async function resolveLoopLength(targetId: string, levelSkins?: LevelSkin
   return loopLength(plan, active.frames ?? { [baseFrameOf(plan)]: active.imageData });
 }
 
-/** One thumbnail-sized entry for a brush's skin picker submenu. */
+/** One thumbnail-sized entry for a brush's skin picker submenu. Shaped to match
+ * backgroundLibraryLoader's own `{id, name, textureKey}` thumbnail, so the skin
+ * picker can label its tiles the same way the background picker already does
+ * rather than counting them off as "Skin 1", "Skin 2". `name` is already
+ * resolved through displaySkinName, so a nameless legacy skin arrives here
+ * carrying its brush label rather than an empty string. */
 export interface SkinThumbnail {
   id: string;
+  name: string;
   textureKey: string;
 }
 
@@ -187,14 +194,21 @@ export interface SkinThumbnail {
  * since the picker only ever shows one brush's skins at a time (whichever
  * one is currently selected in the palette).
  */
-export async function resolveSkinThumbnails(scene: Phaser.Scene, brushId: string): Promise<SkinThumbnail[]> {
+export async function resolveSkinThumbnails(
+  scene: Phaser.Scene,
+  brushId: string,
+  /** The brush's own label, used as the fallback name for skins saved before
+   * names existed. Optional so a caller with no Brush to hand still works; such
+   * skins then show their raw brush id, which is at least stable. */
+  brushLabel = brushId,
+): Promise<SkinThumbnail[]> {
   const skins = await loadCustomSkins();
   const entry = skins[brushId];
   if (!entry) return [];
   const thumbnails: SkinThumbnail[] = [];
   for (const item of entry.items) {
     const key = await registerTexture(scene, skinThumbTextureKey(brushId, item.id), item.imageData);
-    thumbnails.push({ id: item.id, textureKey: key });
+    thumbnails.push({ id: item.id, name: displaySkinName(item, brushLabel), textureKey: key });
   }
   return thumbnails;
 }

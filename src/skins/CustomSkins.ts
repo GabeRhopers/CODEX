@@ -35,6 +35,18 @@ export interface PixelSkinData {
 
 export interface SkinAsset {
   id: string;
+  /**
+   * What this skin is called — shown in the Skin Creator's browse list and in
+   * the level editor's skin picker. Added 2026-08-26; see skinNames.ts.
+   *
+   * Optional, unlike `BackgroundAsset.name` and `MusicAsset.name`, which are
+   * required because those libraries never existed without them. A skin without
+   * one falls back to its brush's label (`displaySkinName`), which is exactly
+   * what every row showed before, so no existing library entry changes
+   * appearance and nothing has to be migrated. A skin picks one up the next
+   * time it is saved.
+   */
+  name?: string;
   imageData: string;
   uploadedBy: string;
   updatedAt: string;

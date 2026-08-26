@@ -3,6 +3,7 @@ import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { AssetPickerItem, AssetPickerMenu } from "../editor/AssetPickerMenu";
 import { Brush, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
+import { LevelNameInput } from "../editor/LevelNameInput";
 import { CanvasView, PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { FIT_INDEX, formatZoom, VIEWPORT_SIZE } from "../editor/canvasZoom";
 import { fitWithinTile } from "../editor/spriteFit";
@@ -19,6 +20,7 @@ import {
 import { baseFrameOf, CHARACTER_SKIN_ID, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES } from "../skins/pixelPalettes";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
+import { defaultSkinName, displaySkinName, sanitizeSkinName } from "../skins/skinNames";
 import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin, setActiveSkin } from "../skins/skinStorage";
 
 const BUTTON_COLOR = 0x0f3460;
@@ -47,6 +49,12 @@ interface EditingTarget {
   brush: Brush;
   existingId?: string;
   paletteId: string;
+  /** What this skin is called. Seeded from the saved skin when re-editing, or
+   * from defaultSkinName for a new one, and updated as the name field is
+   * committed. Lives on the target rather than in a field of its own so it
+   * survives the frame/palette switches that rebuild the whole scene, exactly
+   * like frameCells does. */
+  name: string;
   /** Every frame's cells, keyed by frame name (see spriteFrames.ts). A
    * single-frame skin has exactly one entry under SINGLE_FRAME. Held here
    * rather than on the canvas because the canvas only ever holds the *one*
@@ -106,6 +114,10 @@ export class SkinEditorScene extends Phaser.Scene {
   private clearButton?: Phaser.GameObjects.Text;
   private clearArmed = false;
   private clearArmTimer?: Phaser.Time.TimerEvent;
+  /** Canvas mode's skin-name field. A DOM element, not a Phaser child, so
+   * rebuild() has to tear it down explicitly the way it does pixelCanvas —
+   * children.destroy() would leave it floating over the browse list. */
+  private nameInput?: LevelNameInput;
   private defaultButton?: Phaser.GameObjects.Text;
   private defaultArmed = false;
   private defaultArmTimer?: Phaser.Time.TimerEvent;
@@ -193,6 +205,8 @@ export class SkinEditorScene extends Phaser.Scene {
     // is what actually unhooks them.
     this.referencePicker?.destroy();
     this.referencePicker = undefined;
+    this.nameInput?.destroy();
+    this.nameInput = undefined;
     this.clearArmTimer?.remove(false);
     this.clearArmed = false;
     // Same for the other two-tap button: a rebuild throws away the Text it
@@ -329,8 +343,22 @@ export class SkinEditorScene extends Phaser.Scene {
       const icon = this.add.image(66, y + (ROW_HEIGHT - 8) / 2, textureKey).setOrigin(0.5);
       fitWithinTile(icon, 28);
     }
+    // The skin's own name leads the row. It used to be the *brush* label, so
+    // three Ghost skins were three rows all reading "Ghost" and telling them
+    // apart meant opening each one. The brush moves to a secondary label,
+    // right-aligned before the frame count, since it is still worth knowing
+    // what a skin is for.
     this.add
-      .text(90, y + (ROW_HEIGHT - 8) / 2, brush?.label ?? brushId, { fontSize: "15px", color: "#ffffff" })
+      .text(90, y + (ROW_HEIGHT - 8) / 2, displaySkinName(asset, brush?.label ?? brushId), {
+        fontSize: "15px",
+        color: "#ffffff",
+      })
+      .setOrigin(0, 0.5);
+    this.add
+      .text(GAME_WIDTH - 470, y + (ROW_HEIGHT - 8) / 2, brush?.label ?? brushId, {
+        fontSize: "11px",
+        color: "#a6a6c8",
+      })
       .setOrigin(0, 0.5);
 
     // Frame count for animated skins only, so an ordinary one-off skin's row
@@ -402,12 +430,17 @@ export class SkinEditorScene extends Phaser.Scene {
     }
 
     if (this.mode !== "browse") return; // navigated away while decoding
+    const existingName = displaySkinName(asset, brush.label);
     this.target = {
       brush,
       // Dropping the id is the entire difference between Edit and Copy: Save
       // adds a new library entry instead of overwriting, so the skin this was
       // based on survives untouched.
       existingId: options?.asCopy ? undefined : asset.id,
+      // A copy needs its own name for the same reason it needs its own id —
+      // two rows reading "Ghost 1" would be exactly the confusion names were
+      // added to remove.
+      name: options?.asCopy ? await this.nextCopyName(brush, existingName) : existingName,
       paletteId: asset.pixelData?.paletteId ?? DEFAULT_PIXEL_PALETTE_ID,
       frameCells,
       activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
@@ -415,6 +448,38 @@ export class SkinEditorScene extends Phaser.Scene {
     this.goTo("canvas");
     if (options?.asCopy) {
       this.statusText?.setText("Copy — saving adds a new skin, the original is untouched").setColor("#4ade80");
+    }
+  }
+
+  /** Every name already used by this brush's skins, so a new one can avoid
+   * them. Reads the library rather than the browse list, which only shows
+   * pixel-drawn skins — an uploaded skin's name still counts as taken. */
+  private async existingNamesFor(brush: Brush): Promise<string[]> {
+    try {
+      const skins = await loadCustomSkins();
+      return (skins[brush.id]?.items ?? []).map((item) => displaySkinName(item, brush.label));
+    } catch (err) {
+      // A name clash is a cosmetic problem; failing to open the canvas over one
+      // would not be. Fall back to the un-deduplicated default.
+      console.error("Couldn't read existing skin names:", err);
+      return [];
+    }
+  }
+
+  private async nextDefaultName(brush: Brush): Promise<string> {
+    return defaultSkinName(brush.label, await this.existingNamesFor(brush));
+  }
+
+  /** "Ghost 1" copied becomes "Ghost 1 copy", then "Ghost 1 copy 2" — keeps the
+   * lineage readable rather than renumbering into the plain sequence, where it
+   * would be indistinguishable from a skin drawn from scratch. */
+  private async nextCopyName(brush: Brush, sourceName: string): Promise<string> {
+    const taken = new Set((await this.existingNamesFor(brush)).map((name) => name.toLowerCase()));
+    const first = `${sourceName} copy`;
+    if (!taken.has(first.toLowerCase())) return first;
+    for (let n = 2; ; n++) {
+      const candidate = `${first} ${n}`;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
     }
   }
 
@@ -451,14 +516,21 @@ export class SkinEditorScene extends Phaser.Scene {
 
       const onClick = () => {
         const plan = framePlanFor(brush.id);
-        this.target = {
-          brush,
-          existingId: undefined,
-          paletteId: DEFAULT_PIXEL_PALETTE_ID,
-          frameCells: {},
-          activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
-        };
-        this.goTo("canvas");
+        // Async only to read the brush's existing names, so the default is
+        // "Ghost 2" rather than a second "Ghost 1". The canvas opens either
+        // way — existingNamesFor swallows a failed read.
+        void this.nextDefaultName(brush).then((name) => {
+          if (this.mode !== "pick-brush") return; // navigated away meanwhile
+          this.target = {
+            brush,
+            existingId: undefined,
+            name,
+            paletteId: DEFAULT_PIXEL_PALETTE_ID,
+            frameCells: {},
+            activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
+          };
+          this.goTo("canvas");
+        });
       };
       icon.on("pointerdown", onClick);
       label.setInteractive({ useHandCursor: true }).on("pointerdown", onClick);
@@ -475,9 +547,27 @@ export class SkinEditorScene extends Phaser.Scene {
     }
 
     this.addBackButton(() => this.goTo("browse"));
+    // The brush is now context rather than the headline — the name field is
+    // what identifies the skin, so "Editing: Ghost" moves out of the centre and
+    // left, into the empty band between Back and the name field.
     this.add
-      .text(GAME_WIDTH / 2, 20, `Editing: ${target.brush.label}`, { fontSize: "16px", color: "#ffffff" })
-      .setOrigin(0.5, 0);
+      .text(150, 20, `Editing: ${target.brush.label}`, { fontSize: "14px", color: "#a6a6c8" })
+      .setOrigin(0, 0);
+
+    // The name field. Reuses LevelNameInput rather than a second DOM input of
+    // its own: that class carries the capture-phase blur that makes clicking
+    // Save commit an in-progress edit (rather than saving the previous name),
+    // and the keydown stopPropagation that stops a space in a name reaching
+    // Phaser's shortcuts. Both were found the hard way; a copy would lose them.
+    this.nameInput = new LevelNameInput(
+      this,
+      { x: GAME_WIDTH / 2 - 120, y: 14, width: 240, height: 26 },
+      target.name,
+      (value) => {
+        if (this.target) this.target.name = value;
+      },
+      { fallback: target.name, placeholder: "Skin name" },
+    );
 
     // --- header right cluster: Undo, Redo, Save — Save stays at its
     // fixed spot; Redo/Undo are auto-width Text buttons (makeSmallButton
@@ -826,8 +916,16 @@ export class SkinEditorScene extends Phaser.Scene {
       for (const { brushId, asset } of saved) {
         const textureKey = thumbsByBrush.get(brushId)?.find((thumb) => thumb.id === asset.id)?.textureKey;
         if (!textureKey) continue;
-        const label = skinTargets().find((brush) => brush.id === brushId)?.label ?? brushId;
-        sources.push({ id: skinReferenceId(brushId, asset.id), label: `${label} skin`, textureKey, kind: "skin" });
+        // The skin's own name, not "Ghost skin" for every one of them — a
+        // trace list of three identical labels is no more use than a browse
+        // list of three identical rows was.
+        const brushLabel = skinTargets().find((brush) => brush.id === brushId)?.label ?? brushId;
+        sources.push({
+          id: skinReferenceId(brushId, asset.id),
+          label: displaySkinName(asset, brushLabel),
+          textureKey,
+          kind: "skin",
+        });
       }
     } catch (err) {
       // The built-in half still works offline, which is the half that matters
@@ -997,9 +1095,15 @@ export class SkinEditorScene extends Phaser.Scene {
       imageData = frames[base];
     }
 
-    void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId }, uploadedBy, frames)
+    // Sanitized here rather than in storage: this is the layer that knows what
+    // a blank should fall back to for *this* skin (its own current name, or the
+    // brush's default), the same way LevelNameInput knows about "Untitled
+    // Level". Storage just persists what it is handed.
+    const name = sanitizeSkinName(target.name, defaultSkinName(target.brush.label, []));
+
+    void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId }, uploadedBy, frames, name)
       .then((id) => {
-        this.target = { ...target, existingId: id };
+        this.target = { ...target, existingId: id, name };
         const painted = frames ? ` (${Object.keys(frames).length} frame${Object.keys(frames).length === 1 ? "" : "s"})` : "";
         // Says where it went, because as of 2026-08-23 saving deliberately
         // changes nothing anyone can see yet. Before that it silently became

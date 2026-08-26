@@ -29,7 +29,7 @@ import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musi
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { loadActiveProfile } from "../profile/Profile";
-import { loadActiveSkinId, resolveSkinTextureKeys, resolveSkinThumbnails } from "../skins/skinLoader";
+import { resolveSkinTextureKeys, resolveSkinThumbnails } from "../skins/skinLoader";
 import { addCustomSkin, removeCustomSkin, setActiveSkin } from "../skins/skinStorage";
 import { withLevelSkin } from "../skins/skinSelection";
 import { readAndDownscaleSkinImage } from "../skins/skinUpload";
@@ -976,7 +976,10 @@ export class EditorScene extends Phaser.Scene {
     }
     const uploadedBy = loadActiveProfile() ?? "unknown";
     readAndDownscaleSkinImage(file)
-      .then((dataUrl) => addCustomSkin(brush.id, dataUrl, uploadedBy))
+      // The file's own name, exactly as addBackgroundAsset and addMusicAsset
+      // already do — an upload arrived nameless until 2026-08-26 and showed up
+      // in the picker as "Skin 2".
+      .then((dataUrl) => addCustomSkin(brush.id, dataUrl, uploadedBy, file.name))
       .then((id) => {
         this.setLevelSkin(brush.id, id);
         return this.reresolveSkins();
@@ -1004,12 +1007,19 @@ export class EditorScene extends Phaser.Scene {
   private onSkinPickerOpen(): void {
     const brush = this.currentBrush;
     if (!brush.entityType) return; // EditorUI's canOpen already guards this; defensive no-op
-    void Promise.all([resolveSkinThumbnails(this, brush.id), loadActiveSkinId(brush.id)]).then(([thumbnails, defaultId]) => {
-      const defaultLabel = defaultId ? "Use default" : "Use default (built-in)";
+    void resolveSkinThumbnails(this, brush.id, brush.label).then((thumbnails) => {
+      // Just "Use default" — the "(built-in)" suffix that used to say what the
+      // default currently *was* wrapped over three lines in a 63px-wide picker
+      // cell and ran into the row beneath it. The trigger label already reports
+      // what is actually showing ("Skin: Default ▾" vs "Skin: Built-in ▾"), so
+      // the tile does not need to say it twice.
       const items: AssetPickerItem[] = [
-        { id: USE_DEFAULT_SKIN_ID, label: defaultLabel, textureKey: brush.textureKey },
+        { id: USE_DEFAULT_SKIN_ID, label: "Use default", textureKey: brush.textureKey },
         { id: BUILTIN_SKIN_ID, label: "Built-in art", textureKey: brush.textureKey },
-        ...thumbnails.map((t, i) => ({ id: t.id, label: `Skin ${i + 1}`, textureKey: t.textureKey, deletable: true })),
+        // The skin's own name, the way the background and music pickers have
+        // always labelled theirs. It was `Skin ${i + 1}`, which made choosing
+        // between two of them a matter of picking one and looking.
+        ...thumbnails.map((t) => ({ id: t.id, label: t.name, textureKey: t.textureKey, deletable: true })),
       ];
       const choice = this.level.skins?.[brush.id];
       const selected = choice === undefined ? USE_DEFAULT_SKIN_ID : (choice ?? BUILTIN_SKIN_ID);
