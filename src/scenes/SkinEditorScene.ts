@@ -24,7 +24,33 @@ import { defaultSkinName, displaySkinName, sanitizeSkinName } from "../skins/ski
 import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin, setActiveSkin } from "../skins/skinStorage";
 
 const BUTTON_COLOR = 0x0f3460;
-const BUTTON_HOVER_COLOR = 0x3a5a9c;
+/** The Text buttons take CSS strings; the Rectangles take the number above. */
+const BUTTON_HEX = "#0f3460";
+const BUTTON_HOVER_HEX = "#3a5a9c";
+/**
+ * Selected, and selected-while-hovered.
+ *
+ * These exist because one colour served as *both* the hover colour and the
+ * selected colour, which broke selection twice over: an armed tool looked
+ * exactly like a tool you happened to be pointing at, and makeSmallButton's
+ * pointerout reset every button to the unselected colour unconditionally — so
+ * hovering the armed tool and moving away rendered it inactive until you
+ * clicked something else.
+ *
+ * The amber is deliberately nowhere near the hover blue, and is the same family
+ * as the ring around the selected colour swatch, so "selected" reads as one
+ * language across the screen. The level editor already worked this way
+ * (EditorUI's ERASER_ACTIVE_COLOR / ERASER_ACTIVE_HOVER_COLOR pair); this is
+ * that pattern, not a new one.
+ */
+const SELECTED_COLOR = "#8a6d1f";
+const SELECTED_HOVER_COLOR = "#b8912c";
+/** SELECTED_COLOR as a number, for Rectangle fills. */
+const SELECTED_FILL = 0x8a6d1f;
+/** The ring drawn around whichever member of an exclusive group is active, so
+ * selection is a shape and not only a colour — the same idea as EditorUI's
+ * `selectedOutline` on the brush grid. */
+const SELECTED_RING_COLOR = 0xffc93c;
 const ARM_TIMEOUT_MS = 3000;
 const ROW_START_Y = 90;
 const ROW_HEIGHT = 44;
@@ -250,27 +276,50 @@ export class SkinEditorScene extends Phaser.Scene {
       .text(24, 20, "← Back", {
         fontSize: "14px",
         color: "#ffffff",
-        backgroundColor: "#0f3460",
+        backgroundColor: BUTTON_HEX,
         padding: { x: 10, y: 6 },
       })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", onClick);
   }
 
-  private makeSmallButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
+  /**
+   * A small text button.
+   *
+   * `isActive` is what makes selection survive a hover. Without it, pointerout
+   * reset the background unconditionally, so pointing at the armed tool and
+   * moving away made it look unarmed — see SELECTED_COLOR. Pass it for anything
+   * that carries state (the tool row, Grid, Mirror); omit it for plain actions
+   * like Save.
+   */
+  private makeSmallButton(
+    x: number,
+    yMid: number,
+    label: string,
+    onClick: () => void,
+    isActive?: () => boolean,
+  ): Phaser.GameObjects.Text {
+    const idle = (): string => (isActive?.() ? SELECTED_COLOR : BUTTON_HEX);
+    const hover = (): string => (isActive?.() ? SELECTED_HOVER_COLOR : BUTTON_HOVER_HEX);
     const text = this.add
       .text(x, yMid, label, {
         fontSize: "12px",
         color: "#ffffff",
-        backgroundColor: "#0f3460",
+        backgroundColor: idle(),
         padding: { x: 10, y: 6 },
       })
       .setOrigin(0, 0.5)
       .setInteractive({ useHandCursor: true });
     text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: "#0f3460" }));
+    text.on("pointerover", () => text.setStyle({ backgroundColor: hover() }));
+    text.on("pointerout", () => text.setStyle({ backgroundColor: idle() }));
     return text;
+  }
+
+  /** Repaints a stateful button to its resting look — call after the state it
+   * reflects changes, since the button only re-reads `isActive` on hover. */
+  private refreshButton(button: Phaser.GameObjects.Text, active: boolean): void {
+    button.setStyle({ backgroundColor: active ? SELECTED_COLOR : BUTTON_HEX });
   }
 
   // --- mode: browse ------------------------------------------------------
@@ -588,10 +637,15 @@ export class SkinEditorScene extends Phaser.Scene {
     const paletteRowWidth = PIXEL_PALETTES.length * (paletteButtonWidth + 8) - 8;
     let px = (GAME_WIDTH - paletteRowWidth) / 2;
     for (const p of PIXEL_PALETTES) {
+      const activePalette = p.id === palette.id;
       const bg = this.add
-        .rectangle(px, 62, paletteButtonWidth, 24, p.id === palette.id ? BUTTON_HOVER_COLOR : BUTTON_COLOR)
+        .rectangle(px, 62, paletteButtonWidth, 24, activePalette ? SELECTED_FILL : BUTTON_COLOR)
         .setOrigin(0, 0)
         .setInteractive({ useHandCursor: true });
+      // The open palette gets the same ring the armed tool and the chosen
+      // colour get, rather than the hover blue it used to wear — which made the
+      // open palette indistinguishable from one you were merely pointing at.
+      if (activePalette) bg.setStrokeStyle(2, SELECTED_RING_COLOR);
       this.add.text(px + paletteButtonWidth / 2, 74, p.name, { fontSize: "11px", color: "#ffffff" }).setOrigin(0.5);
       bg.on("pointerdown", () => {
         if (!this.target || !this.pixelCanvas || p.id === this.target.paletteId) return;
@@ -621,9 +675,21 @@ export class SkinEditorScene extends Phaser.Scene {
     const sy = 96;
     const TOOL_GAP = 6;
     const toolButtons: { tool: PixelTool; button: Phaser.GameObjects.Text }[] = [];
+    // A ring around the armed tool, so which one is live is a shape and not
+    // only a fill colour. Sized and placed by refreshToolHighlight once the
+    // buttons exist and have rendered widths.
+    const toolRing = this.add
+      .rectangle(0, 0, 10, 10)
+      .setOrigin(0, 0.5)
+      .setStrokeStyle(2, SELECTED_RING_COLOR)
+      .setFillStyle()
+      .setVisible(false);
     const refreshToolHighlight = (): void => {
       for (const { tool, button } of toolButtons) {
-        button.setStyle({ backgroundColor: tool === this.currentTool ? "#3a5a9c" : "#0f3460" });
+        const active = tool === this.currentTool;
+        this.refreshButton(button, active);
+        if (!active) continue;
+        toolRing.setPosition(button.x - 2, button.y).setSize(button.width + 4, button.height + 4).setVisible(true);
       }
     };
     const setTool = (tool: PixelTool): void => {
@@ -643,7 +709,7 @@ export class SkinEditorScene extends Phaser.Scene {
     ];
     let toolRight = GAME_WIDTH - 24;
     for (const { tool, label } of toolSpecs) {
-      const button = this.makeSmallButton(0, sy + 12, label, () => setTool(tool));
+      const button = this.makeSmallButton(0, sy + 12, label, () => setTool(tool), () => this.currentTool === tool);
       button.setX(toolRight - button.width);
       toolRight = button.x - TOOL_GAP;
       toolButtons.push({ tool, button });
@@ -769,11 +835,18 @@ export class SkinEditorScene extends Phaser.Scene {
       .setOrigin(0, 0.5);
     this.add.text(40, canvasRect.y + 172, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
     this.add.text(40, canvasRect.y + 186, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
-    const gridButton = this.makeSmallButton(40, canvasRect.y + 220, this.gridVisible ? "Grid: On" : "Grid: Off", () => {
-      this.gridVisible = !this.gridVisible;
-      this.pixelCanvas?.setGridVisible(this.gridVisible);
-      gridButton.setText(this.gridVisible ? "Grid: On" : "Grid: Off").setStyle({ backgroundColor: this.gridVisible ? "#3a5a9c" : "#0f3460" });
-    });
+    const gridButton = this.makeSmallButton(
+      40,
+      canvasRect.y + 220,
+      this.gridVisible ? "Grid: On" : "Grid: Off",
+      () => {
+        this.gridVisible = !this.gridVisible;
+        this.pixelCanvas?.setGridVisible(this.gridVisible);
+        gridButton.setText(this.gridVisible ? "Grid: On" : "Grid: Off");
+        this.refreshButton(gridButton, this.gridVisible);
+      },
+      () => this.gridVisible,
+    );
 
     // --- right column beside the canvas: actions that affect the
     // drawing (Mirror, Clear) — same "always clear of the canvas at any
@@ -785,8 +858,10 @@ export class SkinEditorScene extends Phaser.Scene {
       () => {
         this.mirrorEnabled = !this.mirrorEnabled;
         this.pixelCanvas?.setMirrorX(this.mirrorEnabled);
-        mirrorButton.setText(this.mirrorEnabled ? "Mirror: On" : "Mirror: Off").setStyle({ backgroundColor: this.mirrorEnabled ? "#3a5a9c" : "#0f3460" });
+        mirrorButton.setText(this.mirrorEnabled ? "Mirror: On" : "Mirror: Off");
+        this.refreshButton(mirrorButton, this.mirrorEnabled);
       },
+      () => this.mirrorEnabled,
     );
     // Clear (two-tap confirm, same shape as EditorUI's Clear/Delete Area)
     this.clearButton = this.makeSmallButton(GAME_WIDTH - 24 - 130, canvasRect.y + 80, "Clear", () => this.onClearClicked());
@@ -818,13 +893,13 @@ export class SkinEditorScene extends Phaser.Scene {
       this.defaultButton.setText("For every level?").setStyle({ backgroundColor: "#aa3333" });
       this.defaultArmTimer = this.time.delayedCall(ARM_TIMEOUT_MS, () => {
         this.defaultArmed = false;
-        this.defaultButton?.setText("Set as default").setStyle({ backgroundColor: "#0f3460" });
+        this.defaultButton?.setText("Set as default").setStyle({ backgroundColor: BUTTON_HEX });
       });
       return;
     }
     this.defaultArmTimer?.remove(false);
     this.defaultArmed = false;
-    this.defaultButton.setText("Set as default").setStyle({ backgroundColor: "#0f3460" });
+    this.defaultButton.setText("Set as default").setStyle({ backgroundColor: BUTTON_HEX });
     const { brush, existingId } = this.target;
     void setActiveSkin(brush.id, existingId)
       .then(() => this.statusText?.setText(`${brush.label}: default set for every level`).setColor("#4ade80"))
@@ -850,7 +925,7 @@ export class SkinEditorScene extends Phaser.Scene {
     if (this.clearArmed) {
       this.clearArmTimer?.remove(false);
       this.clearArmed = false;
-      this.clearButton.setText("Clear").setStyle({ backgroundColor: "#0f3460" });
+      this.clearButton.setText("Clear").setStyle({ backgroundColor: BUTTON_HEX });
       this.pixelCanvas?.clearAll();
       return;
     }
@@ -858,7 +933,7 @@ export class SkinEditorScene extends Phaser.Scene {
     this.clearButton.setText("Clear?").setStyle({ backgroundColor: "#aa3333" });
     this.clearArmTimer = this.time.delayedCall(ARM_TIMEOUT_MS, () => {
       this.clearArmed = false;
-      this.clearButton?.setText("Clear").setStyle({ backgroundColor: "#0f3460" });
+      this.clearButton?.setText("Clear").setStyle({ backgroundColor: BUTTON_HEX });
     });
   }
 
@@ -1022,9 +1097,12 @@ export class SkinEditorScene extends Phaser.Scene {
       const painted = hasPaintedCells(target.frameCells[name]);
       const active = name === target.activeFrame;
       const bg = this.add
-        .rectangle(x, y, buttonWidth, 26, active ? BUTTON_HOVER_COLOR : painted ? BUTTON_COLOR : 0x16213e)
+        .rectangle(x, y, buttonWidth, 26, active ? SELECTED_FILL : painted ? BUTTON_COLOR : 0x16213e)
         .setOrigin(0, 0)
         .setInteractive({ useHandCursor: true });
+      // Same ring as the armed tool and the open palette — the frame you are
+      // drawing on used to be marked with the hover blue alone.
+      if (active) bg.setStrokeStyle(2, SELECTED_RING_COLOR);
       // An unpainted frame is dimmed and dotted, so "which poses have I
       // actually drawn" is answerable at a glance instead of by clicking
       // through all five.
