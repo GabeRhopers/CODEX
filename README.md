@@ -2756,6 +2756,26 @@ engage unless `outcome === "playing"`, so a PAUSED card can never end up sitting
 on the win or lose screen, and Start can never un-pause the physics that `onWin`
 deliberately froze. **P** does the same thing from the keyboard.
 
+**The save/reopen flake, finally named (2026-08-26).** Three specs
+(`skin-roundtrip`, `skin-reuse`, `skin-names`) had been failing on CI on and off
+for days without ever being root-caused. The `waitForSkinCanvas` diagnostic
+added earlier for exactly this purpose is what cracked it: every failure
+reported the same state — **`mode=browse status="" target=<set>`**.
+
+That combination only has one explanation. `openForEditing` had got far enough
+to be decoding, but never reached `goTo("canvas")`, and the catch never ran
+either — so nothing rejected. `cellsFromPngDataUrl` awaited `image.onload` with
+**no timeout**, and a promise with neither a `load` nor an `error` event never
+settles. It bit multi-frame skins specifically because those decode one PNG per
+painted frame, sequentially — four chances to lose an event instead of one — and
+they have no `cells` fallback since that redundant array was dropped.
+
+Both decode paths now share one bounded `loadImage`. The timeout does not make a
+lost event impossible; it makes it **sayable** — a rejection reaches the catch
+that already knows how to write "Couldn't open that skin" to the browse-mode
+status line, and leaves the list usable so it can be retried, instead of Edit
+looking like a dead button with nothing in the console.
+
 **Worlds become a world map (2026-08-26).** Worlds was a list — `WorldData`
 was `{id, name, levelIds[]}`, the maker was two text columns, and playing one
 chained levels back to back on **N**. Its own docstring said the quiet part:

@@ -21,6 +21,42 @@ function toHexByte(value: number): string {
   return value.toString(16).padStart(2, "0");
 }
 
+/** Generous next to a data: URL decode, which is local and normally instant —
+ * this is a stuck-forever backstop, not a performance budget, and a CI runner
+ * under load is exactly where a slow-but-fine decode happens. */
+const DECODE_TIMEOUT_MS = 10_000;
+
+/**
+ * Decodes a data URL into an Image, **bounded**.
+ *
+ * Both decode paths below used to await `onload` with no timeout, which means
+ * the promise can simply never settle: if neither `load` nor `error` fires,
+ * every caller waits forever. SkinEditorScene.openForEditing is where that
+ * hurts — it awaits one of these per painted frame, so a multi-frame skin
+ * decodes four in a row, and a single lost event leaves the Skin Creator in
+ * browse mode with its target already set, no status text, and Edit looking
+ * like a dead button with nothing in the console. That is exactly the state a
+ * long-running CI flake reported: `mode=browse status="" target=<set>`.
+ *
+ * Rejecting turns that silent hang into the visible "Couldn't open that skin"
+ * message openForEditing's catch already knows how to show, leaving the browse
+ * list usable so it can be retried. It does not make a lost event impossible —
+ * it makes it sayable, which is what the un-diagnosable version was not.
+ */
+function loadImage(dataUrl: string, errorMessage: string): Promise<HTMLImageElement> {
+  const image = new Image();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out decoding that image")), DECODE_TIMEOUT_MS);
+    const settle = (fn: () => void) => () => {
+      clearTimeout(timer);
+      fn();
+    };
+    image.onload = settle(() => resolve(image));
+    image.onerror = settle(() => reject(new Error(errorMessage)));
+    image.src = dataUrl;
+  });
+}
+
 /**
  * Decodes `dataUrl` into a flat, row-major array of `gridSize * gridSize`
  * hex colors, with `null` for transparent cells.
@@ -32,12 +68,7 @@ function toHexByte(value: number): string {
  * silently corrupt the canvas it seeds.
  */
 export async function cellsFromPngDataUrl(dataUrl: string, gridSize: number): Promise<(string | null)[]> {
-  const image = new Image();
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error("That skin's image couldn't be decoded"));
-    image.src = dataUrl;
-  });
+  const image = await loadImage(dataUrl, "That skin's image couldn't be decoded");
 
   const canvas = document.createElement("canvas");
   canvas.width = gridSize;
@@ -113,12 +144,7 @@ export function hasPaintedCells(cells: readonly (string | null)[] | undefined): 
  * contain`), so what you trace over is what you get.
  */
 export async function cellsFromImageFitted(dataUrl: string, gridSize: number): Promise<(string | null)[]> {
-  const image = new Image();
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error("That image couldn't be decoded"));
-    image.src = dataUrl;
-  });
+  const image = await loadImage(dataUrl, "That image couldn't be decoded");
 
   const canvas = document.createElement("canvas");
   canvas.width = gridSize;

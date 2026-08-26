@@ -79,16 +79,25 @@ async function winCurrentLevel(page: Page): Promise<void> {
 test("a world built in the maker saves its map and reopens with the same nodes", async ({ page }) => {
   test.slow();
   await gotoApp(page);
-  await seedLevels(page, LEVELS);
+  const ids = await seedLevels(page, LEVELS);
 
   await clickByText(page, "Menu", "Worlds");
   await clickByText(page, "WorldBrowser", "New World");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMaker"));
 
-  // Wait for each add to land before reaching for the next name. The maker's
-  // refresh is async and destroys every row to rebuild them, so clicking
-  // straight through resolves a point on a Text that is gone by the time the
-  // click arrives — which silently drops a level rather than failing loudly.
+  // Wait for each add to *settle* before reaching for the next name.
+  //
+  // The maker pushes the id synchronously but rebuilds its available list in an
+  // async refresh, and that rebuild removes the level just added — so every row
+  // below it shifts up one. Clicking straight through resolves a point against
+  // the old rows and lands on the wrong level once the rebuild arrives.
+  //
+  // Waiting on `levelIds.length` is not enough, and getting that wrong is what
+  // made this pass locally and fail on CI: the push is synchronous, so the
+  // length is already right *before* the list settles, and a click that adds
+  // the wrong level still satisfies a length check. So this waits on the exact
+  // ids, in order, plus the row count — which fails loudly on a misplaced click
+  // instead of carrying a wrong world forward.
   for (const [i, name] of LEVELS.entries()) {
     await clickByText(page, "WorldMaker", name);
     await expect
@@ -96,11 +105,12 @@ test("a world built in the maker saves its map and reopens with the same nodes",
         page.evaluate(() => {
           const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
             world: { levelIds: string[] };
+            availableContainer: { list: unknown[] };
           };
-          return scene.world.levelIds.length;
+          return { ids: scene.world.levelIds.join(","), rows: scene.availableContainer.list.length };
         }),
       )
-      .toBe(i + 1);
+      .toEqual({ ids: ids.slice(0, i + 1).join(","), rows: Math.max(1, LEVELS.length - i - 1) });
   }
 
   await clickByText(page, "WorldMaker", "Save World");
