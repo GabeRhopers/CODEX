@@ -277,7 +277,12 @@ Open the dev server URL in a browser. Controls:
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first, in any of Main/Sub/Up (they don't
   both need to be in the same area); enemies and items are optional.
-- In Play mode: **arrow keys / WASD** to move, **Up/W/Space** to jump
+- In Play mode the level sits in a **handheld console shell** — screen in the
+  middle, a **D-pad** to its left, four **face buttons** in a SNES-style diamond
+  to its right. The two nearest the thumb jump; the far pair fires the PJ
+  Thunder Hat and stay faded until you've collected one. Everything is clickable
+  with a mouse too, and none of it covers the level. Keyboard is unchanged:
+  **arrow keys / WASD** to move, **Up/W/Space** to jump
   (press again mid-air for a second jump if you've collected a Chicken
   Slipper), **X** (or the ⚡ on-screen button) to fire the PJ Thunder
   Hat's shock, if you've collected one — see "Power-ups" under Art for
@@ -2630,6 +2635,39 @@ extremes, since each fixed-colour candidate passes one and fails the other.
 Verified to fail on both (1.28 and 0.00) before being accepted. Playwright hands
 back a PNG and Node has no decoder, so the page decodes its own screenshot
 through an offscreen canvas rather than adding a dependency for one measurement.
+
+**Test Play gets a console shell (2026-08-26).** The on-screen controls were
+four translucent circles floating *over* the playfield — the bottom corners of
+the level, permanently half-obscured by the things you press to play it.
+
+They never needed to be there. PlayScene's camera **never scrolls** (no
+`setBounds`, no `startFollow`, no `scrollX` anywhere in the scene) and every
+level the app can produce is exactly `GRID_COLS` wide — `createEmptyLevel`
+defaults to it and nothing passes anything else, and all six bundled templates
+measure 20 columns. So the level always occupies exactly one rectangle,
+`(190, 56, 640, 384)`, and the ~190px to its left and ~220px to its right were
+simply empty. Checking that first is what turned "add a fake console bezel" from
+a cost into a free reframing: nothing gives up any playfield.
+
+So the bands became the console body: D-pad on the left, four face buttons in a
+diamond on the right, a recessed bezel around the screen and a green power LED.
+`SCREEN_RECT` is derived from `GRID_ORIGIN_X/Y` and `GRID_COLS/ROWS` rather than
+hardcoded, so if the grid ever moves the bezel moves with it instead of quietly
+cropping the level.
+
+*Four buttons, two actions.* The near pair (right and bottom) both jump, the far
+pair both fire the shock — mirroring, the way A and B both mean "act" on every
+SNES platformer. Inventing two more actions to fill the diamond would have been
+the worse answer. The D-pad's Down arm is drawn and inert for the same reason: a
+three-armed D-pad looks broken, and this game has no duck. The shock pair fades
+to 25% and ignores presses until the Thunder Hat is collected, so a button that
+can't do anything says so rather than reporting a press that goes nowhere.
+
+`handheld-controls.spec.ts` covers the three things that matter: the controls
+drive the player, the shock pair is inert before the pickup and live after, and
+**no control's bounding box overlaps the screen rect** — that last one is what
+keeps the framing free, because a control creeping back over the playfield is
+exactly the regression this replaced.
 
 **Skins get names (2026-08-26).** Skins were the only asset library without
 one. `BackgroundAsset` and `MusicAsset` have carried `name` since they were

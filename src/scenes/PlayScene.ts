@@ -39,6 +39,7 @@ import {
   speedMultiplierAt,
   useDoubleJump,
 } from "../gameplay/PlayerStats";
+import { HandheldShell } from "../gameplay/HandheldShell";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
@@ -461,6 +462,9 @@ export class PlayScene extends Phaser.Scene {
     });
 
     this.input$ = createPlayerInput(this);
+    // Body first, controls second: the shell is pure decoration in the bands
+    // beside the level, and the controls sit on top of it.
+    new HandheldShell(this);
     this.touch = new TouchControls(this);
 
     this.hud = this.add
@@ -1057,6 +1061,10 @@ export class PlayScene extends Phaser.Scene {
       useDoubleJump(this.stats);
     }
 
+    // Keeps the two shock buttons showing whether they can actually do
+    // anything — they are drawn either way so the diamond never changes
+    // shape, but a faded pair reads as "not yet" rather than as broken.
+    this.touch.setAttackEnabled(this.stats.hasThunderHat);
     const attackDown = isAttackPressed(this.input$, touch);
     const justPressedAttack = attackDown && !this.attackWasDown;
     this.attackWasDown = attackDown;

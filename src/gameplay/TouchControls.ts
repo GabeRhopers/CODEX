@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GAME_WIDTH, GRID_ORIGIN_Y, GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
+import { LEFT_BAND, RIGHT_BAND, SCREEN_RECT } from "./HandheldShell";
 
 export interface TouchControlState {
   left: boolean;
@@ -8,60 +8,169 @@ export interface TouchControlState {
   attack: boolean;
 }
 
-const BUTTON_RADIUS = 32;
-const BUTTON_ALPHA = 0.35;
-const MARGIN = 56;
+/**
+ * The handheld's controls: a D-pad left of the screen, four face buttons in a
+ * diamond to its right (see HandheldShell for the body they sit in).
+ *
+ * These used to be four translucent circles floating *over* the playfield,
+ * because the level looked like it filled the canvas. It doesn't: the camera
+ * never scrolls and every level is exactly GRID_COLS wide, so there are ~190px
+ * to the left of the screen and ~220px to the right that were simply empty.
+ * Moving the controls there stops them covering the level at all, and is what
+ * makes the console framing free rather than a trade.
+ *
+ * Still OR'd into keyboard input by PlayerController rather than replacing it,
+ * and still genuinely clickable on a mouse, so there is no touch-vs-desktop
+ * detection to get wrong. Each control tracks pointerup *and* pointerout so a
+ * finger or cursor sliding off releases it.
+ */
 
-// The level's own visible height, not GAME_HEIGHT — GAME_HEIGHT is taller
-// than the grid to fit the editor's header/footer/side panels (see
-// gameConfig.ts), and PlayScene renders no header/footer bands of its own
-// into that reserved space, so anchoring to GAME_HEIGHT stranded these
-// buttons deep in the dead space below the actual level content.
-const PLAYABLE_HEIGHT = GRID_ROWS * TILE_SIZE;
+// --- D-pad, centred in the left band ---------------------------------------
+const DPAD_CENTER = { x: LEFT_BAND.x + LEFT_BAND.width / 2, y: SCREEN_RECT.y + SCREEN_RECT.height - 130 };
+const DPAD_ARM = 34; // both the length of an arm and the width of the cross
+const DPAD_FACE = 0x3a3d55;
+const DPAD_FACE_DOWN = 0x5a6088;
 
-/** On-screen left/right/jump buttons for PlayScene, OR'd into keyboard
- * input in PlayerController rather than replacing it — harmless (and
- * genuinely tappable, not just decorative) on a mouse too, so there's no
- * touch-vs-desktop device detection to get wrong. Semi-transparent and
- * pinned to the corners via setScrollFactor(0) so they read as an overlay,
- * not part of the level. Each button tracks its own pointer id so a finger
- * sliding off still releases it (pointerup/pointerout), and a second
- * simultaneous finger on another button works too — see main.ts's
- * `input.activePointers` for the multi-touch budget this needs. */
+// --- face buttons, centred in the right band -------------------------------
+const FACE_CENTER = { x: RIGHT_BAND.x + RIGHT_BAND.width / 2, y: DPAD_CENTER.y };
+const FACE_RADIUS = 26;
+const FACE_OFFSET = 44;
+/** Jump sits on the two buttons nearest the thumb (right and bottom), the way
+ * A and B both mean "act" on every SNES platformer; the shock takes the far
+ * pair. Two actions across four buttons is mirroring, not padding — inventing
+ * two more actions to fill the diamond would be the worse answer. */
+const JUMP_COLOR = 0x3a5a9c;
+const JUMP_COLOR_DOWN = 0x6d92e0;
+const ATTACK_COLOR = 0xb8862b;
+const ATTACK_COLOR_DOWN = 0xe8b45a;
+
+const CONTROL_DEPTH = 40;
+/** How faded the shock buttons are before the Thunder Hat is collected — they
+ * are still drawn, so the diamond doesn't change shape mid-level, but they read
+ * as unavailable and ignore presses. */
+const DISABLED_ALPHA = 0.25;
+
 export class TouchControls {
   private state: TouchControlState = { left: false, right: false, jump: false, attack: false };
+  /** The two shock buttons' circles, so their fill can be reset when the
+   * ability goes away mid-press. Their labels are tracked separately because a
+   * Text has no setFillStyle — only the alpha applies to both. */
+  private readonly attackCircles: { circle: Phaser.GameObjects.Arc; base: number }[] = [];
+  private readonly attackLabels: Phaser.GameObjects.Text[] = [];
+  private attackEnabled = true;
 
   constructor(scene: Phaser.Scene) {
-    const y = GRID_ORIGIN_Y + PLAYABLE_HEIGHT - MARGIN;
-    this.makeButton(scene, MARGIN, y, "◀", (down) => (this.state.left = down));
-    this.makeButton(scene, MARGIN + BUTTON_RADIUS * 2 + 16, y, "▶", (down) => (this.state.right = down));
-    this.makeButton(scene, GAME_WIDTH - MARGIN, y, "▲", (down) => (this.state.jump = down));
-    // Stacked directly above Jump rather than beside it — there's no
-    // free horizontal room on the right edge once Jump's own margin is
-    // accounted for, and stacking keeps both reachable by the same thumb.
-    this.makeButton(scene, GAME_WIDTH - MARGIN, y - (BUTTON_RADIUS * 2 + 16), "⚡", (down) => (this.state.attack = down));
+    this.buildDpad(scene);
+    this.buildFaceButtons(scene);
   }
 
   get(): TouchControlState {
     return this.state;
   }
 
-  private makeButton(scene: Phaser.Scene, x: number, y: number, label: string, setDown: (down: boolean) => void): void {
-    const circle = scene.add
-      .circle(x, y, BUTTON_RADIUS, 0xffffff, BUTTON_ALPHA)
-      .setStrokeStyle(2, 0xffffff, 0.6)
-      .setScrollFactor(0)
-      .setDepth(40)
-      .setInteractive({ useHandCursor: true });
-    scene.add
-      .text(x, y, label, { fontSize: "22px", color: "#ffffff" })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(41)
-      .setAlpha(0.8);
+  /**
+   * Shows whether the shock is currently usable. Called each frame by PlayScene
+   * from `stats.hasThunderHat`; cheap enough to set unconditionally, and it
+   * also clears a held press the moment the ability goes away rather than
+   * leaving `attack` stuck true.
+   */
+  setAttackEnabled(enabled: boolean): void {
+    if (enabled === this.attackEnabled) return;
+    this.attackEnabled = enabled;
+    if (!enabled) this.state.attack = false;
+    for (const { circle, base } of this.attackCircles) {
+      circle.setAlpha(enabled ? 1 : DISABLED_ALPHA);
+      circle.setFillStyle(base); // clears a held-down highlight
+    }
+    for (const label of this.attackLabels) label.setAlpha(enabled ? 1 : DISABLED_ALPHA);
+  }
 
-    circle.on("pointerdown", () => setDown(true));
-    circle.on("pointerup", () => setDown(false));
-    circle.on("pointerout", () => setDown(false));
+  private buildDpad(scene: Phaser.Scene): void {
+    const { x, y } = DPAD_CENTER;
+    // Drawn as five squares rather than a cross polygon so each arm is its own
+    // hit area — a single polygon would need per-point maths to tell which arm
+    // a press landed on.
+    const arm = (dx: number, dy: number, label: string, set?: (down: boolean) => void): void => {
+      const square = scene.add
+        .rectangle(x + dx * DPAD_ARM, y + dy * DPAD_ARM, DPAD_ARM, DPAD_ARM, DPAD_FACE)
+        .setScrollFactor(0)
+        .setDepth(CONTROL_DEPTH);
+      scene.add
+        .text(x + dx * DPAD_ARM, y + dy * DPAD_ARM, label, { fontSize: "16px", color: "#c8cbe0" })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(CONTROL_DEPTH + 1);
+      if (!set) return; // Down: drawn so the cross looks like a cross, but this game has no duck
+      square.setInteractive({ useHandCursor: true });
+      const press = (down: boolean) => {
+        set(down);
+        square.setFillStyle(down ? DPAD_FACE_DOWN : DPAD_FACE);
+      };
+      square.on("pointerdown", () => press(true));
+      square.on("pointerup", () => press(false));
+      square.on("pointerout", () => press(false));
+    };
+
+    // Up jumps, matching the keyboard where Up/W already do.
+    arm(0, -1, "▲", (down) => (this.state.jump = down));
+    arm(-1, 0, "◀", (down) => (this.state.left = down));
+    arm(1, 0, "▶", (down) => (this.state.right = down));
+    arm(0, 1, "▼");
+    // Centre pad, purely to make the five squares read as one cross.
+    scene.add.rectangle(x, y, DPAD_ARM, DPAD_ARM, DPAD_FACE).setScrollFactor(0).setDepth(CONTROL_DEPTH);
+  }
+
+  private buildFaceButtons(scene: Phaser.Scene): void {
+    const { x, y } = FACE_CENTER;
+    const button = (
+      dx: number,
+      dy: number,
+      label: string,
+      base: number,
+      downColor: number,
+      set: (down: boolean) => void,
+      isAttack: boolean,
+    ): void => {
+      const cx = x + dx * FACE_OFFSET;
+      const cy = y + dy * FACE_OFFSET;
+      const circle = scene.add
+        .circle(cx, cy, FACE_RADIUS, base)
+        .setStrokeStyle(2, 0x161826, 0.8)
+        .setScrollFactor(0)
+        .setDepth(CONTROL_DEPTH)
+        .setInteractive({ useHandCursor: true });
+      const text = scene.add
+        .text(cx, cy, label, { fontSize: "20px", color: "#ffffff" })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(CONTROL_DEPTH + 1);
+
+      const press = (down: boolean): void => {
+        if (isAttack && !this.attackEnabled) return;
+        set(down);
+        circle.setFillStyle(down ? downColor : base);
+      };
+      circle.on("pointerdown", () => press(true));
+      circle.on("pointerup", () => press(false));
+      circle.on("pointerout", () => press(false));
+
+      if (isAttack) {
+        this.attackCircles.push({ circle, base });
+        this.attackLabels.push(text);
+      }
+    };
+
+    const jump = (down: boolean): void => {
+      this.state.jump = down;
+    };
+    const attack = (down: boolean): void => {
+      this.state.attack = down;
+    };
+
+    // Diamond, SNES-style: the near pair jumps, the far pair fires.
+    button(1, 0, "▲", JUMP_COLOR, JUMP_COLOR_DOWN, jump, false); // A
+    button(0, 1, "▲", JUMP_COLOR, JUMP_COLOR_DOWN, jump, false); // B
+    button(0, -1, "⚡", ATTACK_COLOR, ATTACK_COLOR_DOWN, attack, true); // X
+    button(-1, 0, "⚡", ATTACK_COLOR, ATTACK_COLOR_DOWN, attack, true); // Y
   }
 }
