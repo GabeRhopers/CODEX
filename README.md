@@ -2748,6 +2748,47 @@ engage unless `outcome === "playing"`, so a PAUSED card can never end up sitting
 on the win or lose screen, and Start can never un-pause the physics that `onWin`
 deliberately froze. **P** does the same thing from the keyboard.
 
+**The palette gets shades, and a place for your own colours (2026-08-26).**
+Three changes that turned out to be one problem.
+
+*A colour outside the palette was thrown away.* The swatch row reset
+`currentColor` to `palette.colors[0]` whenever the selection wasn't one of its
+own — and canvas mode is rebuilt on **every frame and palette switch**. So
+sampling a colour off a traced reference and then stepping to the next frame
+silently lost it. Now an off-palette colour is kept and filed into **Yours**.
+
+*Yours* is a palette that fills itself, rather than one you build by hand: it
+collects the colours you used that no preset offered — eyedropper samples and
+shade steps — which are exactly the colours that had nowhere to live. That
+avoids needing a colour picker this app doesn't have. It lives in
+`localStorage` (`customPalette.ts`) because it is a *tool preference* like the
+current tool and zoom level, not part of any skin; same never-trust-storage
+handling as `audioPrefs.ts`, including surviving a `localStorage` that throws.
+
+*Shades.* A fixed palette gives you no ramp — PICO-8's blues are three unrelated
+hues — so the row left of the palette shows one step darker and one step lighter
+than the selected colour (`colorShades.ts`, mixing toward white/black rather
+than scaling channels, because scaling cannot lighten black at all). A step that
+would do nothing is **hidden** rather than shown as a duplicate that ignores
+clicks — black has no darker, white has no lighter.
+
+This is a ramp for the *selected* colour rather than a lighter and darker row
+stacked around every swatch, and the reason is measured: stacking costs 52px of
+height (three 24px rows plus gaps, against one), and the only place to take it
+from is the canvas — the palette row ends at y=86 and the painting window starts
+at 132, a 46px budget. Shrinking the drawing surface from 320px to 268px,
+permanently, on every skin, to show 32 extra swatches when shading only ever
+needs the neighbours of the colour in your hand, is the wrong trade. The ramp
+costs no height at all: the row left of the centred palette was empty.
+
+*Game Boy is gone.* Four greens of one hue drew nothing the other palettes
+couldn't, and the shade ramp now covers the "I want a darker green" case it was
+really serving. **No saved skin changes**: cells store hex strings rather than
+palette indices, so art painted in those greens keeps them exactly, and
+`findPalette` already fell back for an unknown id — which `skinStorage.test.ts`
+happens to prove, since it round-trips `paletteId: "gameboy"` as an opaque
+string.
+
 **Selection you can actually see (2026-08-26).** The Sprite editor used one
 colour, `#3a5a9c`, for *both* "you are pointing at this" and "this is the armed
 tool" — and `makeSmallButton`'s `pointerout` reset every button to the

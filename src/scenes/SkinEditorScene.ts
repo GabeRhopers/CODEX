@@ -18,7 +18,9 @@ import {
   skinReferenceId,
 } from "../skins/referenceSources";
 import { baseFrameOf, CHARACTER_SKIN_ID, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
-import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES } from "../skins/pixelPalettes";
+import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES, PixelPalette } from "../skins/pixelPalettes";
+import { shadeRamp } from "../skins/colorShades";
+import { addCustomColor, CUSTOM_PALETTE_ID, loadCustomColors, saveCustomColors } from "../skins/customPalette";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
 import { defaultSkinName, displaySkinName, sanitizeSkinName } from "../skins/skinNames";
 import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin, setActiveSkin } from "../skins/skinStorage";
@@ -156,6 +158,12 @@ export class SkinEditorScene extends Phaser.Scene {
   // feel that way the next time you open the Skin Creator this session,
   // not silently revert to defaults every time you switch brushes or skins.
   private currentColor: string | null = null;
+  /** "Yours" — colours used that no preset palette offered. Mirrors
+   * localStorage; see customPalette.ts for why it lives there. */
+  private customColors: string[] = [];
+  /** Repaints the shade ramp for whatever colour is now selected. Assigned when
+   * canvas mode builds it, so anything that changes the colour can call it. */
+  private refreshShadeRamp?: () => void;
   private currentTool: PixelTool = "paint";
   private mirrorEnabled = false;
   private gridVisible = false;
@@ -317,6 +325,22 @@ export class SkinEditorScene extends Phaser.Scene {
     text.on("pointerover", () => text.setStyle({ backgroundColor: hover() }));
     text.on("pointerout", () => text.setStyle({ backgroundColor: idle() }));
     return text;
+  }
+
+  /**
+   * Files a colour into "Yours".
+   *
+   * Called for every colour that isn't in the active palette — eyedropper
+   * samples and the shade ramp's steps. Writes through to localStorage
+   * immediately rather than on save, because canvas mode is torn down and
+   * rebuilt constantly (every frame and palette switch) and there is no other
+   * moment that reliably happens.
+   */
+  private rememberColor(color: string): void {
+    const next = addCustomColor(this.customColors, color);
+    if (next === this.customColors) return; // already the most recent
+    this.customColors = next;
+    saveCustomColors(next);
   }
 
   /** Repaints a stateful button to its resting look — call after the state it
@@ -635,11 +659,19 @@ export class SkinEditorScene extends Phaser.Scene {
     this.statusText = this.add.text(GAME_WIDTH / 2, 44, "", { fontSize: "12px", color: "#4ade80" }).setOrigin(0.5, 0);
 
     // --- palette selector row ---
-    const palette = findPalette(target.paletteId);
+    // "Yours" is offered alongside the presets rather than as a separate
+    // control: it *is* a palette, it just fills itself from the colours you
+    // used that no preset had (see customPalette.ts). Built fresh here because
+    // canvas mode is rebuilt on every frame and palette switch, so it always
+    // reflects the latest picks.
+    this.customColors = loadCustomColors();
+    const yours: PixelPalette = { id: CUSTOM_PALETTE_ID, name: "Yours", colors: this.customColors };
+    const paletteChoices = [...PIXEL_PALETTES, yours];
+    const palette = target.paletteId === CUSTOM_PALETTE_ID ? yours : findPalette(target.paletteId);
     const paletteButtonWidth = 110;
-    const paletteRowWidth = PIXEL_PALETTES.length * (paletteButtonWidth + 8) - 8;
+    const paletteRowWidth = paletteChoices.length * (paletteButtonWidth + 8) - 8;
     let px = (GAME_WIDTH - paletteRowWidth) / 2;
-    for (const p of PIXEL_PALETTES) {
+    for (const p of paletteChoices) {
       const activePalette = p.id === palette.id;
       const bg = this.add
         .rectangle(px, 62, paletteButtonWidth, 24, activePalette ? SELECTED_FILL : BUTTON_COLOR)
@@ -741,8 +773,26 @@ export class SkinEditorScene extends Phaser.Scene {
     const swatchColors: (string | null)[] = [...palette.colors, null];
     const swatchRowWidth = swatchColors.length * (swatchSize + swatchGap) - swatchGap;
     let sx = (GAME_WIDTH - swatchRowWidth) / 2;
-    if (this.currentColor === null || !palette.colors.includes(this.currentColor)) {
-      this.currentColor = palette.colors[0];
+    // A colour the active palette doesn't contain used to be replaced by
+    // palette.colors[0] right here — and since canvas mode is rebuilt on every
+    // frame and palette switch, sampling a colour off a traced reference and
+    // then stepping to the next frame silently lost it. Keep it instead, and
+    // put it somewhere it survives (see rememberColor). Only a genuinely unset
+    // colour falls back now.
+    if (this.currentColor === null) {
+      this.currentColor = palette.colors[0] ?? "#ffffff";
+    } else if (!palette.colors.includes(this.currentColor)) {
+      this.rememberColor(this.currentColor);
+    }
+    // "Yours" starts empty, and an empty row is indistinguishable from a broken
+    // one — say what fills it instead. Right-aligned to end just before the
+    // row's own transparent swatch rather than centred on the row: with no
+    // colours the row *is* that one swatch, sitting dead centre, so a centred
+    // hint reads straight through it.
+    if (palette.colors.length === 0) {
+      this.add
+        .text(sx - 10, sy + swatchSize / 2, "Colours you pick land here", { fontSize: "11px", color: "#8a8ab0" })
+        .setOrigin(1, 0.5);
     }
     const swatchNodes: { color: string | null; bg: Phaser.GameObjects.Rectangle }[] = [];
     const refreshSwatchHighlight = (): void => {
@@ -763,6 +813,7 @@ export class SkinEditorScene extends Phaser.Scene {
       bg.on("pointerdown", () => {
         this.currentColor = color;
         this.pixelCanvas?.setCurrentColor(color);
+        this.refreshShadeRamp?.();
         // Eyedropper auto-reverts — it's a momentary "sample and get back to
         // work" gesture, so picking a color instead of clicking the canvas
         // still counts as "done sampling." So does Erase, but only for a real
@@ -785,6 +836,69 @@ export class SkinEditorScene extends Phaser.Scene {
       sx += swatchSize + swatchGap;
     }
     refreshSwatchHighlight();
+
+    // --- shade ramp: one step darker and one step lighter than the selected
+    // colour, immediately left of the palette row on the same line.
+    //
+    // Deliberately a ramp for the *selected* colour rather than a darker and
+    // lighter row stacked around every swatch. Stacking costs 52px of height
+    // (three 24px rows plus gaps against one), and there is nowhere to take it
+    // from except the canvas: the palette row ends at y=86 and the painting
+    // window starts at 132, so the whole budget is 46px. Shrinking the drawing
+    // surface from 320px to 268px — permanently, on every skin — to show 32
+    // extra swatches, when shading only ever needs the neighbours of the colour
+    // in your hand, is the wrong trade. This costs no height at all: the row
+    // left of the centred palette was empty.
+    const rampSize = 24;
+    const rampGap = 4;
+    const rampX = 150;
+    this.add.text(rampX, sy - 14, "SHADES", { fontSize: "10px", color: "#8a8ab0", fontStyle: "bold" });
+    const rampNodes: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }[] = [];
+    for (let i = 0; i < 3; i++) {
+      const x = rampX + i * (rampSize + rampGap);
+      const bg = this.add
+        .rectangle(x, sy, rampSize, rampSize, 0x333333)
+        .setOrigin(0, 0)
+        .setStrokeStyle(1, 0x000000, 0.4)
+        .setInteractive({ useHandCursor: true });
+      const label = this.add
+        .text(x + rampSize / 2, sy + rampSize / 2, "", { fontSize: "11px", color: "#ffffff" })
+        .setOrigin(0.5);
+      rampNodes.push({ bg, label });
+    }
+    this.refreshShadeRamp = (): void => {
+      const ramp = this.currentColor ? shadeRamp(this.currentColor) : { darker: null, base: null, lighter: null };
+      // Middle is always the colour itself, so the ramp reads as "darker · this
+      // · lighter" rather than two mystery swatches.
+      const steps: (string | null)[] = [ramp.darker, ramp.base, ramp.lighter];
+      const marks = ["−", "", "+"];
+      rampNodes.forEach(({ bg, label }, i) => {
+        const color = steps[i];
+        // A step that would do nothing (black cannot darken) is hidden rather
+        // than shown as a duplicate that ignores clicks.
+        bg.setVisible(color !== null);
+        label.setVisible(color !== null && i !== 1);
+        if (color === null) return;
+        bg.setFillStyle(Phaser.Display.Color.HexStringToColor(color).color);
+        bg.setStrokeStyle(i === 1 ? 3 : 1, i === 1 ? 0xffeb3b : 0x000000, i === 1 ? 1 : 0.4);
+        label.setText(marks[i]);
+      });
+    };
+    rampNodes.forEach(({ bg }, i) => {
+      bg.on("pointerdown", () => {
+        const ramp = this.currentColor ? shadeRamp(this.currentColor) : null;
+        const picked = ramp ? [ramp.darker, ramp.base, ramp.lighter][i] : null;
+        if (picked === null) return;
+        this.currentColor = picked;
+        this.pixelCanvas?.setCurrentColor(picked);
+        // A shade step is off-palette by construction — this is the other half
+        // of what "Yours" is for.
+        if (!palette.colors.includes(picked)) this.rememberColor(picked);
+        refreshSwatchHighlight();
+        this.refreshShadeRamp?.();
+      });
+    });
+    this.refreshShadeRamp();
 
     // --- the painting window itself. Fixed size and position: at fit zoom the
     // drawing fills it exactly, and zooming in grows the drawing inside it
@@ -809,7 +923,11 @@ export class SkinEditorScene extends Phaser.Scene {
         // "pick a color, keep working" flow every other pixel-art tool
         // gives this gesture.
         this.currentColor = picked;
+        // The eyedropper is where off-palette colours come from — a traced
+        // reference is a photograph, not a 16-colour palette.
+        if (picked !== null && !palette.colors.includes(picked)) this.rememberColor(picked);
         refreshSwatchHighlight();
+        this.refreshShadeRamp?.();
         setTool("paint");
       },
       gridSize: gridSizeFor(target.brush.id),

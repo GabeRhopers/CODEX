@@ -105,9 +105,13 @@ test("the tool row still clears the widest palette's swatches", async ({ page })
         tools++;
         toolLeft = Math.min(toolLeft, text.x!);
       }
-      // Swatches are 24px rectangles drawn from origin (0,0).
+      // Swatches are 24px rectangles drawn from origin (0,0) — but so are the
+      // three shade-ramp swatches, which sit left of the centred palette row
+      // (they end at x≈230; the widest palette starts at x≈289). Without the
+      // x filter this counts 20 and the "widest case" assertion below stops
+      // meaning what it says.
       const rect = child as { width?: number; height?: number; x?: number; type?: string };
-      if (rect.type === "Rectangle" && rect.width === 24 && rect.height === 24) {
+      if (rect.type === "Rectangle" && rect.width === 24 && rect.height === 24 && rect.x! >= 250) {
         swatches++;
         swatchRight = Math.max(swatchRight, rect.x! + 24);
       }

@@ -1,15 +1,22 @@
-/** The Skin Creator's 5 preset color palettes (see SkinEditorScene /
+/** The Skin Creator's preset color palettes (see SkinEditorScene /
  * PixelCanvasOverlay) — a pixel-art canvas is palette-*constrained*, not
  * a free color wheel, the same way every real pixel-art tool works: it's
  * what keeps a 32x32 sprite reading as one cohesive piece instead of a
  * smear of arbitrary colors. Four of these are well-known, freely-shared
  * reference palettes from the pixel-art community (plain RGB values, not
- * licensed assets — PICO-8's and the Game Boy's are literally fixed by
- * hardware, and Sweetie 16/DawnBringer 16 are long-established public
- * palettes) plus one exact palette needing no external reference at all
- * (Bright 8 — every pure on/off combination of R/G/B). Deliberately a
- * spread of sizes (4 to 16 colors) and moods (muted retro vs. vivid
- * primary) rather than 5 similar-looking options.
+ * licensed assets — PICO-8's is literally fixed by hardware, and Sweetie
+ * 16/DawnBringer 16 are long-established public palettes) plus one exact
+ * palette needing no external reference at all (Bright 8 — every pure
+ * on/off combination of R/G/B). Deliberately a spread of sizes and moods
+ * (muted retro vs. vivid primary) rather than similar-looking options.
+ *
+ * Game Boy's 4 greens were dropped: with only four colors, all of one hue,
+ * it could not draw anything the other palettes couldn't, and the shade
+ * ramp (see colorShades.ts) now covers the "I want a darker green" case it
+ * was really serving. Removing it changes no saved skin — cells store hex
+ * strings rather than palette indices (see below), so a skin painted in
+ * those greens keeps them exactly, and findPalette falls back for the
+ * now-unknown id.
  *
  * Colors are plain hex strings, stored directly per-cell in a saved
  * skin's PixelSkinData (see CustomSkins.ts) rather than as an index into
@@ -87,11 +94,6 @@ export const PIXEL_PALETTES: PixelPalette[] = [
       "#dad45e",
       "#deeed6",
     ],
-  },
-  {
-    id: "gameboy",
-    name: "Game Boy",
-    colors: ["#0f380f", "#306230", "#8bac0f", "#9bbc0f"],
   },
   {
     id: "bright8",
