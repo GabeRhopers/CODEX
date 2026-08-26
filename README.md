@@ -277,11 +277,17 @@ Open the dev server URL in a browser. Controls:
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first, in any of Main/Sub/Up (they don't
   both need to be in the same area); enemies and items are optional.
-- In Play mode the level sits in a **handheld console shell** — screen in the
-  middle, a **D-pad** to its left, four **face buttons** in a SNES-style diamond
-  to its right. The two nearest the thumb jump; the far pair fires the PJ
-  Thunder Hat and stay faded until you've collected one. Everything is clickable
-  with a mouse too, and none of it covers the level. Keyboard is unchanged:
+- In Play mode the level sits in a **handheld console shell** — a rounded body
+  with the screen recessed into a darker surround, a **D-pad** to its left, four
+  **face buttons** in a SNES-style diamond to its right, and a **Start** button
+  under them. The two face buttons nearest the thumb jump; the far pair fires the
+  PJ Thunder Hat and stay faded until you've collected one. **Start** (or **P**)
+  pauses — the physics world freezes and a PAUSED card sits on the glass; press
+  it again to carry on. It's refused once you've won or lost, so a pause can't
+  land on top of the win screen. Around all that are the details you'd expect on
+  a real one: a power LED beside the glass, a speaker grille and a RHOPERS
+  wordmark under the D-pad. Everything is clickable with a mouse too, and none of
+  it covers the level. Keyboard is unchanged:
   **arrow keys / WASD** to move, **Up/W/Space** to jump
   (press again mid-air for a second jump if you've collected a Chicken
   Slipper), **X** (or the ⚡ on-screen button) to fire the PJ Thunder
@@ -2663,11 +2669,41 @@ three-armed D-pad looks broken, and this game has no duck. The shock pair fades
 to 25% and ignores presses until the Thunder Hat is collected, so a button that
 can't do anything says so rather than reporting a press that goes nowhere.
 
-`handheld-controls.spec.ts` covers the three things that matter: the controls
-drive the player, the shock pair is inert before the pickup and live after, and
-**no control's bounding box overlaps the screen rect** — that last one is what
-keeps the framing free, because a control creeping back over the playfield is
-exactly the regression this replaced.
+`handheld-controls.spec.ts` covers what matters: the controls drive the player,
+the shock pair is inert before the pickup and live after, Start pauses and
+resumes, Start is refused after the run ends, and **no control's bounding box
+overlaps the screen rect** — that last one is what keeps the framing free,
+because a control creeping back over the playfield is exactly the regression
+this replaced.
+
+**A shape rather than a frame (2026-08-26).** The first version filled both
+bands edge to edge with rectangles, which read as a picture frame around the
+level rather than an object holding it: there was no silhouette, because every
+pixel of the canvas was body. The fix is depth, not geometry. The body is now
+**one** rounded rectangle at depth `-200`, *under* `StaticBackground`'s `-100`,
+inset 10px from the canvas edge with a 56px corner radius. Because the level's
+background is cover-fitted and masked to exactly `SCREEN_RECT`, it paints over
+the middle of that rectangle completely, so only the console's outline is ever
+visible — which is what buys rounded ends and a darker inset screen surround for
+free. The camera's own `CANVAS_BACKGROUND_COLOR` becomes the surface the console
+is lying on.
+
+The details all live outside `SCREEN_RECT`, so none of them can cover a pixel of
+level: the bezel stroke right around the glass, a green power LED with an `ON`
+legend on the surround, a RHOPERS wordmark and a four-dot speaker grille under
+the D-pad, and an angled **Start** pill under the face buttons. `CONTROL_ROW_Y`
+is exported from `HandheldShell` and used by *both* control clusters as well as
+by the trim, so the D-pad and the diamond can't drift apart and the shell always
+knows what its lower details have to clear.
+
+Start pauses. `togglePause` calls `physics.pause()` as well as short-circuiting
+`update()`, because Arcade integrates gravity on its own timer — a "pause" that
+only stopped `update()` would leave the player quietly sinking through the
+floor, which is why the e2e test asserts `physics.world.isPaused` and that
+holding Right moves nothing, rather than just reading the flag. It refuses to
+engage unless `outcome === "playing"`, so a PAUSED card can never end up sitting
+on the win or lose screen, and Start can never un-pause the physics that `onWin`
+deliberately froze. **P** does the same thing from the keyboard.
 
 **Skins get names (2026-08-26).** Skins were the only asset library without
 one. `BackgroundAsset` and `MusicAsset` have carried `name` since they were

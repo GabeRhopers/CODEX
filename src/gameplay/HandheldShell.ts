@@ -2,20 +2,28 @@ import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH, GRID_COLS, GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
 
 /**
- * The console body Test Play sits inside — a horizontal handheld: screen in
- * the middle, D-pad to its left, face buttons to its right (see TouchControls
- * for those).
+ * The console Test Play sits inside — a horizontal handheld: screen in the
+ * middle, D-pad to its left, face buttons to its right (see TouchControls for
+ * those), Start below them.
  *
  * This costs nothing in playable space, which is the reason it works at all.
- * PlayScene's camera never scrolls, and every level the app can produce is
- * exactly GRID_COLS wide — `createEmptyLevel` defaults to it and nothing passes
+ * PlayScene's camera never scrolls and every level the app can produce is
+ * exactly GRID_COLS wide — `createEmptyLevel` defaults to it, nothing passes
  * anything else, and all six bundled templates measure 20 columns — so the
  * level always occupies exactly the same rectangle, and the bands to either
- * side of it were already empty. The old on-screen buttons floated *over* the
- * playfield precisely because nobody had noticed there was room beside it.
+ * side of it were already empty.
  *
- * SCREEN_RECT is asserted against those constants rather than hardcoded, so if
- * the grid or the origins ever move, the bezel moves with them instead of
+ * *Drawn behind the level, not around it.* The body is one rounded rectangle at
+ * depth -200, under StaticBackground's -100. That is what lets it be a shape
+ * with rounded ends and an inset screen surround rather than four rectangles
+ * tiled into the gaps: the level's background is cover-fitted and masked to
+ * exactly SCREEN_RECT, so it paints over the middle of the body completely and
+ * only the console's outline is ever visible. The first version filled the
+ * bands edge to edge and read as a picture frame for precisely this reason —
+ * there was no silhouette, because every pixel of the canvas was body.
+ *
+ * SCREEN_RECT is derived from the grid constants rather than hardcoded, so if
+ * the grid or the origins ever move, the console moves with them instead of
  * quietly cropping the level.
  */
 
@@ -29,67 +37,131 @@ export const SCREEN_RECT = {
 
 /** The band left of the screen, where the D-pad lives. */
 export const LEFT_BAND = { x: 0, width: SCREEN_RECT.x };
-/** The band right of the screen, where the face buttons live. */
+/** The band right of the screen, where the face buttons and Start live. */
 export const RIGHT_BAND = { x: SCREEN_RECT.x + SCREEN_RECT.width, width: GAME_WIDTH - (SCREEN_RECT.x + SCREEN_RECT.width) };
 
+/** Vertical centre of both control clusters, and the line the lower details
+ * hang below. Shared so the D-pad and the face diamond can't drift apart. */
+export const CONTROL_ROW_Y = SCREEN_RECT.y + SCREEN_RECT.height - 152;
+
 // Deliberately lighter than CANVAS_BACKGROUND_COLOR (0x1a1a2e), which the
-// letterbox around the canvas also uses: at the first attempt the body was
-// within a few points of it and the console read as more page rather than as an
-// object with a screen set into it.
+// camera paints behind everything and which now reads as the surface the
+// console is lying on.
 const BODY_COLOR = 0x2b2f4c;
 const BODY_EDGE_COLOR = 0x3d4268;
+const SURROUND_COLOR = 0x20243c;
 const BEZEL_COLOR = 0x14161f;
-/** Above the level and its own overlays, below the HUD/controls (depth 40+). */
-const SHELL_DEPTH = 30;
+const DETAIL_COLOR = 0x4a4e68;
 
-/**
- * Draws the body and bezel. Purely decorative — it adds no input handlers and
- * never covers SCREEN_RECT, so nothing about gameplay or hit-testing changes.
- */
+/** Below StaticBackground's -100, so the level paints over the middle. */
+const BODY_DEPTH = -200;
+/** Above the level, below the HUD (30) and controls (40). */
+const TRIM_DEPTH = 20;
+
+const START_WIDTH = 74;
+const START_HEIGHT = 22;
+
+export interface HandheldShellOptions {
+  /** Fired by the Start button. PlayScene pauses on it. */
+  onStart: () => void;
+}
+
 export class HandheldShell {
-  constructor(scene: Phaser.Scene) {
-    const screenRight = SCREEN_RECT.x + SCREEN_RECT.width;
-    const screenBottom = SCREEN_RECT.y + SCREEN_RECT.height;
+  constructor(scene: Phaser.Scene, options: HandheldShellOptions) {
+    this.drawBody(scene);
+    this.drawTrim(scene);
+    this.drawStartButton(scene, options.onStart);
+  }
 
-    // Four bands around the screen rather than one full-canvas rectangle with a
-    // hole in it: Phaser has no "rectangle minus rectangle", and covering the
-    // screen even for one frame would hide the level.
-    const bands: [number, number, number, number][] = [
-      [0, 0, GAME_WIDTH, SCREEN_RECT.y], // top
-      [0, screenBottom, GAME_WIDTH, GAME_HEIGHT - screenBottom], // bottom
-      [0, SCREEN_RECT.y, SCREEN_RECT.x, SCREEN_RECT.height], // left
-      [screenRight, SCREEN_RECT.y, GAME_WIDTH - screenRight, SCREEN_RECT.height], // right
-    ];
-    for (const [x, y, w, h] of bands) {
-      scene.add.rectangle(x, y, w, h, BODY_COLOR).setOrigin(0, 0).setScrollFactor(0).setDepth(SHELL_DEPTH);
-    }
+  /** One Graphics for the whole silhouette: the shell outline, plus the darker
+   * panel the screen is set into. Both sit under the level. */
+  private drawBody(scene: Phaser.Scene): void {
+    const g = scene.add.graphics().setScrollFactor(0).setDepth(BODY_DEPTH);
 
-    // A darker recess right around the screen, so it reads as inset glass
-    // rather than as a hole in a flat colour. Stroke-only, drawn just outside
-    // the screen so it never overlaps a pixel of level.
+    // The shell. Generous corner radius on all four corners is most of what
+    // separates "handheld" from "rectangle"; the margin leaves the camera's
+    // background visible around it so it reads as an object.
+    g.fillStyle(BODY_COLOR, 1);
+    g.fillRoundedRect(10, 8, GAME_WIDTH - 20, GAME_HEIGHT - 20, 56);
+    g.lineStyle(2, BODY_EDGE_COLOR, 1);
+    g.strokeRoundedRect(10, 8, GAME_WIDTH - 20, GAME_HEIGHT - 20, 56);
+
+    // The screen surround — a darker inset panel wider and taller than the
+    // screen itself, so the glass looks recessed into the shell rather than
+    // painted onto it.
+    g.fillStyle(SURROUND_COLOR, 1);
+    g.fillRoundedRect(SCREEN_RECT.x - 32, SCREEN_RECT.y - 28, SCREEN_RECT.width + 64, SCREEN_RECT.height + 56, 18);
+  }
+
+  /** The details that sell it: the bezel right around the glass, a power LED, a
+   * speaker grille and a wordmark. All outside SCREEN_RECT, so none of it can
+   * cover a pixel of level. */
+  private drawTrim(scene: Phaser.Scene): void {
     scene.add
       .rectangle(SCREEN_RECT.x - 4, SCREEN_RECT.y - 4, SCREEN_RECT.width + 8, SCREEN_RECT.height + 8)
       .setOrigin(0, 0)
       .setStrokeStyle(8, BEZEL_COLOR)
       .setScrollFactor(0)
-      .setDepth(SHELL_DEPTH + 1);
-    scene.add
-      .rectangle(SCREEN_RECT.x - 9, SCREEN_RECT.y - 9, SCREEN_RECT.width + 18, SCREEN_RECT.height + 18)
-      .setOrigin(0, 0)
-      .setStrokeStyle(2, BODY_EDGE_COLOR)
-      .setScrollFactor(0)
-      .setDepth(SHELL_DEPTH + 1);
+      .setDepth(TRIM_DEPTH);
 
-    // The power LED, top-left of the bezel — the one detail that makes the
-    // whole thing read as a handheld rather than a picture frame.
+    // Power LED, on the surround beside the glass.
+    scene.add.circle(SCREEN_RECT.x - 18, SCREEN_RECT.y + 8, 4, 0x4ade80).setScrollFactor(0).setDepth(TRIM_DEPTH);
     scene.add
-      .circle(SCREEN_RECT.x - 26, SCREEN_RECT.y + 10, 4, 0x4ade80)
-      .setScrollFactor(0)
-      .setDepth(SHELL_DEPTH + 2);
-    scene.add
-      .text(SCREEN_RECT.x - 26, SCREEN_RECT.y + 22, "ON", { fontSize: "8px", color: "#4a4e68" })
+      .text(SCREEN_RECT.x - 18, SCREEN_RECT.y + 18, "ON", { fontSize: "8px", color: "#5a5f85" })
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
-      .setDepth(SHELL_DEPTH + 2);
+      .setDepth(TRIM_DEPTH);
+
+    // Wordmark under the D-pad.
+    scene.add
+      .text(LEFT_BAND.x + LEFT_BAND.width / 2, CONTROL_ROW_Y + 78, "RHOPERS", {
+        fontSize: "11px",
+        color: "#5a5f85",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(TRIM_DEPTH);
+
+    // Speaker grille, angled the way a handheld's usually is.
+    for (let i = 0; i < 4; i++) {
+      scene.add
+        .circle(LEFT_BAND.x + LEFT_BAND.width / 2 - 24 + i * 16, CONTROL_ROW_Y + 100 + i * 3, 3, DETAIL_COLOR)
+        .setScrollFactor(0)
+        .setDepth(TRIM_DEPTH);
+    }
+  }
+
+  /** Start, below the face buttons — a pill, angled slightly like the real
+   * thing. Pauses the game; see PlayScene.togglePause. */
+  private drawStartButton(scene: Phaser.Scene, onStart: () => void): void {
+    const x = RIGHT_BAND.x + RIGHT_BAND.width / 2;
+    const y = CONTROL_ROW_Y + 88;
+
+    const pill = scene.add
+      .rectangle(x, y, START_WIDTH, START_HEIGHT, 0x3a3d55)
+      .setStrokeStyle(2, 0x161826, 0.8)
+      .setAngle(-12)
+      .setScrollFactor(0)
+      .setDepth(TRIM_DEPTH)
+      .setInteractive({ useHandCursor: true });
+    const label = scene.add
+      .text(x, y, "START", { fontSize: "10px", color: "#c8cbe0", fontStyle: "bold" })
+      .setOrigin(0.5)
+      .setAngle(-12)
+      .setScrollFactor(0)
+      .setDepth(TRIM_DEPTH + 1);
+
+    pill.on("pointerdown", () => {
+      pill.setFillStyle(0x5a6088);
+      label.setColor("#ffffff");
+      onStart();
+    });
+    const release = (): void => {
+      pill.setFillStyle(0x3a3d55);
+      label.setColor("#c8cbe0");
+    };
+    pill.on("pointerup", release);
+    pill.on("pointerout", release);
   }
 }

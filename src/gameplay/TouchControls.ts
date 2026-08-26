@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { LEFT_BAND, RIGHT_BAND, SCREEN_RECT } from "./HandheldShell";
+import { CONTROL_ROW_Y, LEFT_BAND, RIGHT_BAND } from "./HandheldShell";
 
 export interface TouchControlState {
   left: boolean;
@@ -26,13 +26,15 @@ export interface TouchControlState {
  */
 
 // --- D-pad, centred in the left band ---------------------------------------
-const DPAD_CENTER = { x: LEFT_BAND.x + LEFT_BAND.width / 2, y: SCREEN_RECT.y + SCREEN_RECT.height - 130 };
+// Both clusters share CONTROL_ROW_Y so they cannot drift apart, and so the
+// shell knows where its wordmark, grille and Start button have to clear.
+const DPAD_CENTER = { x: LEFT_BAND.x + LEFT_BAND.width / 2, y: CONTROL_ROW_Y };
 const DPAD_ARM = 34; // both the length of an arm and the width of the cross
 const DPAD_FACE = 0x3a3d55;
 const DPAD_FACE_DOWN = 0x5a6088;
 
 // --- face buttons, centred in the right band -------------------------------
-const FACE_CENTER = { x: RIGHT_BAND.x + RIGHT_BAND.width / 2, y: DPAD_CENTER.y };
+const FACE_CENTER = { x: RIGHT_BAND.x + RIGHT_BAND.width / 2, y: CONTROL_ROW_Y };
 const FACE_RADIUS = 26;
 const FACE_OFFSET = 44;
 /** Jump sits on the two buttons nearest the thumb (right and bottom), the way

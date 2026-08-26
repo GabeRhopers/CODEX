@@ -39,7 +39,7 @@ import {
   speedMultiplierAt,
   useDoubleJump,
 } from "../gameplay/PlayerStats";
-import { HandheldShell } from "../gameplay/HandheldShell";
+import { HandheldShell, SCREEN_RECT } from "../gameplay/HandheldShell";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
@@ -293,6 +293,10 @@ export class PlayScene extends Phaser.Scene {
   // See CAST_FLASH_MS.
   private castFlashUntil = 0;
   private outcome: "playing" | "won" | "lost" = "playing";
+  /** Start-button pause. Separate from `outcome` because it is reversible
+   * and does not end the run — update() short-circuits on either. */
+  private paused = false;
+  private pauseOverlay!: Phaser.GameObjects.Text;
   private banner!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
   private restartButton!: Phaser.GameObjects.Text;
@@ -381,6 +385,7 @@ export class PlayScene extends Phaser.Scene {
     this.checkpoint = data.checkpoint;
     this.activeCheckpointSprite = undefined;
     this.outcome = "playing";
+    this.paused = false;
     this.wizardAnim = createWizardAnimState();
     this.enemies = [];
     this.stats = createPlayerStats();
@@ -464,7 +469,7 @@ export class PlayScene extends Phaser.Scene {
     this.input$ = createPlayerInput(this);
     // Body first, controls second: the shell is pure decoration in the bands
     // beside the level, and the controls sit on top of it.
-    new HandheldShell(this);
+    new HandheldShell(this, { onStart: () => this.togglePause() });
     this.touch = new TouchControls(this);
 
     this.hud = this.add
@@ -547,6 +552,22 @@ export class PlayScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     backLabel.on("pointerdown", () => this.backToEditor());
 
+    // Centred on the *screen*, not the canvas — the console's glass is what
+    // the message belongs on, and the canvas centre happens to be the same
+    // point only because the screen is centred in the shell.
+    this.pauseOverlay = this.add
+      .text(SCREEN_RECT.x + SCREEN_RECT.width / 2, SCREEN_RECT.y + SCREEN_RECT.height / 2, "PAUSED", {
+        fontSize: "40px",
+        color: "#ffffff",
+        backgroundColor: "#000000bb",
+        padding: { x: 24, y: 14 },
+      })
+      .setOrigin(0.5)
+      .setDepth(30)
+      .setScrollFactor(0)
+      .setVisible(false);
+
+    this.input.keyboard?.on("keydown-P", () => this.togglePause());
     this.input.keyboard?.on("keydown-ESC", () => this.backToEditor());
     this.input.keyboard?.on("keydown-R", () => this.restart());
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
@@ -988,6 +1009,23 @@ export class PlayScene extends Phaser.Scene {
     this.enterArea(destinationKey, { x: matchingBasket.x, y: matchingBasket.y });
   }
 
+  /**
+   * Start (and P): freeze the level where it stands.
+   *
+   * Pauses the physics world as well as short-circuiting update(), because
+   * Arcade keeps integrating gravity on its own — without it the player quietly
+   * sinks through the floor of a "paused" game. Refuses to engage once the run
+   * is over, so a pause overlay can never end up sitting on top of the win or
+   * lose screen.
+   */
+  private togglePause(): void {
+    if (this.outcome !== "playing") return;
+    this.paused = !this.paused;
+    if (this.paused) this.physics.pause();
+    else this.physics.resume();
+    this.pauseOverlay.setVisible(this.paused);
+  }
+
   /** "Editor"/"Worlds"/"Templates" for the top-left back button; see
    * backDestinationPhrase for the lowercase, mid-sentence form used in the
    * win/lose hint text. */
@@ -1022,6 +1060,9 @@ export class PlayScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     if (this.outcome !== "playing") return;
+    // Physics is paused too (see togglePause) — without that, gravity would
+    // keep pulling the player down through a "paused" level.
+    if (this.paused) return;
 
     // Re-arm the latched pad only once the player has actually stepped off
     // it. Arcade Physics runs its overlap callbacks after this method, so the

@@ -24,6 +24,9 @@ const SCREEN = { x: 190, y: 56, width: 640, height: 384 };
  * volume knob is also an interactive Arc, which is what this excludes. */
 const DPAD_ARM = 34;
 const FACE_RADIUS = 26;
+/** HandheldShell.START_WIDTH — the Start pill is the only interactive
+ * Rectangle this wide, which is how the pause tests find it. */
+const START_WIDTH = 74;
 
 const LEVEL = () =>
   makeLevel(
@@ -108,6 +111,32 @@ const touchState = (page: Page): Promise<{ left: boolean; right: boolean; jump: 
     return scene.touch.get();
   });
 
+/** The Start pill's scene coordinates. */
+async function startButton(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate((width) => {
+    const scene = window.__debugGame!.scene.getScene("Play");
+    for (const child of scene.children.list) {
+      const o = child as unknown as { type?: string; input?: { enabled?: boolean }; x?: number; y?: number; width?: number };
+      if (o.input?.enabled && o.type === "Rectangle" && o.width === width) return { x: o.x!, y: o.y! };
+    }
+    throw new Error("no Start button on the display list");
+  }, START_WIDTH) as Promise<{ x: number; y: number }>;
+}
+
+async function clickStart(page: Page): Promise<void> {
+  const b = await startButton(page);
+  const p = await toPage(page, b.x, b.y);
+  await page.mouse.click(p.x, p.y);
+}
+
+/** Whether the physics world is frozen — the thing that actually stops the
+ * level, as opposed to the flag that only stops update(). */
+const physicsPaused = (page: Page): Promise<boolean> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Play") as unknown as { physics: { world: { isPaused: boolean } } };
+    return scene.physics.world.isPaused;
+  });
+
 async function startPlay(page: Page): Promise<void> {
   await gotoApp(page);
   await startEditorWithLevel(page, LEVEL());
@@ -158,6 +187,60 @@ test("no control overlaps the screen, which is what makes the framing free", asy
     const clear = right <= SCREEN.x || left >= screenRight || bottom <= SCREEN.y || top >= screenBottom;
     expect(clear, `control at (${c.x}, ${c.y}) overlaps the screen`).toBe(true);
   }
+});
+
+test("Start freezes the level, and pressing it again resumes it", async ({ page }) => {
+  test.slow();
+  await startPlay(page);
+
+  await clickStart(page);
+  // The flag alone would be a weak assertion: Arcade integrates gravity on its
+  // own timer, so a "pause" that only short-circuits update() still lets the
+  // player fall. Assert the world is frozen, and that holding Right genuinely
+  // moves nothing.
+  expect(await physicsPaused(page)).toBe(true);
+  const frozenX = await playerX(page);
+  await page.keyboard.down("ArrowRight");
+  await page.waitForTimeout(500);
+  expect(await playerX(page)).toBe(frozenX);
+
+  await clickStart(page);
+  expect(await physicsPaused(page)).toBe(false);
+  await page.waitForTimeout(500);
+  await page.keyboard.up("ArrowRight");
+  expect(await playerX(page)).toBeGreaterThan(frozenX + 20);
+});
+
+test("Start is refused once the run is over, so no pause lands on the win screen", async ({ page }) => {
+  test.slow();
+  await startPlay(page);
+
+  // Walk into the goal.
+  await page.keyboard.down("ArrowRight");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const scene = window.__debugGame!.scene.getScene("Play") as unknown as { outcome?: string };
+          return scene.outcome ?? "";
+        }),
+      { timeout: 20_000 },
+    )
+    .toBe("won");
+  await page.keyboard.up("ArrowRight");
+
+  // Winning pauses physics itself. Start must not un-pause it, or the world
+  // would restart underneath the "You Win" banner.
+  expect(await physicsPaused(page)).toBe(true);
+  await clickStart(page);
+  expect(await physicsPaused(page)).toBe(true);
+  const overlayVisible = await page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Play");
+    return scene.children.list.some(
+      (c) => (c as unknown as { text?: string; visible?: boolean }).text === "PAUSED" && (c as unknown as { visible?: boolean }).visible === true,
+    );
+  });
+  expect(overlayVisible).toBe(false);
 });
 
 test("the shock buttons stay inert until the Thunder Hat is collected", async ({ page }) => {
