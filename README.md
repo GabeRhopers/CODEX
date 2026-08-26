@@ -2332,6 +2332,16 @@ as a new `e2e` job the Pages `deploy` job now depends on alongside
 `build` — a genuine regression blocks the deploy the same way a failing
 build already does.
 
+*Since then it has grown to* **41 tests across 15 specs**, alongside 191
+Vitest unit tests. Worth naming the bias while it is still fixable: coverage
+has followed *recency*, not *risk*. The Skin Creator — the last eight commits'
+worth of work — carries 18 e2e and 64 unit tests. Worlds, which has its own
+schema, two scenes and two storage adapters across 520 lines, carries none;
+neither do Templates, My Levels' delete, music upload, background upload or the
+Profile gate, and every one of those is a path a real player walks. The suite
+is large now, but it is not yet *aimed*. See the Priority Matrix's "01 · TEST
+NEXT" card for the order to close that in.
+
 The real engineering problem was persistence: this app's only storage
 backend is Google Drive (`GoogleDriveStorageAdapter`/`driveClient.ts`),
 gated behind real Google Identity Services OAuth — completely unusable
