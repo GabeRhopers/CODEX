@@ -161,28 +161,39 @@ function entryFor(skins: CustomSkinsFile, brushId: string): SkinLibraryEntry {
   return skins[brushId] ?? { activeId: null, items: [] };
 }
 
-/** Adds a newly-uploaded skin to the brush's library and makes it the
- * active one — matches the pre-2026-08-16 behavior of an upload
- * immediately becoming visible everywhere, just without discarding
- * whatever was uploaded before it. Returns the new skin's id purely for
- * callers that want it (none currently do; resolveSkinTextureKeys is
- * what everything actually re-reads from). */
+/**
+ * Adds a newly-uploaded skin to the brush's library and **leaves the default
+ * alone** — the returned id is how the caller applies it where it wants (the
+ * editor puts it on the level being edited; see LevelData.skins).
+ *
+ * It used to set `activeId` here, so an upload became the look of that brush in
+ * every level the moment it finished. That is the behaviour the 2026-08-23 pass
+ * removed: adding art to a library is not a decision about how anything should
+ * look, and there was no way to add a skin without making that decision. Only
+ * setActiveSkin moves a default now.
+ */
 export async function addCustomSkin(brushId: string, imageData: string, uploadedBy: string): Promise<string> {
   const skins = await loadCustomSkins();
   const entry = entryFor(skins, brushId);
   const id = crypto.randomUUID();
   const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: new Date().toISOString() };
-  skins[brushId] = { activeId: id, items: [...entry.items, asset] };
+  skins[brushId] = { ...entry, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;
 }
 
-/** Sets which of a brush's already-uploaded skins is active (`null` =
- * "use the built-in art") — the picker submenu's selection action. A
- * no-op against the last-read state if `skinId` isn't actually one of
- * this brush's items (stale UI, item removed by someone else in the
- * meantime); silently falls back to `null` rather than pointing at a
- * skin that no longer exists. */
+/**
+ * Sets a brush's **library default** — what every level that hasn't chosen for
+ * itself will wear (`null` = "use the built-in art"). See skinSelection.ts for
+ * how that layers under a level's own choice.
+ *
+ * The *only* function that moves a default, deliberately: it is reached from
+ * one explicit, confirmed "Set as default" button and from nowhere else, so
+ * making or uploading a skin can never quietly restyle every level. A no-op
+ * against the last-read state if `skinId` isn't actually one of this brush's
+ * items (stale UI, item removed by someone else in the meantime); silently
+ * falls back to `null` rather than pointing at a skin that no longer exists.
+ */
 export async function setActiveSkin(brushId: string, skinId: string | null): Promise<void> {
   const skins = await loadCustomSkins();
   const entry = entryFor(skins, brushId);
@@ -209,16 +220,24 @@ export async function listPixelSkins(): Promise<{ brushId: string; asset: SkinAs
   return result;
 }
 
-/** Creates or overwrites one pixel-drawn skin and makes it the brush's
- * active skin — the Skin Creator's Save button. `existingId` re-saves in
- * place (same id, brush unchanged) when re-editing an existing pixel
- * skin; omitted (or no longer present — removed by someone else in the
- * meantime) falls through to adding a brand new library entry, mirroring
- * addCustomSkin's own "always becomes active" behavior. Deliberately
- * reuses loadCustomSkins/writeCustomSkins/entryFor exactly as every other
- * mutator here does, rather than a separate pixel-skins file — one skin
- * is one skin regardless of how its PNG was produced; see PixelSkinData's
- * own docstring for what actually distinguishes a pixel-drawn one. */
+/**
+ * Creates or overwrites one pixel-drawn skin — the Skin Creator's Save button —
+ * and, like addCustomSkin, **leaves the default alone**.
+ *
+ * This one mattered most. It used to set `activeId`, so finishing a drawing
+ * silently made it the look of that brush in every level, with nothing asked
+ * and no way to paint one without that happening. Painting is not a decision
+ * about how existing levels should look; picking the skin in a level is, and
+ * "Set as default" is.
+ *
+ * `existingId` re-saves in place (same id, brush unchanged) when re-editing an
+ * existing pixel skin; omitted (or no longer present — removed by someone else
+ * in the meantime) falls through to adding a brand new library entry.
+ * Deliberately reuses loadCustomSkins/writeCustomSkins/entryFor exactly as
+ * every other mutator here does, rather than a separate pixel-skins file — one
+ * skin is one skin regardless of how its PNG was produced; see PixelSkinData's
+ * own docstring for what actually distinguishes a pixel-drawn one.
+ */
 export async function savePixelSkin(
   brushId: string,
   existingId: string | undefined,
@@ -252,14 +271,14 @@ export async function savePixelSkin(
         ? { ...item, imageData, pixelData: persisted, frames: persistedFrames, uploadedBy, updatedAt: now }
         : item,
     );
-    skins[brushId] = { activeId: targetId, items };
+    skins[brushId] = { ...entry, items };
     await writeCustomSkins(skins);
     return targetId;
   }
 
   const id = crypto.randomUUID();
   const asset: SkinAsset = { id, imageData, uploadedBy, updatedAt: now, pixelData: persisted, frames: persistedFrames };
-  skins[brushId] = { activeId: id, items: [...entry.items, asset] };
+  skins[brushId] = { ...entry, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;
 }

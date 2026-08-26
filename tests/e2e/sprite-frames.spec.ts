@@ -39,16 +39,27 @@ async function playerTexture(page: Page): Promise<string> {
   });
 }
 
+const status = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { statusText?: { text: string } };
+    return scene.statusText?.text ?? "";
+  });
+
 async function saveSkin(page: Page): Promise<void> {
   await clickByText(page, "SkinEditor", "Save");
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { statusText?: { text: string } };
-        return scene.statusText?.text ?? "";
-      }),
-    )
-    .toContain("Saved");
+  await expect.poll(() => status(page)).toContain("Saved");
+}
+
+/**
+ * Saving a skin deliberately changes nothing anyone can see (2026-08-23) — it
+ * joins the library and waits to be chosen. These tests are about what the
+ * *runtime* does with a skin, so they make that choice the blunt way: become
+ * the default for every level. Two taps, because it reaches every level.
+ */
+async function makeDefault(page: Page): Promise<void> {
+  await clickByText(page, "SkinEditor", "Set as default");
+  await clickByText(page, "SkinEditor", "For every level?");
+  await expect.poll(() => status(page)).toContain("default set");
 }
 
 test("a painted character skin replaces Grampa, animates, and cannot change his hitbox", async ({ page }) => {
@@ -92,6 +103,7 @@ test("a painted character skin replaces Grampa, animates, and cannot change his 
   }
 
   await saveSkin(page);
+  await makeDefault(page);
 
   // walk2 was never painted, so it falls back to this skin's own idle — never
   // to Grampa's art, which would look like a bug mid-stride.
@@ -171,6 +183,7 @@ test("a painted enemy skin loops through its frames", async ({ page }) => {
   }
 
   await saveSkin(page);
+  await makeDefault(page);
   await clickByText(page, "SkinEditor", "← Back");
   await clickByText(page, "SkinEditor", "← Back");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));

@@ -165,6 +165,29 @@ export interface LevelData extends LevelArea {
    * doesn't render Sub/Main/Up as one continuous stacked space; each is
    * its own screen, swapped to instantly on touch, not scrolled into). */
   upArea?: LevelArea;
+  /**
+   * Which custom skin (see skins/skinSelection.ts) this level wears for each
+   * Brush id. Level-wide rather than per-`LevelArea` on purpose: Sub/Up are the
+   * same level, and a ghost that looked different after a basket teleport would
+   * read as a bug, not a feature — unlike Background/Music, which are per-area
+   * precisely so each screen can feel like its own place.
+   *
+   * Three-state per brush, which is the whole point: a missing key follows the
+   * library default, a skin id pins that skin for this level whatever the
+   * default becomes later, and an explicit `null` pins the *built-in* art
+   * despite a default. See skinSelection.ts for the resolution order.
+   *
+   * Optional, and absent on every level saved before 2026-08-23 — which then
+   * reads as "follow the default" for every brush, exactly the single global
+   * `activeId` behaviour those levels were saved under. So there is nothing to
+   * migrate and no level changes appearance.
+   *
+   * Stores ids, not art, unlike `customBackgroundData`/`customMusicData`: the
+   * skin library lives in the same Drive account and already holds every PNG,
+   * so a level shared with another account shows default art for its custom
+   * skins — the same way it already degrades when a skin is deleted.
+   */
+  skins?: Record<string, string | null>;
 }
 
 export interface LevelSummary {

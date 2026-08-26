@@ -13,6 +13,7 @@ import {
   SCHEMA_VERSION,
   WATER_TILE,
 } from "./LevelSchema";
+import { sanitizeLevelSkins } from "../skins/skinSelection";
 
 /**
  * Single source of truth for turning a LevelData object into a JSON string
@@ -38,6 +39,12 @@ export function cloneLevel(level: LevelData): LevelData {
     ...cloneArea(level),
     subArea: level.subArea ? cloneArea(level.subArea) : undefined,
     upArea: level.upArea ? cloneArea(level.upArea) : undefined,
+    // Level-wide rather than per-area (see LevelData.skins), so it sits here
+    // beside the areas rather than inside cloneArea. Copied rather than shared
+    // for the same reason the areas are: the editor mutates this map as the
+    // skin picker is used, and a clone that aliased it would write through to
+    // whatever it was cloned from.
+    skins: level.skins ? { ...level.skins } : undefined,
   };
 }
 
@@ -95,5 +102,13 @@ export function deserializeLevel(json: string): LevelData {
       `Unsupported level schema version ${String(parsed.schemaVersion)}; expected ${SCHEMA_VERSION}`,
     );
   }
+  // Skin choices are the one field here whose values are neither numbers nor
+  // fixed enums, so a hand-edited or half-written file could put anything in
+  // them. Filtered to ids and explicit nulls rather than trusted, so one bad
+  // entry can't reach the resolver — every other field on a level is either
+  // structural (and would already have failed above) or re-derived on load.
+  const skins = sanitizeLevelSkins(parsed.skins);
+  if (skins) parsed.skins = skins;
+  else delete parsed.skins;
   return parsed as unknown as LevelData;
 }

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { CustomSkinsFile } from "./CustomSkins";
+import { CustomSkinsFile, SkinAsset } from "./CustomSkins";
+import { LevelSkins, resolveSkinId } from "./skinSelection";
 import { baseFrameOf, framePlanFor, loopLength, resolveFrame } from "./spriteFrames";
 import { loadCustomSkins } from "./skinStorage";
 
@@ -55,28 +56,52 @@ function registerTexture(scene: Phaser.Scene, key: string, dataUrl: string): Pro
 }
 
 /**
- * Loads every brush's *active* custom skin (see skinStorage.ts's
- * SkinLibraryEntry — a brush can have several uploaded, only one applied
- * at a time) and registers it as a `skin-<brushId>` Phaser texture,
- * returning a brushId -> textureKey map for whichever ones are actually
- * active right now. Deliberately a separate key per skin rather than
- * overwriting a brush's *built-in* texture key in place: several built-in
- * textures (e.g. "enemy-ghost-pillow") are also reused as pure decoration
- * elsewhere (MenuScene's home-page icons) that has nothing to do with
- * level content and shouldn't silently change just because someone
- * reskinned the Ghost enemy for gameplay. Same return shape as before the
- * 2026-08-16 multi-skin-library change, so every existing consumer
- * (EntityPlacer, PlayScene) needed zero changes — only *how* the active
- * skin is chosen changed, not what gets handed back.
+ * The one place the two-layer choice becomes a concrete asset: the level's own
+ * pick if it made one, otherwise the library default, otherwise nothing (which
+ * means the brush keeps its built-in art). Every resolver below goes through
+ * here so none of them can drift from the rule in skinSelection.ts.
  */
-export async function resolveSkinTextureKeys(scene: Phaser.Scene): Promise<Map<string, string>> {
+function chosenSkin(skins: CustomSkinsFile, brushId: string, levelSkins?: LevelSkins): SkinAsset | null {
+  const entry = skins[brushId];
+  if (!entry) return null;
+  const id = resolveSkinId(
+    levelSkins?.[brushId],
+    entry.activeId,
+    entry.items.map((item) => item.id),
+  );
+  return id ? (entry.items.find((item) => item.id === id) ?? null) : null;
+}
+
+/**
+ * Loads whichever custom skin each brush is wearing *in this level* and
+ * registers it as its own Phaser texture, returning a brushId -> textureKey map
+ * for the ones that resolve to something. Deliberately a separate key per skin
+ * rather than overwriting a brush's *built-in* texture key in place: several
+ * built-in textures (e.g. "enemy-ghost-pillow") are also reused as pure
+ * decoration elsewhere (MenuScene's home-page icons) that has nothing to do
+ * with level content and shouldn't silently change just because someone
+ * reskinned the Ghost enemy for gameplay.
+ *
+ * `levelSkins` is the level's own choices (see LevelData.skins). Omit it and
+ * every brush falls back to the library default, which is what the Skin
+ * Creator's own thumbnail passes want and is exactly the pre-2026-08-23
+ * behaviour. Same return shape throughout, so PlayScene/EntityPlacer's patch
+ * loops needed no changes — only *how* the skin is chosen has ever changed.
+ */
+export async function resolveSkinTextureKeys(
+  scene: Phaser.Scene,
+  levelSkins?: LevelSkins,
+): Promise<Map<string, string>> {
   const skins = await loadCustomSkins();
   const result = new Map<string, string>();
-  for (const [brushId, entry] of Object.entries(skins)) {
-    if (!entry.activeId) continue;
-    const active = entry.items.find((item) => item.id === entry.activeId);
-    if (!active) continue;
-    const key = await registerTexture(scene, activeSkinTextureKey(brushId, active.id), active.imageData);
+  // Iterating the library rather than the level's map is deliberate: a brush
+  // can only wear a skin that exists, and a level entry of `null` means
+  // "built-in art", which is an absence from this map rather than a member of
+  // it. chosenSkin returns null for both cases.
+  for (const brushId of Object.keys(skins)) {
+    const chosen = chosenSkin(skins, brushId, levelSkins);
+    if (!chosen) continue;
+    const key = await registerTexture(scene, activeSkinTextureKey(brushId, chosen.id), chosen.imageData);
     result.set(brushId, key);
   }
   return result;
@@ -111,13 +136,12 @@ export type FrameTextureKeys = Map<string, string>;
 export async function resolveFrameTextureKeys(
   scene: Phaser.Scene,
   targetId: string,
+  levelSkins?: LevelSkins,
 ): Promise<FrameTextureKeys | null> {
   const plan = framePlanFor(targetId);
   if (!plan) return null;
   const skins = await loadCustomSkins();
-  const entry = skins[targetId];
-  if (!entry?.activeId) return null;
-  const active = entry.items.find((item) => item.id === entry.activeId);
+  const active = chosenSkin(skins, targetId, levelSkins);
   if (!active) return null;
 
   // A skin saved before multi-frame support has no `frames` at all; treat its
@@ -140,12 +164,11 @@ export async function resolveFrameTextureKeys(
 
 /** How many frames of an animated skin are actually painted and distinct —
  * what the runtime loops through. See spriteFrames.loopLength. */
-export async function resolveLoopLength(targetId: string): Promise<number> {
+export async function resolveLoopLength(targetId: string, levelSkins?: LevelSkins): Promise<number> {
   const plan = framePlanFor(targetId);
   if (!plan) return 0;
   const skins = await loadCustomSkins();
-  const entry = skins[targetId];
-  const active = entry?.items.find((item) => item.id === entry.activeId);
+  const active = chosenSkin(skins, targetId, levelSkins);
   if (!active) return 0;
   return loopLength(plan, active.frames ?? { [baseFrameOf(plan)]: active.imageData });
 }

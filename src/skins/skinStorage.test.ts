@@ -263,12 +263,18 @@ describe("cache invalidation on write", () => {
   });
 
   it("keeps a newly added skin visible to the next read", async () => {
+    const before = (await loadCustomSkins())["enemy-ghost"].activeId;
     await addCustomSkin("enemy-ghost", "data:image/png;base64,BBBB", "Gabriel");
 
     const after = await loadCustomSkins();
     expect(after["enemy-ghost"].items).toHaveLength(2);
     expect(after["enemy-ghost"].items[1].uploadedBy).toBe("Gabriel");
-    expect(after["enemy-ghost"].activeId).toBe(after["enemy-ghost"].items[1].id);
+    // ...and does *not* make it the default. Until 2026-08-23 this line
+    // asserted the opposite, which is exactly the bug: uploading a skin
+    // restyled that brush in every level, with nothing asked. Adding art to a
+    // library is not a decision about how existing levels should look — see
+    // addCustomSkin and skinSelection.ts.
+    expect(after["enemy-ghost"].activeId).toBe(before);
   });
 
   it("leaves the cache showing what is actually on Drive when a write fails", async () => {

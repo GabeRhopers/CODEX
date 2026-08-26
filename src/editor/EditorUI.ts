@@ -47,9 +47,15 @@ export interface EditorUICallbacks {
   // targets whichever brush is currently selected (see selectBrush), so
   // its callbacks don't need a brush id parameter.
   onSkinPickerOpen: () => void;
-  onSelectSkin: (skinId: string | null) => void;
+  /** A library skin id, `null` for "built-in art", or `undefined` for "follow
+   * the library default" — the level's three states, see skinSelection.ts. */
+  onSelectSkin: (skinId: string | null | undefined) => void;
   onUploadSkin: (file: File) => void;
   onDeleteSkin: (skinId: string) => void;
+  /** The deliberate, confirmed act of moving the library default to whatever
+   * this level currently uses for the selected brush. Separated from
+   * onSelectSkin precisely so no ordinary edit can reach every other level. */
+  onSetSkinAsDefault: () => void;
 
   onBackgroundPickerOpen: () => void;
   onSelectBackground: (id: string) => void;
@@ -62,14 +68,19 @@ export interface EditorUICallbacks {
   onDeleteMusic: (id: string) => void;
 }
 
-// Sentinel ids for a picker's non-deletable "use the built-in look"
-// option — never a real skin/track id (those are crypto.randomUUID()),
-// so there's no risk of an actual upload colliding with either. The skin
-// picker's callback maps this back to `null` (skinStorage.ts's own
-// "no active skin" value) before calling onSelectSkin; the music picker
-// does the same for `null` (musicLoader.ts's "no music" value) via
-// NO_MUSIC_ID.
-export const DEFAULT_SKIN_ID = "__default__";
+// Sentinel ids for a picker's non-deletable built-in options — never a real
+// skin/track id (those are crypto.randomUUID()), so there's no risk of an
+// actual upload colliding with one.
+//
+// The skin picker has *two* because a level's choice is three-state (see
+// skinSelection.ts): "follow whatever the library default is" and "use the
+// built-in art" were one option until 2026-08-23, and had to stop being, or a
+// level could not say "I want Grampa's own art here" in a way that survives
+// someone setting a default later. They map to `undefined` and `null`
+// respectively before reaching onSelectSkin. The music picker's NO_MUSIC_ID has
+// no such split — silence is silence — and still maps to plain `null`.
+export const USE_DEFAULT_SKIN_ID = "__default__";
+export const BUILTIN_SKIN_ID = "__builtin__";
 export const NO_MUSIC_ID = "__none__";
 
 const ENEMY_SIZES: { id: EnemySize; label: string }[] = [
@@ -211,6 +222,14 @@ export class EditorUI {
   private backgroundPicker!: AssetPickerMenu;
   private musicPicker!: AssetPickerMenu;
   private skinPicker!: AssetPickerMenu;
+  private setDefaultSkinButton!: Phaser.GameObjects.Text;
+  private setDefaultArmed = false;
+  private setDefaultArmTimer?: Phaser.Time.TimerEvent;
+  /** The level's own skin choices, pushed in by EditorScene. Held here only so
+   * the trigger can say *where* the current look came from — which matters now
+   * that "Custom" alone can't distinguish a choice this level made from one it
+   * inherited and would lose if the default moved. */
+  private levelSkins: Record<string, string | null> | undefined;
   private eraserButton!: PanelButton;
   private handButton!: PanelButton;
   private clearButton!: PanelButton;
@@ -384,10 +403,34 @@ export class EditorUI {
         this.musicPicker.close();
         this.callbacks.onSkinPickerOpen();
       },
-      onSelect: (id) => this.callbacks.onSelectSkin(id === DEFAULT_SKIN_ID ? null : id),
+      onSelect: (id) => {
+        if (id === USE_DEFAULT_SKIN_ID) this.callbacks.onSelectSkin(undefined);
+        else if (id === BUILTIN_SKIN_ID) this.callbacks.onSelectSkin(null);
+        else this.callbacks.onSelectSkin(id);
+      },
       onDelete: (id) => this.callbacks.onDeleteSkin(id),
       onUploadFile: (file) => this.callbacks.onUploadSkin(file),
     });
+
+    // Created *before* the first setSkinPickerLabel() below, which shows and
+    // hides it — the two are coupled, and building the button afterwards threw
+    // on the very first editor open.
+    //
+    // Directly under the picker, in the ~30px between it and the panel floor.
+    // Two-tap confirmed, same shape as Clear/Delete Area, because unlike every
+    // other control in this panel it reaches *other levels* — it is the only
+    // way a default moves now, and it should feel like the deliberate act it
+    // is. See EditorScene.setAsDefaultSkin.
+    this.setDefaultSkinButton = scene.add
+      .text(PANEL_PADDING, SKIN_SECTION_Y + SKIN_TRIGGER_HEIGHT + 4, "Set as default", {
+        fontSize: "11px",
+        color: "#a6a6c8",
+        backgroundColor: "#0f3460",
+        padding: { x: 8, y: 4 },
+      })
+      .setDepth(CONTENT_DEPTH)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => this.onSetDefaultClicked());
     this.setSkinPickerLabel();
 
     // --- Right "Level Settings" panel ---
@@ -874,21 +917,55 @@ export class EditorUI {
     return brush.entityType !== undefined;
   }
 
+  /** Reports *where the look came from*, not merely whether it is custom: with
+   * two layers, "Custom" alone can't tell a choice this level made from one it
+   * inherited, and inheriting means it changes if the default does. */
   private skinTriggerLabel(): string {
     const brush = this.selectedBrush();
     if (!brush || !this.isSkinnable(brush)) return "Skin: N/A";
-    return `Skin: ${this.skinTextureKeys.has(brush.id) ? "Custom" : "Default"} ▾`;
+    // Nothing resolved means built-in art, whichever layer decided that.
+    if (!this.skinTextureKeys.has(brush.id)) return "Skin: Built-in ▾";
+    // Something resolved: this level's own pick, or one it inherited.
+    return this.levelSkins?.[brush.id] ? "Skin: Custom ▾" : "Skin: Default ▾";
   }
 
   private setSkinPickerLabel(): void {
     this.skinPicker.setTriggerLabel(this.skinTriggerLabel());
+    const skinnable = !!this.selectedBrush() && this.isSkinnable(this.selectedBrush()!);
+    this.setDefaultSkinButton.setVisible(skinnable);
+    this.disarmSetDefault();
+  }
+
+  /** Pushed in by EditorScene alongside every applySkins, so the trigger can
+   * distinguish a look this level chose from one it inherited. */
+  setLevelSkins(levelSkins: Record<string, string | null> | undefined): void {
+    this.levelSkins = levelSkins;
+    this.setSkinPickerLabel();
+  }
+
+  private onSetDefaultClicked(): void {
+    if (this.setDefaultArmed) {
+      this.disarmSetDefault();
+      this.callbacks.onSetSkinAsDefault();
+      return;
+    }
+    this.setDefaultArmed = true;
+    this.setDefaultSkinButton.setText("For every level?").setStyle({ backgroundColor: "#aa3333", color: "#ffffff" });
+    this.setDefaultArmTimer = this.scene.time.delayedCall(CLEAR_ARM_TIMEOUT_MS, () => this.disarmSetDefault());
+  }
+
+  private disarmSetDefault(): void {
+    this.setDefaultArmTimer?.remove(false);
+    this.setDefaultArmTimer = undefined;
+    this.setDefaultArmed = false;
+    this.setDefaultSkinButton.setText("Set as default").setStyle({ backgroundColor: "#0f3460", color: "#a6a6c8" });
   }
 
   /** Called by EditorScene once onSkinPickerOpen's async resolve (a Drive
    * read scoped to just the currently-selected brush — see
-   * skinLoader.ts's resolveSkinThumbnails) finishes — `items` is the
-   * brush's own "Default" option plus every skin uploaded for it;
-   * `activeId` is DEFAULT_SKIN_ID when none is active. */
+   * skinLoader.ts's resolveSkinThumbnails) finishes — `items` is the brush's
+   * "Use default" and "Built-in art" options plus every skin uploaded for it;
+   * `activeId` is whichever of those this *level* currently chooses. */
   setSkinPickerItems(items: AssetPickerItem[], activeId: string): void {
     this.skinPicker.setItems(items, activeId);
   }

@@ -871,12 +871,16 @@ export class PlayScene extends Phaser.Scene {
     // because the player isn't a placed entity and so isn't in
     // spritesByBrushId at all — it's the one sprite the whole skin system
     // never reached before this.
-    void resolveFrameTextureKeys(this, CHARACTER_SKIN_ID).then((keys) => {
+    void resolveFrameTextureKeys(this, CHARACTER_SKIN_ID, this.level.skins).then((keys) => {
       if (this.currentAreaKey !== key) return;
       this.characterFrameKeys = keys ?? undefined;
     });
 
-    void resolveSkinTextureKeys(this).then((skinTextureKeys) => {
+    // `this.level.skins` is what makes a skin choice belong to this level
+    // rather than to everyone — see skinSelection.ts. Level-wide, so every area
+    // of the level resolves identically and a basket teleport can't change how
+    // a ghost looks.
+    void resolveSkinTextureKeys(this, this.level.skins).then((skinTextureKeys) => {
       if (this.currentAreaKey !== key) return;
       for (const [brushId, sprites] of this.spritesByBrushId) {
         const skinKey = skinTextureKeys.get(brushId);
@@ -899,7 +903,10 @@ export class PlayScene extends Phaser.Scene {
     // area, not per sprite, since every ghost shares one skin and one timer.
     for (const brushId of this.spritesByBrushId.keys()) {
       if (!framePlanFor(brushId)) continue;
-      void Promise.all([resolveFrameTextureKeys(this, brushId), resolveLoopLength(brushId)]).then(([keys, length]) => {
+      void Promise.all([
+        resolveFrameTextureKeys(this, brushId, this.level.skins),
+        resolveLoopLength(brushId, this.level.skins),
+      ]).then(([keys, length]) => {
         if (this.currentAreaKey !== key || !keys) return;
         this.enemyLoops.set(brushId, { keys, length, state: createLoopState() });
       });

@@ -9,7 +9,7 @@ import { HistoryStack } from "../editor/commands/HistoryStack";
 import { MoveEntityCommand } from "../editor/commands/MoveEntityCommand";
 import { PaintTileCommand } from "../editor/commands/PaintTileCommand";
 import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
-import { DEFAULT_SKIN_ID, EditorUI, NO_MUSIC_ID } from "../editor/EditorUI";
+import { BUILTIN_SKIN_ID, EditorUI, NO_MUSIC_ID, USE_DEFAULT_SKIN_ID } from "../editor/EditorUI";
 import { EntityPlacer, TileCoord } from "../editor/EntityPlacer";
 import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
 import { Brush, PALETTE } from "../editor/Palette";
@@ -31,6 +31,7 @@ import { StorageAdapter } from "../persistence/StorageAdapter";
 import { loadActiveProfile } from "../profile/Profile";
 import { loadActiveSkinId, resolveSkinTextureKeys, resolveSkinThumbnails } from "../skins/skinLoader";
 import { addCustomSkin, removeCustomSkin, setActiveSkin } from "../skins/skinStorage";
+import { withLevelSkin } from "../skins/skinSelection";
 import { readAndDownscaleSkinImage } from "../skins/skinUpload";
 
 interface EditorSceneData {
@@ -220,6 +221,7 @@ export class EditorScene extends Phaser.Scene {
         onSelectSkin: (skinId) => this.onSelectSkin(skinId),
         onUploadSkin: (file) => this.uploadSkin(file),
         onDeleteSkin: (skinId) => this.onDeleteSkin(skinId),
+        onSetSkinAsDefault: () => this.setAsDefaultSkin(),
         onBackgroundPickerOpen: () => this.onBackgroundPickerOpen(),
         onSelectBackground: (id) => this.onSelectBackground(id),
         onUploadBackground: (file) => this.uploadBackground(file),
@@ -235,12 +237,12 @@ export class EditorScene extends Phaser.Scene {
 
     if (this.initialLevel) this.rebuildVisualsFromLevel();
 
-    // Custom skins (see "Custom skins" under Art) are shared across all 3
-    // profiles and every level, so there's no level data to wait on the
-    // way backgrounds/music have — just one Drive read, kicked off once
-    // per Editor visit. Palette icons and any already-placed entities show
-    // their built-in art until this resolves, then swap in place.
-    void resolveSkinTextureKeys(this).then((skinTextureKeys) => this.applySkinTextureKeys(skinTextureKeys));
+    // The skin *library* is shared across all 3 profiles, but which skin this
+    // level wears is the level's own (see LevelData.skins) — so unlike before
+    // 2026-08-23 this resolve reads level data, and every re-resolve below has
+    // to pass it too. Palette icons and already-placed entities show built-in
+    // art until it lands, then swap in place.
+    void this.reresolveSkins();
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (!this.isOverGrid(pointer)) return; // Palette/Level Settings panel, header, footer, or the dead space below the grid
@@ -939,18 +941,33 @@ export class EditorScene extends Phaser.Scene {
   private applySkinTextureKeys(skinTextureKeys: Map<string, string>): void {
     this.skinTextureKeys = skinTextureKeys;
     this.ui.applySkins(skinTextureKeys);
+    // Paired with applySkins rather than pushed separately: together they are
+    // what the trigger label needs to say whether the look on screen is this
+    // level's own choice or one inherited from the default.
+    this.ui.setLevelSkins(this.level.skins);
     this.entityPlacer.setSkinTextureKeys(skinTextureKeys);
     this.entityPlacer.syncFromLevel(this.brushesByType);
+  }
+
+  /** Re-reads what every brush should be wearing *in this level* and pushes it
+   * everywhere. Every path that can change the answer — the initial load, the
+   * picker, an upload, a delete, Set as default — goes through here, so none of
+   * them can forget to pass `this.level.skins` and silently resolve against the
+   * defaults instead. */
+  private async reresolveSkins(): Promise<void> {
+    this.applySkinTextureKeys(await resolveSkinTextureKeys(this, this.level.skins));
   }
 
   /** Called by EditorUI once its skin picker's "Upload" tile has a file —
    * reskins whichever brush is currently selected (the palette selection
    * doubles as "which type", so there's no separate type-picker UI).
-   * Downscales to a small PNG (see skinUpload.ts), adds it to the brush's
-   * library in the shared, non-profile-scoped skins.json (see
-   * skinStorage.ts — every one of the 3 profiles sees this immediately,
-   * not just the one who uploaded it) as the new active skin, then
-   * re-resolves so this and every other open level picks it up. */
+   * Downscales to a small PNG (see skinUpload.ts) and adds it to the brush's
+   * library in the shared, non-profile-scoped skins.json.
+   *
+   * The upload is then selected **for this level only**. "I just uploaded this"
+   * plainly means "show it to me", but it does not mean "restyle every level I
+   * have" — which is what it used to mean, because addCustomSkin set the global
+   * default. Set as default is how that happens now. */
   private uploadSkin(file: File): void {
     const brush = this.currentBrush;
     if (!brush.entityType) {
@@ -960,12 +977,12 @@ export class EditorScene extends Phaser.Scene {
     const uploadedBy = loadActiveProfile() ?? "unknown";
     readAndDownscaleSkinImage(file)
       .then((dataUrl) => addCustomSkin(brush.id, dataUrl, uploadedBy))
-      .then(() => resolveSkinTextureKeys(this))
+      .then((id) => {
+        this.setLevelSkin(brush.id, id);
+        return this.reresolveSkins();
+      })
       .then(
-        (skinTextureKeys) => {
-          this.applySkinTextureKeys(skinTextureKeys);
-          this.ui.setStatus(`${brush.label} skin updated`);
-        },
+        () => this.ui.setStatus(`${brush.label} skin set for this level`),
         (err: unknown) => {
           console.error("Skin upload failed:", err);
           this.ui.setStatus("Couldn't upload that skin");
@@ -973,39 +990,78 @@ export class EditorScene extends Phaser.Scene {
       );
   }
 
-  /** Called by EditorUI when the skin picker opens — scoped to whichever
-   * brush is currently selected (canOpen already blocked this for a
-   * non-skinnable one), resolves that brush's own library of uploaded
-   * skins (a Drive read) plus its active id, right when the user is about
-   * to see them. A "Default" entry (see DEFAULT_SKIN_ID) always leads the
-   * list, showing the brush's own built-in art. */
+  /** Called by EditorUI when the skin picker opens — scoped to whichever brush
+   * is currently selected (canOpen already blocked this for a non-skinnable
+   * one), resolving that brush's library (a Drive read) right when the user is
+   * about to see it.
+   *
+   * Two built-in entries lead the list where there used to be one, because
+   * "follow the default" and "built-in art" stopped being the same thing on
+   * 2026-08-23: a level that wants Grampa's own art has to be able to say so in
+   * a way that a default set later cannot overrule. The highlighted entry is
+   * the level's own choice, not the default — that is what the picker now
+   * edits. */
   private onSkinPickerOpen(): void {
     const brush = this.currentBrush;
     if (!brush.entityType) return; // EditorUI's canOpen already guards this; defensive no-op
-    void Promise.all([resolveSkinThumbnails(this, brush.id), loadActiveSkinId(brush.id)]).then(([thumbnails, activeId]) => {
+    void Promise.all([resolveSkinThumbnails(this, brush.id), loadActiveSkinId(brush.id)]).then(([thumbnails, defaultId]) => {
+      const defaultLabel = defaultId ? "Use default" : "Use default (built-in)";
       const items: AssetPickerItem[] = [
-        { id: DEFAULT_SKIN_ID, label: "Default", textureKey: brush.textureKey },
+        { id: USE_DEFAULT_SKIN_ID, label: defaultLabel, textureKey: brush.textureKey },
+        { id: BUILTIN_SKIN_ID, label: "Built-in art", textureKey: brush.textureKey },
         ...thumbnails.map((t, i) => ({ id: t.id, label: `Skin ${i + 1}`, textureKey: t.textureKey, deletable: true })),
       ];
-      this.ui.setSkinPickerItems(items, activeId ?? DEFAULT_SKIN_ID);
+      const choice = this.level.skins?.[brush.id];
+      const selected = choice === undefined ? USE_DEFAULT_SKIN_ID : (choice ?? BUILTIN_SKIN_ID);
+      this.ui.setSkinPickerItems(items, selected);
     });
   }
 
-  /** Called by EditorUI once a skin picker item is picked — `null` (from
-   * the "Default" option, see EditorUI's own DEFAULT_SKIN_ID -> null
-   * mapping) reverts the brush to its built-in art; otherwise activates
-   * the chosen library entry. Applies to whichever brush is currently
-   * selected, same as uploadSkin. */
-  private onSelectSkin(skinId: string | null): void {
+  /** Writes a skin choice onto the level being edited and marks it dirty, so it
+   * is saved with the level like the background and music already are. Never
+   * touches the shared library — that is setAsDefaultSkin's job alone. */
+  private setLevelSkin(brushId: string, choice: string | null | undefined): void {
+    this.level.skins = withLevelSkin(this.level.skins, brushId, choice);
+    this.markDirty();
+  }
+
+  /**
+   * Called by EditorUI once a skin picker item is picked. Applies to whichever
+   * brush is currently selected, same as uploadSkin — but to **this level**,
+   * not to the shared library, which is the whole 2026-08-23 change. `undefined`
+   * is the "Use default" entry, `null` the "Built-in art" one, and a string a
+   * library skin; see skinSelection.ts for how the three differ.
+   */
+  private onSelectSkin(choice: string | null | undefined): void {
     const brush = this.currentBrush;
     if (!brush.entityType) return;
-    void setActiveSkin(brush.id, skinId)
-      .then(() => resolveSkinTextureKeys(this))
+    this.setLevelSkin(brush.id, choice);
+    void this.reresolveSkins().catch((err: unknown) => {
+      console.error("Skin selection failed:", err);
+      this.ui.setStatus("Couldn't switch that skin");
+    });
+  }
+
+  /**
+   * The one deliberate way to move a default: makes this level's current choice
+   * for the selected brush the library default, so every level that has *not*
+   * chosen for itself picks it up. Two-tap confirmed in EditorUI, since it
+   * reaches every other level — the same treatment Clear gets.
+   */
+  private setAsDefaultSkin(): void {
+    const brush = this.currentBrush;
+    if (!brush.entityType) return;
+    // Whatever this level resolves to right now, including "built-in art",
+    // which is a legitimate thing to make the default.
+    const choice = this.level.skins?.[brush.id];
+    const target = choice === undefined ? null : choice;
+    void setActiveSkin(brush.id, target)
+      .then(() => this.reresolveSkins())
       .then(
-        (skinTextureKeys) => this.applySkinTextureKeys(skinTextureKeys),
+        () => this.ui.setStatus(`${brush.label}: default set for every level`),
         (err: unknown) => {
-          console.error("Skin selection failed:", err);
-          this.ui.setStatus("Couldn't switch that skin");
+          console.error("Setting the default skin failed:", err);
+          this.ui.setStatus("Couldn't set that default");
         },
       );
   }
@@ -1023,10 +1079,9 @@ export class EditorScene extends Phaser.Scene {
     const brush = this.currentBrush;
     if (!brush.entityType) return;
     removeCustomSkin(brush.id, skinId)
-      .then(() => resolveSkinTextureKeys(this))
+      .then(() => this.reresolveSkins())
       .then(
-        (skinTextureKeys) => {
-          this.applySkinTextureKeys(skinTextureKeys);
+        () => {
           this.ui.setStatus(`${brush.label} skin removed`);
           this.onSkinPickerOpen();
         },

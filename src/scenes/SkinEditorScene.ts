@@ -19,7 +19,7 @@ import {
 import { baseFrameOf, CHARACTER_SKIN_ID, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES } from "../skins/pixelPalettes";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
-import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin } from "../skins/skinStorage";
+import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin, setActiveSkin } from "../skins/skinStorage";
 
 const BUTTON_COLOR = 0x0f3460;
 const BUTTON_HOVER_COLOR = 0x3a5a9c;
@@ -106,6 +106,9 @@ export class SkinEditorScene extends Phaser.Scene {
   private clearButton?: Phaser.GameObjects.Text;
   private clearArmed = false;
   private clearArmTimer?: Phaser.Time.TimerEvent;
+  private defaultButton?: Phaser.GameObjects.Text;
+  private defaultArmed = false;
+  private defaultArmTimer?: Phaser.Time.TimerEvent;
   // Every field below is a *tool preference*, not per-skin data — deliberately
   // never reset in create()/rebuild(), same convention currentColor already
   // followed before this pass: picking Fill or zooming in once should still
@@ -192,6 +195,12 @@ export class SkinEditorScene extends Phaser.Scene {
     this.referencePicker = undefined;
     this.clearArmTimer?.remove(false);
     this.clearArmed = false;
+    // Same for the other two-tap button: a rebuild throws away the Text it
+    // armed, so a timer still holding a reference would fire against a
+    // destroyed object and leave the flag stuck armed for the new one.
+    this.defaultArmTimer?.remove(false);
+    this.defaultArmed = false;
+    this.defaultButton = undefined;
     // NOT `this.children.removeAll(true)` — that looks right but isn't:
     // `this.children` is the Scene's DisplayList, which extends the base
     // Structs.List directly rather than GameObjects.Container, so its
@@ -683,6 +692,46 @@ export class SkinEditorScene extends Phaser.Scene {
     this.clearButton = this.makeSmallButton(GAME_WIDTH - 24 - 130, canvasRect.y + 80, "Clear", () => this.onClearClicked());
 
     this.buildReferenceControls(target, canvasRect.y + 130);
+
+    // "Set as default" lives here as well as in the level editor because the
+    // player character is only reachable from this scene — it is deliberately
+    // not a Palette brush (see CHARACTER_BRUSH), so it has no picker over
+    // there, and without this a painted character could be saved and never
+    // worn by anything. Two-tap confirmed, same as Clear, since it reaches
+    // every level that hasn't chosen for itself.
+    this.defaultButton = this.makeSmallButton(GAME_WIDTH - 24 - 130, canvasRect.y + 200, "Set as default", () =>
+      this.onSetDefaultClicked(),
+    );
+  }
+
+  /** Makes the skin currently open the library default for its brush — see
+   * skinStorage.setActiveSkin, the only thing that moves a default. Requires a
+   * save first: an unsaved drawing has no library entry to point at. */
+  private onSetDefaultClicked(): void {
+    if (!this.target || !this.defaultButton) return;
+    if (!this.target.existingId) {
+      this.statusText?.setText("Save it first, then it can become the default").setColor("#ffeb3b");
+      return;
+    }
+    if (!this.defaultArmed) {
+      this.defaultArmed = true;
+      this.defaultButton.setText("For every level?").setStyle({ backgroundColor: "#aa3333" });
+      this.defaultArmTimer = this.time.delayedCall(ARM_TIMEOUT_MS, () => {
+        this.defaultArmed = false;
+        this.defaultButton?.setText("Set as default").setStyle({ backgroundColor: "#0f3460" });
+      });
+      return;
+    }
+    this.defaultArmTimer?.remove(false);
+    this.defaultArmed = false;
+    this.defaultButton.setText("Set as default").setStyle({ backgroundColor: "#0f3460" });
+    const { brush, existingId } = this.target;
+    void setActiveSkin(brush.id, existingId)
+      .then(() => this.statusText?.setText(`${brush.label}: default set for every level`).setColor("#4ade80"))
+      .catch((err: unknown) => {
+        console.error("Setting the default skin failed:", err);
+        this.statusText?.setText("Couldn't set that default").setColor("#ff6666");
+      });
   }
 
   /** One step on the zoom ladder, about the middle of the window. Pure CSS
@@ -942,7 +991,13 @@ export class SkinEditorScene extends Phaser.Scene {
       .then((id) => {
         this.target = { ...target, existingId: id };
         const painted = frames ? ` (${Object.keys(frames).length} frame${Object.keys(frames).length === 1 ? "" : "s"})` : "";
-        this.statusText?.setText(`Saved — ${target.brush.label} skin updated${painted}`).setColor("#4ade80");
+        // Says where it went, because as of 2026-08-23 saving deliberately
+        // changes nothing anyone can see yet. Before that it silently became
+        // the look of this brush in every level; now it joins the library and
+        // waits to be picked. Without this line that reads as a broken Save.
+        this.statusText
+          ?.setText(`Saved${painted} — pick it in a level's Skin menu to use it`)
+          .setColor("#4ade80");
       })
       .catch((err: unknown) => {
         console.error("Pixel skin save failed:", err);

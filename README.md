@@ -260,13 +260,19 @@ Open the dev server URL in a browser. Controls:
 - **Custom skins**: select any Marker/Enemy/Item/Decor brush in the left
   panel, then click the **Skin** trigger below the icon grid to open a
   submenu of small thumbnails — every skin ever uploaded for that brush,
-  plus a non-deletable "Default" (its built-in art) — and pick one to
-  make it active, or use the submenu's own **+ Upload** tile to add a new
-  one. Applies to that brush's palette icon, every already-placed
-  instance, and gameplay, shared instantly across all 3 profiles (not
-  just the current level). Blocks aren't reskinnable yet. Backgrounds and
-  music share this exact same trigger-and-thumbnail-submenu shape — see
-  "Skin/background/music libraries" under Art.
+  plus two non-deletable entries, **Use default** and **Built-in art** —
+  or use the submenu's own **+ Upload** tile to add a new one. **The
+  choice belongs to this level** and is saved with it, exactly like
+  Background and Music: it applies to the brush's palette icon, every
+  already-placed instance and gameplay *here*, and leaves your other
+  levels alone. The trigger says where the current look came from —
+  `Custom` (this level picked it), `Default` (inherited, so it changes if
+  the default does) or `Built-in`. **Set as default** underneath, two-tap
+  confirmed, is the only thing that moves the shared default that levels
+  fall back to; painting or uploading a skin never does. Blocks aren't
+  reskinnable yet. Backgrounds and music share this exact same
+  trigger-and-thumbnail-submenu shape — see "Skin/background/music
+  libraries" under Art, and "A level owns its skins" for the layering.
 - **Test Play** (button or Space): plays the level you've built. Requires
   a Spawn and a Goal to be placed first, in any of Main/Sub/Up (they don't
   both need to be in the same area); enemies and items are optional.
@@ -2623,6 +2629,63 @@ extremes, since each fixed-colour candidate passes one and fails the other.
 Verified to fail on both (1.28 and 0.00) before being accepted. Playwright hands
 back a PNG and Node has no decoder, so the page decodes its own screenshot
 through an offscreen canvas rather than adding a dependency for one measurement.
+
+**A level owns its skins, and a default only moves when you say so
+(2026-08-23).** A review of the whole skin path turned up three things, and the
+third was doing real damage quietly.
+
+*One:* of 37 palette brushes the 27 entity ones are skinnable and every one
+genuinely works — `PlayScene` patches skins over `spritesByBrushId` and every
+placeable entity is tracked. The **10 block brushes cannot be skinned at all**
+(Grass, Desert, Castle, Snow, Brick, Castle Brick, Bounce, Castle Bounce, Water,
+Lava): blocks render through a tilemap of four 6-frame tilesets at fixed gid
+ranges, not one swappable image per brush. That is the next pass. A smaller
+oddity found alongside it: `spawn` appears in both skin pickers but has no
+gameplay sprite, so reskinning it changes only the editor marker, while the
+actual player character is a separate target reachable only from the Skin
+Creator.
+
+*Two:* a level stored `background`, `customBackgroundId`, `customMusicId` and
+**nothing about skins**. The choice lived in the shared `skins.json` as
+`activeId`, which `CustomSkins.ts` described plainly as applying "for every
+profile, in every level, immediately". So picking a skin while editing one level
+restyled every other one, and Save never recorded it.
+
+*Three, and the bad one:* `addCustomSkin` and `savePixelSkin` both **set**
+`activeId`. Merely finishing a drawing in the Skin Creator made it the look of
+that brush everywhere, with nothing asked and no way to paint one without that
+happening.
+
+The fix is two layers with the level on top:
+
+    level override  →  library default  →  built-in art
+
+`skinSelection.ts` holds the rule, pure and unit-tested. A level's value is
+deliberately **three-state**, which is what makes "defaults stay put" sayable at
+all: a missing key follows the default, a skin id pins that skin whatever the
+default becomes later, and an explicit `null` pins the *built-in* art despite a
+default. Two picker entries where there was one, because "follow the default"
+and "use built-in art" had been the same option and had to stop being.
+
+*Nothing anyone had already made changed appearance, and there was no
+migration.* Every level saved before this has no `skins` field, so every brush
+reads `undefined` and defers to `activeId` — precisely the behaviour those
+levels were saved under. There is a unit test asserting exactly that.
+
+Saving and uploading now leave the default alone. `setActiveSkin` is the only
+thing that moves it, reached from a two-tap **Set as default** in the level
+editor and a second one in the Skin Creator — the latter because the player
+character is deliberately not a Palette brush, so it has no picker in the level
+editor and a painted character would otherwise have been unwearable. An upload
+selects itself for the level being edited, since "I just uploaded this" means
+"show me", not "restyle everything I own".
+
+Two follow-on costs, both accepted rather than hidden. A level stores skin
+*ids*, not art, unlike backgrounds and music which inline theirs — so a level
+shared with another account shows default art for its custom skins, the same way
+it already degrades when a skin is deleted. And `sprite-frames.spec.ts` had to
+learn to press Set as default: it paints a skin and asserts the runtime wears
+it, which is no longer something that happens by itself.
 
 **An Erase tool, not just an erase gesture (2026-08-23).** Erasing already
 worked two ways, and neither was a tool. Right-click (`e.buttons & 2` in
