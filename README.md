@@ -2748,6 +2748,62 @@ engage unless `outcome === "playing"`, so a PAUSED card can never end up sitting
 on the win or lose screen, and Start can never un-pause the physics that `onWin`
 deliberately froze. **P** does the same thing from the keyboard.
 
+**Selection you can actually see (2026-08-26).** The Sprite editor used one
+colour, `#3a5a9c`, for *both* "you are pointing at this" and "this is the armed
+tool" — and `makeSmallButton`'s `pointerout` reset every button to the
+unselected colour unconditionally. Two bugs from one collision: an armed tool
+looked exactly like a tool you happened to be hovering, and hovering the armed
+tool then moving away rendered it *unarmed* until you clicked something else.
+`Grid: On` and `Mirror: On` had it too, saved only by their text still saying
+"On".
+
+The level editor had already solved this — `ERASER_ACTIVE_COLOR` paired with
+`ERASER_ACTIVE_HOVER_COLOR`, and `pointerout` restoring the active look instead
+of clearing it — so this ports that pattern rather than inventing one.
+`makeSmallButton` takes an optional `isActive` callback that both hover handlers
+consult. Selection is now a shape as well as a colour (an amber ring on the
+armed tool, the open palette and the frame being drawn on), which is what the
+colour swatches already did.
+
+The same collision existed in three more places in the level editor, all using
+`BUTTON_HOVER_COLOR` as their *active* colour: the palette category tabs, the
+area buttons and Enemy Size. The category tabs were worse than the rest — their
+fill was only ever set by the hover handlers, so opening the dropdown showed
+**no** category as open until you hovered one and left. All four now share one
+`SELECTED_COLOR`.
+
+**Grouping.** The Sprite editor's controls sat in two stacks ~1200px apart: a
+labelled "View" column on the left, and an unlabelled pile on the right holding
+Mirror (a drawing mode), Clear (destructive), the reference controls (tracing)
+and Set as default (publishing) — four jobs with nothing saying so. Both rails
+now carry headings, and the right one aligns to a single left edge (the
+reference picker's, since it is the widest thing in the rail and has to end at
+the margin). In the level editor, `Clear` left the "Level Settings" panel: it
+wipes every tile you have placed, and it was grouped and coloured as if it were
+a third asset picker. It now sits last under its own "Level content" heading and
+a rule. Its *resting* colour stays the normal navy on purpose — the two-tap arm
+is what signals danger, and tinting the rest state red too would blunt the
+difference between "this is destructive" and "the next tap does it".
+
+**Icons, and where they didn't fit.** Glyph prefixes went on Undo/Redo in both
+editors and the zoom buttons, and Skin Creator on the home page picked up the
+card family's accent stripe, icon and chevron (it is a destination like the four
+cards, and was the only one that didn't look like one; it does not *become* a
+card because a third card row costs 102px and would push the resume bar past the
+footer).
+
+They were tried on the Sprite editor's tool row and **measured out**: the swatch
+row is centred and the tool row right-aligned, so they close on each other, and
+the widest palette already left ~4px between them. Prefixing all five labels put
+the tools 43px *over* the swatches. The row's problem was never its labels — it
+was that the armed tool was invisible.
+
+That overlap also exposed a test that had stopped testing: `skin-erase.spec.ts`
+finds tool buttons by exact label, so relabelling them matched **nothing**,
+leaving `toolLeft` at `Infinity` — which clears every swatch by a comfortable
+infinity, and passed. It now asserts it found all five first, so it fails loudly
+on drift rather than silently succeeding.
+
 **Skins get names (2026-08-26).** Skins were the only asset library without
 one. `BackgroundAsset` and `MusicAsset` have carried `name` since they were
 built and their pickers show it; a skin had `{id, imageData, uploadedBy,

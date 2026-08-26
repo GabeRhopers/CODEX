@@ -76,7 +76,7 @@ test("a click paints the cell under it, zoomed in four times and panned off-cent
   test.slow();
   await openGhostCanvas(page);
 
-  for (let i = 0; i < 4; i++) await clickByText(page, "SkinEditor", "Zoom +");
+  for (let i = 0; i < 4; i++) await clickByText(page, "SkinEditor", "＋ Zoom");
   expect((await boxes(page)).canvas.width).toBeGreaterThan((await boxes(page)).viewport.width * 3.5);
 
   // Drag the view off-centre with the Pan tool, so the content box's origin is
@@ -126,7 +126,7 @@ test("zooms in far past the old 320px ceiling, and the window stays put", async 
   // baseline rather than the limit.
   expect(fit.canvas.width).toBeCloseTo(fit.viewport.width, 0);
 
-  for (let i = 0; i < 12; i++) await clickByText(page, "SkinEditor", "Zoom +");
+  for (let i = 0; i < 12; i++) await clickByText(page, "SkinEditor", "＋ Zoom");
   const zoomed = await boxes(page);
 
   // The old model could not exceed the window by any amount at all.
@@ -150,7 +150,7 @@ test("zooms out below the old 200px floor and centres what is left", async ({ pa
   await openGhostCanvas(page);
 
   const fit = await boxes(page);
-  for (let i = 0; i < 6; i++) await clickByText(page, "SkinEditor", "Zoom −");
+  for (let i = 0; i < 6; i++) await clickByText(page, "SkinEditor", "－ Zoom");
   const out = await boxes(page);
 
   // Old floor was 200 of a 320 window, i.e. 0.625.

@@ -387,25 +387,41 @@ export class MenuScene extends Phaser.Scene {
   private buildFooter(): void {
     const cx = GAME_WIDTH / 2;
 
-    // Skin Creator earns a chip rather than the bare text link it used to
-    // be: it is a real destination, and as a dim 13px link under a bright
-    // green volume slider it was the least prominent thing on the page
-    // despite being the only other place you can actually go.
-    const skinChip = this.add
-      .text(SIDE_MARGIN, FOOTER_ROW_Y, "Skin Creator", {
-        fontSize: "13px",
-        color: MUTED_TEXT,
-        backgroundColor: "#16213e",
-        padding: { x: 12, y: 7 },
-      })
-      .setOrigin(0, 0.5)
+    // Skin Creator is a destination like the four cards above, and it was the
+    // only one that didn't look like one — a flat chip with no icon, no accent
+    // and no chevron, reading as footer chrome next to them.
+    //
+    // It does *not* become a fifth card, because there is no room for one: a
+    // third card row costs CARD_HEIGHT + CARD_GAP_Y = 102px, which would push
+    // the resume bar (BAR_TOP 308) past the footer line. So it borrows the card
+    // family's language at footer scale instead — accent stripe, icon, chevron,
+    // and the same fill/stroke swap on highlight — which is what actually makes
+    // it read as somewhere you can go.
+    const chipHeight = 34;
+    const chipWidth = 190;
+    const chipTop = FOOTER_ROW_Y - chipHeight / 2;
+    const skinChipBg = this.add
+      .rectangle(SIDE_MARGIN, chipTop, chipWidth, chipHeight, CARD_FILL)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, CARD_STROKE)
       .setInteractive({ useHandCursor: true });
-    this.register(skinChip, {
+    this.add.rectangle(SIDE_MARGIN, chipTop, ACCENT_WIDTH, chipHeight, 0xc678dd).setOrigin(0, 0);
+    const skinIcon = this.add.image(SIDE_MARGIN + ACCENT_WIDTH + 20, FOOTER_ROW_Y, "enemy-ghost-pillow").setOrigin(0.5);
+    skinIcon.setScale(Math.min(1, 22 / skinIcon.width, 22 / skinIcon.height));
+    const skinLabel = this.add
+      .text(SIDE_MARGIN + ACCENT_WIDTH + 38, FOOTER_ROW_Y, "Skin Creator", { fontSize: "13px", color: MUTED_TEXT })
+      .setOrigin(0, 0.5);
+    const skinChevron = this.add
+      .text(SIDE_MARGIN + chipWidth - 16, FOOTER_ROW_Y, "\u203a", { fontSize: "18px", color: CHEVRON_IDLE })
+      .setOrigin(0.5);
+    this.register(skinChipBg, {
       row: ROW_FOOTER,
       col: 0,
       setHighlighted: (on) => {
-        skinChip.setColor(on ? "#ffffff" : MUTED_TEXT);
-        skinChip.setStyle({ backgroundColor: on ? "#3a5a9c" : "#16213e" });
+        skinChipBg.setFillStyle(on ? CARD_FILL_ACTIVE : CARD_FILL);
+        skinChipBg.setStrokeStyle(on ? 2 : 1, on ? CARD_STROKE_ACTIVE : CARD_STROKE);
+        skinLabel.setColor(on ? "#ffffff" : MUTED_TEXT);
+        skinChevron.setColor(on ? "#ffffff" : CHEVRON_IDLE);
       },
       activate: () => this.scene.start("SkinEditor"),
     });

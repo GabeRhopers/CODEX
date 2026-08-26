@@ -38,7 +38,7 @@ test("Hand tool grabs/moves an entity and a ground block, and Undo reverts each"
   let ghost = snapshot.entities.find((e) => e.type === "enemy-ghost");
   expect(ghost).toMatchObject({ x: 3, y: 2 });
 
-  await clickByText(page, "Editor", "Undo");
+  await clickByText(page, "Editor", "↶ Undo");
   snapshot = await readLevel(page);
   ghost = snapshot.entities.find((e) => e.type === "enemy-ghost");
   expect(ghost).toMatchObject({ x: 3, y: 5 });
@@ -50,7 +50,7 @@ test("Hand tool grabs/moves an entity and a ground block, and Undo reverts each"
   expect(snapshot.ground[2][6]).toBe(GROUND_GRASS_TILE);
   expect(snapshot.ground[5][6]).toBe(EMPTY_TILE);
 
-  await clickByText(page, "Editor", "Undo");
+  await clickByText(page, "Editor", "↶ Undo");
   snapshot = await readLevel(page);
   expect(snapshot.ground[5][6]).toBe(GROUND_GRASS_TILE);
   expect(snapshot.ground[2][6]).toBe(EMPTY_TILE);

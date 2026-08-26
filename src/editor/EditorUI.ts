@@ -200,6 +200,12 @@ interface PanelButton {
 
 const BUTTON_COLOR = 0x0f3460;
 const BUTTON_HOVER_COLOR = 0x3a5a9c;
+/** "This is the selected member of a set" — the open palette category, the
+ * current area, the chosen enemy size. Deliberately distinct from
+ * BUTTON_HOVER_COLOR, which all three used to share, so "this one is selected"
+ * never reads as "your pointer is here". Matches the Sprite editor's
+ * SELECTED_COLOR so the two screens speak the same language. */
+const SELECTED_COLOR = 0x8a6d1f;
 const ERASER_ACTIVE_COLOR = 0xaa3333;
 const ERASER_ACTIVE_HOVER_COLOR = 0xd14f4f;
 const HAND_ACTIVE_COLOR = 0x6a3fa0;
@@ -242,6 +248,7 @@ export class EditorUI {
   private upAreaExists = false;
   private sizeButtons = new Map<EnemySize, PanelButton>();
   private currentSize: EnemySize = "medium";
+  private readonly categoryButtons = new Map<BrushCategory, PanelButton>();
   private iconGrid: Phaser.GameObjects.Container;
   private chipButton!: PanelButton;
   private dropdownContainer: Phaser.GameObjects.Container;
@@ -298,8 +305,8 @@ export class EditorUI {
       headerX += width + 8;
       return button;
     };
-    this.wireHoverStyles(addHeaderButton("Undo", 56, () => this.callbacks.onUndo()).bg);
-    this.wireHoverStyles(addHeaderButton("Redo", 56, () => this.callbacks.onRedo()).bg);
+    this.wireHoverStyles(addHeaderButton("↶ Undo", 72, () => this.callbacks.onUndo()).bg);
+    this.wireHoverStyles(addHeaderButton("↷ Redo", 72, () => this.callbacks.onRedo()).bg);
     this.eraserButton = addHeaderButton("Eraser", 64, () => this.callbacks.onToggleEraser());
     this.refreshEraserStyle();
     // Mutually exclusive with Eraser (EditorScene.toggleHand/toggleEraser
@@ -368,9 +375,11 @@ export class EditorUI {
         this.selectCategory(category.id),
       );
       button.bg.on("pointerover", () => button.bg.setFillStyle(BUTTON_HOVER_COLOR));
-      button.bg.on("pointerout", () => button.bg.setFillStyle(category.id === this.activeCategory ? BUTTON_HOVER_COLOR : BUTTON_COLOR));
+      button.bg.on("pointerout", () => this.refreshCategoryStyles());
+      this.categoryButtons.set(category.id, button);
       this.dropdownContainer.add([button.bg, button.label]);
     });
+    this.refreshCategoryStyles();
 
     this.iconGrid = scene.add.container(0, 0).setDepth(CONTENT_DEPTH);
     this.selectedOutline = scene.add.image(-100, -100, "selected-outline").setDepth(OUTLINE_DEPTH);
@@ -489,16 +498,6 @@ export class EditorUI {
     this.musicPicker.setTriggerLabel(this.musicLabelText(initialMusicLabel));
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
-    // Clear: two-tap arm/confirm rather than a native confirm() popup, to
-    // stay visually consistent with the rest of this UI — see
-    // CLEAR_ARM_TIMEOUT_MS and armClear/disarmClear below.
-    this.clearButton = this.makeFixedWidthButton(RIGHT_PANEL_X + PANEL_PADDING, rowY, RIGHT_BUTTON_WIDTH, RIGHT_BUTTON_HEIGHT, "Clear", () =>
-      this.onClearClicked(),
-    );
-    this.clearButton.bg.on("pointerover", () => this.clearButton.bg.setFillStyle(this.clearArmed ? CLEAR_ARMED_HOVER_COLOR : BUTTON_HOVER_COLOR));
-    this.clearButton.bg.on("pointerout", () => this.clearButton.bg.setFillStyle(this.clearArmed ? CLEAR_ARMED_COLOR : BUTTON_COLOR));
-    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
-
     // Enemy Size: a placement-time preference (like the palette selection
     // itself), not a property of anything currently selected — it applies
     // whenever an enemy brush is next placed, regardless of which brush
@@ -521,6 +520,34 @@ export class EditorUI {
       this.sizeButtons.set(id, button);
     });
     this.refreshSizeStyles();
+    rowY += RIGHT_BUTTON_HEIGHT;
+
+    // Clear used to sit between the Music picker and Enemy Size, styled
+    // identically to both — a button that erases every tile you have placed,
+    // grouped and coloured as if it were a third asset setting. It is not a
+    // setting, so it now sits last, under its own heading and a rule, with
+    // nothing beneath it to reach for by accident.
+    //
+    // Its resting colour stays BUTTON_COLOR deliberately: the two-tap arm is
+    // what signals danger (CLEAR_ARMED_COLOR), and tinting the resting state
+    // red as well would blunt the difference between "this is destructive" and
+    // "this is armed and the next tap does it".
+    rowY += 12;
+    scene.add
+      .rectangle(RIGHT_PANEL_X + PANEL_PADDING, rowY, RIGHT_BUTTON_WIDTH, 1, 0x2b3350)
+      .setOrigin(0, 0)
+      .setDepth(CONTENT_DEPTH);
+    rowY += 12;
+    scene.add
+      .text(RIGHT_PANEL_X + PANEL_PADDING, rowY, "Level content", { fontSize: "13px", color: "#a6a6c8", fontStyle: "bold" })
+      .setOrigin(0, 0)
+      .setDepth(CONTENT_DEPTH);
+    rowY += 24;
+    this.clearButton = this.makeFixedWidthButton(RIGHT_PANEL_X + PANEL_PADDING, rowY, RIGHT_BUTTON_WIDTH, RIGHT_BUTTON_HEIGHT, "Clear", () =>
+      this.onClearClicked(),
+    );
+    this.clearButton.bg.on("pointerover", () => this.clearButton.bg.setFillStyle(this.clearArmed ? CLEAR_ARMED_HOVER_COLOR : BUTTON_HOVER_COLOR));
+    this.clearButton.bg.on("pointerout", () => this.clearButton.bg.setFillStyle(this.clearArmed ? CLEAR_ARMED_COLOR : BUTTON_COLOR));
 
     // --- Footer: read-only stats ---
     scene.add
@@ -592,6 +619,21 @@ export class EditorUI {
     return `${category?.label ?? ""} ▾`;
   }
 
+  /**
+   * Paints the open category.
+   *
+   * Two bugs in one: the fill was only ever set by the hover handlers, so
+   * opening the dropdown showed *no* category as open until you hovered one and
+   * left — and when it did paint, it used BUTTON_HOVER_COLOR, which is what a
+   * category you are merely pointing at looks like. Same "restyle on both
+   * selection and hover-out" treatment the area and Enemy Size rows already use.
+   */
+  private refreshCategoryStyles(): void {
+    for (const [id, button] of this.categoryButtons) {
+      button.bg.setFillStyle(id === this.activeCategory ? SELECTED_COLOR : BUTTON_COLOR);
+    }
+  }
+
   private toggleDropdown(): void {
     this.dropdownOpen = !this.dropdownOpen;
     this.dropdownContainer.setVisible(this.dropdownOpen);
@@ -606,6 +648,7 @@ export class EditorUI {
     this.iconGrid.setVisible(true);
     if (category !== this.activeCategory) {
       this.activeCategory = category;
+      this.refreshCategoryStyles();
       this.renderIconGrid();
     } else {
       this.updateSelectedOutlinePosition();
@@ -798,7 +841,7 @@ export class EditorUI {
    * own refreshSizeStyles. */
   private refreshAreaButtonStyles(): void {
     for (const [key, button] of this.areaButtons) {
-      button.bg.setFillStyle(key === this.currentAreaKey ? BUTTON_HOVER_COLOR : BUTTON_COLOR);
+      button.bg.setFillStyle(key === this.currentAreaKey ? SELECTED_COLOR : BUTTON_COLOR);
     }
   }
 
@@ -860,7 +903,7 @@ export class EditorUI {
    * highlighted after the pointer leaves it. */
   private refreshSizeStyles(): void {
     for (const [id, button] of this.sizeButtons) {
-      button.bg.setFillStyle(id === this.currentSize ? BUTTON_HOVER_COLOR : BUTTON_COLOR);
+      button.bg.setFillStyle(id === this.currentSize ? SELECTED_COLOR : BUTTON_COLOR);
     }
   }
 

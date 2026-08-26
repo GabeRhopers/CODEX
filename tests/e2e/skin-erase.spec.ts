@@ -98,9 +98,11 @@ test("the tool row still clears the widest palette's swatches", async ({ page })
     let toolLeft = Number.POSITIVE_INFINITY;
     let swatchRight = Number.NEGATIVE_INFINITY;
     let swatches = 0;
+    let tools = 0;
     for (const child of scene.children.list) {
       const text = child as { text?: string; x?: number };
       if (typeof text.text === "string" && labels.includes(text.text)) {
+        tools++;
         toolLeft = Math.min(toolLeft, text.x!);
       }
       // Swatches are 24px rectangles drawn from origin (0,0).
@@ -110,9 +112,15 @@ test("the tool row still clears the widest palette's swatches", async ({ page })
         swatchRight = Math.max(swatchRight, rect.x! + 24);
       }
     }
-    return { toolLeft, swatchRight, swatches };
+    return { toolLeft, swatchRight, swatches, tools };
   });
 
+  // Without this the test passes vacuously: it finds tool buttons by exact
+  // label, so a relabelling makes it match nothing, leaving toolLeft at
+  // Infinity — which clears every swatch by a comfortable infinity. That is
+  // exactly what happened when the tools were given icon prefixes, and the
+  // overlap it was written to catch went straight past it.
+  expect(layout.tools, "no tool buttons matched — the labels below have drifted").toBe(5);
   expect(layout.swatches).toBe(17); // 16 colours + transparent — the widest case
   expect(layout.toolLeft).toBeGreaterThan(layout.swatchRight);
   // Not merely "does not overlap": a gap this side of comfortable is the signal

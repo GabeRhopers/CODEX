@@ -173,6 +173,6 @@ test("Trace in stamps the reference as a starting point, and Undo takes it back"
 
   // Tracing is an edit like any other, which is most of the point: try it,
   // decide you preferred your own, take it back.
-  await clickByText(page, "SkinEditor", "Undo");
+  await clickByText(page, "SkinEditor", "↶ Undo");
   await expect.poll(() => readCells(page).then(paintedCount)).toBe(1);
 });

@@ -58,6 +58,9 @@ const ROW_HEIGHT = 44;
 // the drawing inside this box, never the box itself, so no button can be pushed
 // off the scene's 468px floor however far someone zooms in. 132 + 320 = 452.
 const CANVAS_TOP_Y = 132;
+/** Width of the reference picker, and therefore of the whole right rail — see
+ * buildReferenceControls for why the picker cannot be narrower. */
+const REFERENCE_WIDTH = 260;
 
 type Mode = "browse" | "pick-brush" | "canvas";
 
@@ -624,9 +627,9 @@ export class SkinEditorScene extends Phaser.Scene {
     // so each is positioned from its *own* rendered `.width` immediately
     // after creation, right-to-left, rather than a guessed pixel offset. ---
     const saveButton = this.makeSmallButton(GAME_WIDTH - 24 - 60, 20 + 10, "Save", () => this.onSave());
-    const redoButton = this.makeSmallButton(0, 20 + 10, "Redo", () => this.performRedo());
+    const redoButton = this.makeSmallButton(0, 20 + 10, "↷ Redo", () => this.performRedo());
     redoButton.setX(saveButton.x - 8 - redoButton.width);
-    const undoButton = this.makeSmallButton(0, 20 + 10, "Undo", () => this.performUndo());
+    const undoButton = this.makeSmallButton(0, 20 + 10, "↶ Undo", () => this.performUndo());
     undoButton.setX(redoButton.x - 8 - undoButton.width);
 
     this.statusText = this.add.text(GAME_WIDTH / 2, 44, "", { fontSize: "12px", color: "#4ade80" }).setOrigin(0.5, 0);
@@ -700,6 +703,14 @@ export class SkinEditorScene extends Phaser.Scene {
     // Erase and Pan are both here because a touchscreen can reach neither
     // otherwise: erasing is right-click and panning is the wheel or the middle
     // button, and a finger has none of the three.
+    // No icon prefixes on this row, and the reason is measured rather than
+    // aesthetic: the swatch row is centred and the tool row is right-aligned, so
+    // they close on each other, and the widest palette already left only ~4px
+    // between them. Prefixing all five labels widened the row by ~47px and put
+    // the tool buttons 43px *over* the swatches. The row's clarity problem was
+    // never the labels anyway — it was that the armed tool wasn't visible, which
+    // SELECTED_COLOR and the ring now handle. Icons live where there is room:
+    // Undo/Redo above and the zoom buttons on the View rail.
     const toolSpecs: { tool: PixelTool; label: string }[] = [
       { tool: "eyedropper", label: "Pick" },
       { tool: "fill", label: "Fill" },
@@ -818,12 +829,26 @@ export class SkinEditorScene extends Phaser.Scene {
     // so the reference has to be re-applied rather than set once.
     this.pixelCanvas.setReferenceImage(this.referenceDataUrl);
 
-    // --- left column beside the canvas: viewing aids. Fixed at x=40, which the
-    // window's left edge (x=365) never comes near, and clear of the frame strip
-    // at x=150..246. ---
-    this.add.text(40, canvasRect.y + 6, "View", { fontSize: "11px", color: "#a6a6c8" });
-    this.makeSmallButton(40, canvasRect.y + 40, "Zoom +", () => this.adjustZoom(1));
-    this.makeSmallButton(40, canvasRect.y + 80, "Zoom −", () => this.adjustZoom(-1));
+    // --- the side rails.
+    //
+    // These used to be two unrelated stacks ~1200px apart: "View" on the left,
+    // and an unlabelled pile on the right holding Mirror (a drawing mode),
+    // Clear (destructive), the reference controls (tracing) and Set as default
+    // (publishing). Four different jobs with nothing saying so, and you had to
+    // sweep the whole screen to find any one of them.
+    //
+    // Now each rail carries a heading and holds one kind of thing: the left is
+    // everything about *looking* at the drawing, the right everything about
+    // *the drawing itself*. Both stay at their old x — 40 and GAME_WIDTH-154 —
+    // which the 320px window (x 365..685) never reaches at any zoom, since
+    // zooming grows the art inside a fixed window rather than the window.
+    const railHeading = (x: number, y: number, text: string): void => {
+      this.add.text(x, y, text.toUpperCase(), { fontSize: "10px", color: "#8a8ab0", fontStyle: "bold" });
+    };
+
+    railHeading(40, canvasRect.y + 6, "View");
+    this.makeSmallButton(40, canvasRect.y + 40, "＋ Zoom", () => this.adjustZoom(1));
+    this.makeSmallButton(40, canvasRect.y + 80, "－ Zoom", () => this.adjustZoom(-1));
     this.makeSmallButton(40, canvasRect.y + 120, "Fit", () => {
       this.pixelCanvas?.fitToViewport();
     });
@@ -833,11 +858,9 @@ export class SkinEditorScene extends Phaser.Scene {
     this.zoomReadout = this.add
       .text(40, canvasRect.y + 152, formatZoom(this.view.zoomIndex), { fontSize: "13px", color: "#ffffff" })
       .setOrigin(0, 0.5);
-    this.add.text(40, canvasRect.y + 172, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
-    this.add.text(40, canvasRect.y + 186, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
     const gridButton = this.makeSmallButton(
       40,
-      canvasRect.y + 220,
+      canvasRect.y + 178,
       this.gridVisible ? "Grid: On" : "Grid: Off",
       () => {
         this.gridVisible = !this.gridVisible;
@@ -847,13 +870,23 @@ export class SkinEditorScene extends Phaser.Scene {
       },
       () => this.gridVisible,
     );
+    // The gestures the buttons above have no equivalent for, kept at the foot
+    // of the rail they belong to rather than floating mid-column.
+    this.add.text(40, canvasRect.y + 208, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
+    this.add.text(40, canvasRect.y + 222, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
 
-    // --- right column beside the canvas: actions that affect the
-    // drawing (Mirror, Clear) — same "always clear of the canvas at any
-    // zoom level" reasoning as the left column, mirrored. ---
+    // One left edge for the whole rail. The reference picker is the widest
+    // thing in it (260px — its dropdown labels need the room, see
+    // buildReferenceControls) and has to end at the right margin, so its left
+    // edge is what everything else aligns to; three different x values read as
+    // ragged rather than as a column. Still 81px clear of the canvas window's
+    // right edge at 685, at any zoom.
+    const railX = GAME_WIDTH - 24 - REFERENCE_WIDTH;
+
+    railHeading(railX, canvasRect.y + 6, "Drawing");
     const mirrorButton = this.makeSmallButton(
-      GAME_WIDTH - 24 - 130,
-      canvasRect.y + 40,
+      railX,
+      canvasRect.y + 34,
       this.mirrorEnabled ? "Mirror: On" : "Mirror: Off",
       () => {
         this.mirrorEnabled = !this.mirrorEnabled;
@@ -864,9 +897,10 @@ export class SkinEditorScene extends Phaser.Scene {
       () => this.mirrorEnabled,
     );
     // Clear (two-tap confirm, same shape as EditorUI's Clear/Delete Area)
-    this.clearButton = this.makeSmallButton(GAME_WIDTH - 24 - 130, canvasRect.y + 80, "Clear", () => this.onClearClicked());
+    this.clearButton = this.makeSmallButton(railX, canvasRect.y + 70, "Clear", () => this.onClearClicked());
 
-    this.buildReferenceControls(target, canvasRect.y + 130);
+    railHeading(railX, canvasRect.y + 104, "Reference");
+    this.buildReferenceControls(target, canvasRect.y + 132);
 
     // "Set as default" lives here as well as in the level editor because the
     // player character is only reachable from this scene — it is deliberately
@@ -874,7 +908,8 @@ export class SkinEditorScene extends Phaser.Scene {
     // there, and without this a painted character could be saved and never
     // worn by anything. Two-tap confirmed, same as Clear, since it reaches
     // every level that hasn't chosen for itself.
-    this.defaultButton = this.makeSmallButton(GAME_WIDTH - 24 - 130, canvasRect.y + 200, "Set as default", () =>
+    railHeading(railX, canvasRect.y + 196, "This skin");
+    this.defaultButton = this.makeSmallButton(railX, canvasRect.y + 224, "Set as default", () =>
       this.onSetDefaultClicked(),
     );
   }
@@ -950,7 +985,7 @@ export class SkinEditorScene extends Phaser.Scene {
     // other, and far enough left to clear the canvas's own right edge at every
     // zoom level. A narrow trigger was tried first: the dropdown inherits the
     // trigger's width, so its labels collided and its rows ran off the bottom.
-    const width = 260;
+    const width = REFERENCE_WIDTH;
     const x = GAME_WIDTH - 24 - width;
 
     this.referencePicker = new AssetPickerMenu({
@@ -1091,7 +1126,7 @@ export class SkinEditorScene extends Phaser.Scene {
     const x = 150;
     let y = 152;
 
-    this.add.text(x, 130, "Frames", { fontSize: "11px", color: "#a6a6c8" });
+    this.add.text(x, 130, "FRAMES", { fontSize: "10px", color: "#8a8ab0", fontStyle: "bold" });
 
     for (const name of plan.frames) {
       const painted = hasPaintedCells(target.frameCells[name]);
@@ -1109,7 +1144,9 @@ export class SkinEditorScene extends Phaser.Scene {
       this.add
         .text(x + 10, y + 13, painted ? name : `${name} ·`, {
           fontSize: "12px",
-          color: painted ? "#ffffff" : "#8a8ab0",
+          // Dimmed while unpainted, but never on the selected row: grey on the
+          // amber selected fill is unreadable.
+          color: active || painted ? "#ffffff" : "#8a8ab0",
         })
         .setOrigin(0, 0.5);
       bg.on("pointerdown", () => this.switchFrame(name));
