@@ -276,6 +276,13 @@ export class SkinEditorScene extends Phaser.Scene {
       0.5,
     );
 
+    // Browse mode had no status line at all, so anything that went wrong here
+    // — most importantly openForEditing failing to decode a skin's PNG — wrote
+    // to a `statusText` that only exists in canvas mode, i.e. nowhere. Clicking
+    // Edit then did visibly nothing, with the reason only in the console. One
+    // line, created in both modes, is what makes that failure sayable.
+    this.statusText = this.add.text(GAME_WIDTH / 2, 68, "", { fontSize: "12px", color: "#4ade80" }).setOrigin(0.5, 0);
+
     const loadingText = this.add
       .text(GAME_WIDTH / 2, ROW_START_Y + 20, "Loading…", { fontSize: "14px", color: "#a6a6c8" })
       .setOrigin(0.5);
@@ -387,7 +394,10 @@ export class SkinEditorScene extends Phaser.Scene {
       }
     } catch (err) {
       console.error("Couldn't rebuild that skin's pixels:", err);
-      this.statusText?.setText("Couldn't open that skin").setColor("#ff6666");
+      // Reaches the browse-mode status line added above — before that this
+      // wrote to a Text that only canvas mode ever created, so a skin that
+      // wouldn't decode made Edit look like a dead button.
+      this.statusText?.setText(`Couldn't open that skin: ${String(err)}`).setColor("#ff6666");
       return;
     }
 

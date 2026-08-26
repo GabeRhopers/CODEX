@@ -295,3 +295,46 @@ export async function readSceneField<T>(page: Page, sceneKey: string, field: str
     { sceneKey, field },
   );
 }
+
+/**
+ * Waits for the Skin Creator's painting canvas to exist, and on timeout says
+ * *why* it doesn't.
+ *
+ * Opening a saved skin decodes its PNG back into cells before the canvas is
+ * built (SkinEditorScene.openForEditing), and every way that can go wrong —
+ * a decode that rejects, a mode switch mid-await — leaves the scene sitting
+ * quietly in browse mode. A bare waitForFunction reports that as an anonymous
+ * 20-second timeout, which is exactly enough information to be useless, and is
+ * how a CI-only failure here first surfaced. This reports the scene's mode and
+ * its status line instead, so the next occurrence names itself.
+ */
+export async function waitForSkinCanvas(page: Page, timeout = 20_000): Promise<void> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { pixelCanvas?: unknown };
+        return !!scene.pixelCanvas;
+      },
+      undefined,
+      { timeout },
+    );
+  } catch {
+    const state = await page.evaluate(() => {
+      const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
+        mode?: string;
+        statusText?: { text?: string };
+        target?: { brush?: { id?: string }; existingId?: string };
+      };
+      return {
+        mode: scene.mode ?? "(none)",
+        status: scene.statusText?.text ?? "(empty)",
+        targetBrush: scene.target?.brush?.id ?? "(none)",
+        targetId: scene.target?.existingId ?? "(none)",
+      };
+    });
+    throw new Error(
+      `Skin Creator never entered canvas mode within ${timeout}ms. ` +
+        `mode=${state.mode} status="${state.status}" target=${state.targetBrush}/${state.targetId}`,
+    );
+  }
+}

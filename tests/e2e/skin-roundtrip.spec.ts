@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas } from "./support/coords";
 
 /**
  * A pixel skin is now stored only as its PNG — the editable cell grid it was
@@ -101,17 +101,9 @@ test("a painted skin survives save and reopen with every pixel intact", async ({
   await clickByText(page, "SkinEditor", "Edit");
   // Opening a saved skin decodes its PNG back into cells before the canvas
   // exists (see SkinEditorScene.openForEditing), so this genuinely has to
-  // wait. Explicitly bounded rather than inheriting the whole test budget,
-  // so a real failure here reports as "the canvas never opened" instead of
-  // as an anonymous test timeout — which is exactly how it first surfaced.
-  await page.waitForFunction(
-    () => {
-      const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { pixelCanvas?: unknown };
-      return !!scene.pixelCanvas;
-    },
-    undefined,
-    { timeout: 20_000 },
-  );
+  // wait — and when it doesn't arrive, the helper reports the scene's mode and
+  // status rather than an anonymous timeout.
+  await waitForSkinCanvas(page);
 
   const after = await readCells(page);
   expect(after).toEqual(before);

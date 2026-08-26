@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas } from "./support/coords";
 
 /**
  * Reusing art you already have: copying a skin as a starting point without
@@ -89,10 +89,7 @@ test("Copy starts a new skin from an existing one and leaves the original alone"
 
   // Copy, then paint something clearly different and save.
   await clickByText(page, "SkinEditor", "Copy");
-  await page.waitForFunction(() => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { pixelCanvas?: unknown };
-    return !!scene.pixelCanvas;
-  });
+  await waitForSkinCanvas(page);
   // The copy opens holding the source's pixels — that is what makes it a base.
   await expect.poll(() => readCells(page).then(paintedCount)).toBe(3);
   for (const [x, y] of [
@@ -146,10 +143,7 @@ test("a tracing reference guides the drawing but never gets saved into it", asyn
   await saveSkin(page);
   await clickByText(page, "SkinEditor", "← Back");
   await clickByText(page, "SkinEditor", "Edit");
-  await page.waitForFunction(() => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { pixelCanvas?: unknown };
-    return !!scene.pixelCanvas;
-  });
+  await waitForSkinCanvas(page);
 
   // Reopened from the saved PNG: still two cells. If the reference had been
   // baked in this would be in the hundreds.
