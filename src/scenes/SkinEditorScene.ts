@@ -497,16 +497,20 @@ export class SkinEditorScene extends Phaser.Scene {
 
     this.buildFrameStrip(target);
 
-    // --- tool-mode buttons (Paint / Fill / Pick), right-aligned on the
-    // swatch row's own y — declared before the swatch row below since a
-    // swatch click resumes Paint mode (see setTool inside the swatch
-    // handler), same "eyedropper is momentary" reasoning the
-    // onColorPicked callback further down uses. Pinned to the row's right
-    // edge rather than laid out relative to the swatch row's own (palette-
-    // dependent) width, so it never collides with it even for the widest
-    // palette (Pico-8/Sweetie16/DawnBringer's 17-item row still leaves
-    // ~250px of clearance here). ---
+    // --- tool-mode buttons, right-aligned on the swatch row's own y —
+    // declared before the swatch row below since a swatch click resumes Paint
+    // mode (see setTool inside the swatch handler), same "eyedropper is
+    // momentary" reasoning the onColorPicked callback further down uses.
+    //
+    // Laid out right-to-left from the row's right edge rather than relative to
+    // the swatch row's own (palette-dependent) width, and built from a list so
+    // adding a tool is one entry rather than another hand-chained setX. Order
+    // below is right-to-left, so it reads Pan · Paint · Erase · Fill · Pick on
+    // screen. Clearance against the widest 17-swatch palette is measured, not
+    // assumed — see the e2e check in skin-erase.spec.ts, which is what stops a
+    // sixth tool silently sliding under the swatches. ---
     const sy = 96;
+    const TOOL_GAP = 6;
     const toolButtons: { tool: PixelTool; button: Phaser.GameObjects.Text }[] = [];
     const refreshToolHighlight = (): void => {
       for (const { tool, button } of toolButtons) {
@@ -518,30 +522,36 @@ export class SkinEditorScene extends Phaser.Scene {
       this.pixelCanvas?.setTool(tool);
       refreshToolHighlight();
     };
-    const pickButton = this.makeSmallButton(0, sy + 12, "Pick", () => setTool("eyedropper"));
-    pickButton.setX(GAME_WIDTH - 24 - pickButton.width);
-    const fillButton = this.makeSmallButton(0, sy + 12, "Fill", () => setTool("fill"));
-    fillButton.setX(pickButton.x - 6 - fillButton.width);
-    const paintButton = this.makeSmallButton(0, sy + 12, "Paint", () => setTool("paint"));
-    paintButton.setX(fillButton.x - 6 - paintButton.width);
-    // Pan belongs with its siblings rather than beside Zoom, mutually exclusive
-    // with them as it is. It exists for touch and for a mouse with no wheel or
-    // middle button; everyone else pans by scrolling without switching mode.
-    // The widest palette's swatch row ends at x~777 and this row now starts at
-    // x~824, so the clearance is real but no longer generous.
-    const panButton = this.makeSmallButton(0, sy + 12, "Pan", () => setTool("pan"));
-    panButton.setX(paintButton.x - 6 - panButton.width);
-    toolButtons.push(
-      { tool: "paint", button: paintButton },
-      { tool: "fill", button: fillButton },
-      { tool: "eyedropper", button: pickButton },
-      { tool: "pan", button: panButton },
-    );
+    // Erase and Pan are both here because a touchscreen can reach neither
+    // otherwise: erasing is right-click and panning is the wheel or the middle
+    // button, and a finger has none of the three.
+    const toolSpecs: { tool: PixelTool; label: string }[] = [
+      { tool: "eyedropper", label: "Pick" },
+      { tool: "fill", label: "Fill" },
+      { tool: "erase", label: "Erase" },
+      { tool: "paint", label: "Paint" },
+      { tool: "pan", label: "Pan" },
+    ];
+    let toolRight = GAME_WIDTH - 24;
+    for (const { tool, label } of toolSpecs) {
+      const button = this.makeSmallButton(0, sy + 12, label, () => setTool(tool));
+      button.setX(toolRight - button.width);
+      toolRight = button.x - TOOL_GAP;
+      toolButtons.push({ tool, button });
+    }
     refreshToolHighlight();
 
     // --- color swatch row (palette colors + a transparent "eraser") ---
+    // The gap was 6 until the Erase tool arrived. This row is centred and the
+    // tool row is right-aligned, so the two close on each other from opposite
+    // directions, and a fifth tool left a measured 4px between them. Taking 2px
+    // off each of the widest palette's 16 gaps buys back 32px of centred row —
+    // 20px of clearance — which is a cheaper fix than exiling Pan to the View
+    // column and splitting five mutually-exclusive tools across two corners of
+    // the screen. The swatches are still 24px targets; only the air between
+    // them shrank. skin-erase.spec.ts measures the result.
     const swatchSize = 24;
-    const swatchGap = 6;
+    const swatchGap = 4;
     const swatchColors: (string | null)[] = [...palette.colors, null];
     const swatchRowWidth = swatchColors.length * (swatchSize + swatchGap) - swatchGap;
     let sx = (GAME_WIDTH - swatchRowWidth) / 2;
@@ -567,17 +577,22 @@ export class SkinEditorScene extends Phaser.Scene {
       bg.on("pointerdown", () => {
         this.currentColor = color;
         this.pixelCanvas?.setCurrentColor(color);
-        // Only Eyedropper auto-reverts here — it's a momentary "sample and
-        // get back to work" gesture, so picking a color instead of
-        // clicking the canvas still counts as "done sampling." Fill is
-        // the opposite: it's a deliberate, sticky mode (fill one region,
-        // pick a different color, fill another, repeat) — forcing it back
-        // to Paint on every single color change would silently break that
+        // Eyedropper auto-reverts — it's a momentary "sample and get back to
+        // work" gesture, so picking a color instead of clicking the canvas
+        // still counts as "done sampling." So does Erase, but only for a real
+        // color: reaching for red while erasing means you want to draw in red.
+        // Reaching for the transparent ✕ does not — it would swap the
+        // highlighted tool out from under you for no change in behaviour,
+        // since Paint with no color erases anyway.
+        //
+        // Fill is the opposite of both: a deliberate, sticky mode (fill one
+        // region, pick a different color, fill another, repeat) — forcing it
+        // back to Paint on every color change would silently break that
         // workflow before a fill click ever lands (a real bug caught in
-        // testing: Fill -> pick a color -> click the canvas only ever
-        // painted one cell, because this handler had already switched the
-        // tool back to Paint out from under the click).
-        if (this.currentTool === "eyedropper") setTool("paint");
+        // testing: Fill -> pick a color -> click the canvas only ever painted
+        // one cell, because this handler had already switched the tool back to
+        // Paint out from under the click).
+        if (this.currentTool === "eyedropper" || (this.currentTool === "erase" && color !== null)) setTool("paint");
         refreshSwatchHighlight();
       });
       swatchNodes.push({ color, bg });

@@ -27,7 +27,7 @@ const MIN_GRID_CELL_PX = 4;
  * pan, tight enough that a deliberate pinch responds on the first move. */
 const PINCH_STEP_RATIO = 1.3;
 
-export type PixelTool = "paint" | "fill" | "eyedropper" | "pan";
+export type PixelTool = "paint" | "erase" | "fill" | "eyedropper" | "pan";
 
 /** Zoom level plus where the drawing sits inside the window. Handed out and
  * taken back whole so SkinEditorScene can persist it across the canvas
@@ -355,11 +355,15 @@ export class PixelCanvasOverlay {
     this.currentColor = color;
   }
 
-  /** Paint (freehand), Fill (flood-fill the clicked region), Eyedropper
-   * (sample a cell's color back into currentColor, see actAt), or Pan (drag
-   * the window around a magnified drawing) — see SkinEditorScene's tool-mode
-   * buttons. Pan is a tool rather than only a modifier gesture because a
-   * touchscreen has no middle button and no wheel. */
+  /** Paint (freehand), Erase (freehand, but transparent), Fill (flood-fill the
+   * clicked region), Eyedropper (sample a cell's color back into currentColor,
+   * see actAt), or Pan (drag the window around a magnified drawing) — see
+   * SkinEditorScene's tool-mode buttons.
+   *
+   * Erase and Pan are both tools rather than only modifier gestures for the
+   * same reason: a touchscreen has no right button, no middle button and no
+   * wheel, so without them neither erasing nor panning is reachable by finger
+   * at all. */
   setTool(tool: PixelTool): void {
     this.tool = tool;
     this.applyCursor();
@@ -633,12 +637,13 @@ export class PixelCanvasOverlay {
     }
 
     if (!this.isPointerDown) return;
-    // Fill and Eyedropper are one-shot-per-press, not drag-continuous —
-    // dragging with Fill active would otherwise re-flood-fill (usually a
-    // no-op after the first cell, but wasted work) on every cell the
-    // pointer crosses, and a dragged Eyedropper would keep resampling
-    // instead of settling on the cell you actually meant to pick.
-    if (this.tool !== "paint") return;
+    // Erase is freehand exactly like Paint — it *is* Paint with a fixed
+    // transparent colour — so both drag. Fill and Eyedropper are
+    // one-shot-per-press instead: dragging with Fill active would otherwise
+    // re-flood-fill (usually a no-op after the first cell, but wasted work) on
+    // every cell the pointer crosses, and a dragged Eyedropper would keep
+    // resampling instead of settling on the cell you actually meant to pick.
+    if (this.tool !== "paint" && this.tool !== "erase") return;
     this.actAt(e);
   }
 
@@ -708,10 +713,14 @@ export class PixelCanvasOverlay {
   /** Debounced to "only the first time this stroke touches a given cell,"
    * same shape as EditorScene's own drag-paint (dragLastX/dragLastY) —
    * without it, a slow drag would fire dozens of redundant same-color
-   * repaints of one cell as the pointer lingers over it. Right-click
-   * (or a right-button drag) always erases, regardless of `tool` or
-   * `currentColor` — a quick "get rid of this" gesture that doesn't
-   * require switching to the transparent swatch first and back after. */
+   * repaints of one cell as the pointer lingers over it.
+   *
+   * Two ways to erase, and they exist for different reasons. Right-click (or a
+   * right-button drag) always erases regardless of `tool` or `currentColor` — a
+   * momentary "get rid of this" gesture mid-stroke. The Erase *tool* is the
+   * sticky version, and the only one a touchscreen can reach at all, since
+   * there is no right button on a finger. Both land on the same line below
+   * rather than each getting their own path. */
   private actAt(e: PointerEvent): void {
     const index = this.cellIndexFromEvent(e);
     if (index === null) return;
@@ -727,7 +736,7 @@ export class PixelCanvasOverlay {
 
     if (index === this.lastActedIndex) return;
     this.lastActedIndex = index;
-    const erasing = (e.buttons & 2) !== 0;
+    const erasing = (e.buttons & 2) !== 0 || this.tool === "erase";
     const color = erasing ? null : this.currentColor;
 
     if (this.tool === "fill") this.floodFill(index, color);

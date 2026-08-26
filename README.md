@@ -181,17 +181,20 @@ Open the dev server URL in a browser. Controls:
   ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
   skin library and makes it active immediately, same as an ordinary
   upload — see the Custom skins bullet below. Its own canvas has **Undo/
-  Redo** (buttons or Ctrl+Z/Ctrl+Y), **Paint/Fill/Pick/Pan** tools (Fill
-  flood-fills a same-color region; Pick samples a color already on the
-  canvas and resumes painting with it; Pan drags the view when you're
-  zoomed in), a **Mirror** toggle (paints the horizontal-mirror cell too),
-  a **Grid** overlay, and **Zoom +/− / Fit** — the drawing scales from half
-  the window up to eight times it, and once it's bigger than the window you
-  scroll to pan, Ctrl+scroll to zoom at the pointer, or drag with Pan (or
-  the middle mouse button, or two fingers). Right-click (or a right-button
-  drag) always erases regardless of the selected tool or color, no
-  swatch-switching needed. See "Skin Creator
-  tools" under Art for the full 2026-08-17 pass that added all of this.
+  Redo** (buttons or Ctrl+Z/Ctrl+Y), **Pan/Paint/Erase/Fill/Pick** tools
+  (Erase draws transparency freehand and hands your colour back when you
+  leave it; Fill flood-fills a same-color region; Pick samples a color
+  already on the canvas and resumes painting with it; Pan drags the view
+  when you're zoomed in), a **Mirror** toggle (paints the horizontal-mirror
+  cell too), a **Grid** overlay, and **Zoom +/− / Fit** — the drawing
+  scales from half the window up to eight times it, and once it's bigger
+  than the window you scroll to pan, Ctrl+scroll to zoom at the pointer, or
+  drag with Pan (or the middle mouse button, or two fingers). Right-click
+  (or a right-button drag) also erases regardless of the selected tool or
+  color, as a momentary mid-stroke gesture; the transparent **✕** swatch is
+  a third route, and the only one that combines with Fill to flood-erase a
+  region. See "Skin Creator tools" under Art for the full 2026-08-17 pass
+  that added most of this.
 - **Palette** (left panel): a **category chip** at the top (e.g. "Blocks
   ▾") expands into the 5 categories — Blocks, Markers, Enemies, Items,
   Decor — on tap; picking one collapses it back and shows that category's
@@ -2620,6 +2623,37 @@ extremes, since each fixed-colour candidate passes one and fails the other.
 Verified to fail on both (1.28 and 0.00) before being accepted. Playwright hands
 back a PNG and Node has no decoder, so the page decodes its own screenshot
 through an offscreen canvas rather than adding a dependency for one measurement.
+
+**An Erase tool, not just an erase gesture (2026-08-23).** Erasing already
+worked two ways, and neither was a tool. Right-click (`e.buttons & 2` in
+`actAt`) is momentary and **does not exist on a touchscreen** — a finger has no
+right button, no middle button and no wheel, which is the same gap that made Pan
+a tool the day before. The transparent `✕` swatch is the other way, and it reads
+as a colour rather than an eraser: taking it costs you whatever colour you had
+selected, and getting back means hunting for it again.
+
+So `PixelTool` gained `"erase"`, which is Paint with a fixed transparent colour
+— one extra clause on the line the right-click path already used
+(`erasing = (e.buttons & 2) !== 0 || this.tool === "erase"`) rather than a
+second code path. It drags like Paint; the one-shot-per-press guard that keeps
+Fill from re-flooding every cell a drag crosses had to learn about it, or an
+erase drag would have rubbed out exactly one cell. Clicking a *colour* swatch
+returns you to Paint, the same "you have just told me what you want to do next"
+rule the eyedropper follows — but clicking the `✕` swatch does not, since that
+would swap the highlighted tool for no change in behaviour.
+
+The `✕` swatch stays regardless: Fill plus transparent is flood-**erase**, and a
+separate Erase tool cannot express it.
+
+*The layout was the actual work.* The tool row is right-aligned and the swatch
+row is centred and palette-dependent, so they close on each other from opposite
+directions with nothing in the code stopping them meeting. Measured against
+PICO-8's 17 swatches, a fifth tool left **4px**. Rather than exile Pan to the
+View column — splitting five mutually-exclusive tools across two corners of the
+screen to save one — 2px came off each of the 16 swatch gaps, buying back 32px
+of centred row for **20px** of clearance. The swatches are still 24px targets;
+only the air between them shrank. `skin-erase.spec.ts` asserts the gap rather
+than trusting it, which is what stops a sixth tool sliding underneath.
 
 **Zoom is a window now, not a bigger canvas (2026-08-23).** Zoom +/− grew the
 canvas itself, clamped to `[200, 320]` px in 40px steps. That is a **1.6x range
