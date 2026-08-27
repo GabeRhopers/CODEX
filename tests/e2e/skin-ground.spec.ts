@@ -9,6 +9,7 @@ import {
   waitForSkinCanvas,
 } from "./support/coords";
 import { makeLevel } from "./support/levels";
+import { hangSkinsRead } from "./support/mockDrive";
 import type { LevelArea, LevelData, LevelEntity } from "../../src/level/LevelSchema";
 
 /**
@@ -335,5 +336,29 @@ test("a skinned Lava tile still kills", async ({ page }) => {
 
   await page.keyboard.down("ArrowRight");
   await expect.poll(() => readSceneField<string>(page, "Play", "outcome"), { timeout: 15000, intervals: [100] }).toBe("lost");
+  await page.keyboard.up("ArrowRight");
+});
+
+test("a level still starts when the skins library read never answers", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  // Not an error — a request that is never answered at all. PlayScene waits on
+  // the composed tilesets before it builds the area, so an unbounded wait here
+  // is a level that never starts: no ground, no player, nothing to do but
+  // watch. Every `.catch` in the app is useless against this, because nothing
+  // ever settles.
+  await hangSkinsRead(page);
+  await startEditorWithLevel(page, grassLevel());
+
+  await clickByText(page, "Editor", "Test Play (Space)");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
+
+  // It falls back to the shipped art and plays. Generous, because the fallback
+  // is deliberately on a 10s backstop rather than a fast retry.
+  await expect
+    .poll(() => grassTilesetName(page, "Play"), { timeout: 25000, intervals: [250] })
+    .toBe(GRASS_TILESET);
+  await page.keyboard.down("ArrowRight");
+  await expect.poll(() => readSceneField<string>(page, "Play", "outcome"), { timeout: 20000, intervals: [100] }).toBe("won");
   await page.keyboard.up("ArrowRight");
 });

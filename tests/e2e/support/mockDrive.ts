@@ -310,3 +310,26 @@ export function stopFailingDriveWrites(page: Page): void {
   const state = writeFailures.get(page);
   if (state) state.failing = false;
 }
+
+/**
+ * Makes the shared skins library read **hang** — the request is intercepted and
+ * never answered.
+ *
+ * Not the same failure as `failDriveWrites`, and the difference is the whole
+ * point: an error rejects and every `.catch` in the app gets its chance, while
+ * a request that simply never answers settles nothing, so a promise waiting on
+ * it waits forever. That only became dangerous when blocks became skinnable,
+ * because PlayScene started *waiting* on the skins read before building the
+ * area — before that a stalled read cost you the skins and nothing else.
+ *
+ * Registered after installMockDrive so it shadows it for this one request and
+ * falls through for everything else, exactly like failDriveWrites.
+ */
+export async function hangSkinsRead(page: Page): Promise<void> {
+  await page.route("https://www.googleapis.com/**", async (route) => {
+    // The Drive listing query is URL-encoded, but the file name survives it
+    // literally, so this matches the lookup that precedes reading the file.
+    if (route.request().url().includes("skins.json")) return; // never answered, on purpose
+    await route.fallback();
+  });
+}

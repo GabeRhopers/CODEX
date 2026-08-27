@@ -123,13 +123,49 @@ export async function composeGroundStrip(
  * "synchronous field updates land before the async work settles" race that has
  * bitten this codebase before.
  */
-export async function composeGroundTilesets(
+export function composeGroundTilesets(
   scene: Phaser.Scene,
   levelSkins?: LevelSkins,
 ): Promise<Record<GroundSkin, string>> {
+  // Bounded, for the same reason pixelSkinCells.loadImage is: a promise that
+  // neither resolves nor rejects makes every caller wait forever, and the
+  // skins read underneath this is a real network round trip with no timeout of
+  // its own. A rejection is handled below; a request that simply never answers
+  // is not, and PlayScene waits on this before it builds the area — so an
+  // unbounded wait here is a level that never starts. Falling back to the
+  // shipped art is always a correct answer, just not the prettiest one.
+  return Promise.race([
+    composeAll(scene, levelSkins),
+    new Promise<Record<GroundSkin, string>>((resolve) =>
+      setTimeout(() => {
+        console.error("Timed out composing the ground tilesets; using the built-in art");
+        resolve(builtInGroundTilesets());
+      }, COMPOSE_TIMEOUT_MS),
+    ),
+  ]);
+}
+
+/** Generous: this is a stuck-forever backstop, not a performance budget, and a
+ * cold Drive read on a loaded machine is exactly where a slow-but-fine
+ * composition happens. Matches pixelSkinCells' own DECODE_TIMEOUT_MS. */
+const COMPOSE_TIMEOUT_MS = 10_000;
+
+async function composeAll(scene: Phaser.Scene, levelSkins?: LevelSkins): Promise<Record<GroundSkin, string>> {
   const keys = builtInGroundTilesets();
   for (const skin of GROUND_SKINS) {
-    keys[skin] = await composeGroundStrip(scene, skin, levelSkins);
+    try {
+      keys[skin] = await composeGroundStrip(scene, skin, levelSkins);
+    } catch (err: unknown) {
+      // Never rejects, deliberately. PlayScene *waits* on this before it
+      // builds the area, so a rejection here would mean no ground, no
+      // player, no level — a level that never starts. The skins read behind
+      // it is a Drive round trip and can genuinely fail (see
+      // skinStorage.loadCustomSkins, which clears its in-flight promise
+      // precisely so a failure can be retried), and before blocks were
+      // skinnable a failed skins read only ever cost you the skins.
+      // Falling back to the built-in strip keeps that true.
+      console.error(`Couldn't compose the ${skin} ground tileset:`, err);
+    }
   }
   return keys;
 }
