@@ -44,10 +44,11 @@ import { recordCompletion } from "../world/worldProgress";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
-import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
+import { CANVAS_BACKGROUND_COLOR, GroundSkin, GROUND_SKINS } from "../level/groundSkins";
 import { AreaKey, DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
+import { builtInGroundTilesets, composeGroundTilesets } from "../skins/groundTileset";
 import { FrameTextureKeys, resolveFrameTextureKeys, resolveLoopLength, resolveSkinTextureKeys } from "../skins/skinLoader";
 import { CHARACTER_SKIN_ID, framePlanFor } from "../skins/spriteFrames";
 import { advanceLoop, createLoopState, LoopState } from "../gameplay/spriteLoop";
@@ -258,6 +259,20 @@ export class PlayScene extends Phaser.Scene {
   // run (see useBasket) always finds this already true, so it correctly
   // tears down and reuses the *live* player rather than skipping either.
   private areaBuilt = false;
+  // Which texture each ground skin's tileset strip is drawn from: the four
+  // built-in images, or a composed copy carrying this level's painted block
+  // skins (see groundTileset.ts). Resolved once in create(), *before* the
+  // first enterArea, because enterArea builds the tilemap synchronously and
+  // rebuilding it afterwards would mean tearing down a live layer and its
+  // collider mid-play.
+  private groundTilesetKeys: Record<GroundSkin, string> = builtInGroundTilesets();
+  // Bumped by init() on every run (Test Play, Restart, the next level in a
+  // world), so create()'s async tileset composition can tell whether the run
+  // it belongs to is still the current one. Without it, a Restart landing
+  // inside that window would get a second, stale enterArea from the run it
+  // replaced — the same guard shape as enterArea's own `currentAreaKey !== key`
+  // checks.
+  private runToken = 0;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   // Rebuilt alongside groundLayer on every enterArea call — Phaser doesn't
   // automatically drop a collider just because the TilemapLayer it
@@ -424,6 +439,7 @@ export class PlayScene extends Phaser.Scene {
     this.areaZones = [];
     this.areaColliders = [];
     this.areaBuilt = false;
+    this.runToken += 1;
   }
 
   /** Resolves an AreaKey to its actual data — undefined for "sub"/"up"
@@ -602,7 +618,17 @@ export class PlayScene extends Phaser.Scene {
     // always) instead of the area the checkpoint itself remembers —
     // enterArea's own `checkpointHere` resolution only ever finds a match
     // once `currentAreaKey` is already set to that same area.
-    this.enterArea(this.checkpoint?.area ?? this.startingAreaKey());
+    // Composed *before* the area is built rather than swapped in after: the
+    // ground tileset is baked into the tilemap at creation, so a late arrival
+    // would mean destroying a live layer and its player collider. Blocks stay
+    // built-in and the wait is a single already-cached storage read when the
+    // level has no block skins at all.
+    const token = this.runToken;
+    void composeGroundTilesets(this, this.level.skins).then((keys) => {
+      if (this.runToken !== token) return; // restarted (or a new level started) meanwhile
+      this.groundTilesetKeys = keys;
+      this.enterArea(this.checkpoint?.area ?? this.startingAreaKey());
+    });
   }
 
   /** Tears down (if anything's currently built — a no-op the very first
@@ -694,7 +720,7 @@ export class PlayScene extends Phaser.Scene {
       tileHeight: TILE_SIZE,
     });
     const tilesets = GROUND_SKINS.map((skin, i) => {
-      const tilesetKey = groundTilesetKey(skin);
+      const tilesetKey = this.groundTilesetKeys[skin];
       return map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
     });
     this.groundLayer = map.createLayer(0, tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
@@ -1079,6 +1105,11 @@ export class PlayScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     if (this.outcome !== "playing") return;
+    // create() no longer builds the area synchronously (it waits on the ground
+    // tileset — see the composeGroundTilesets call there), so Phaser can tick
+    // this before there is a player, a ground layer, or anything else below to
+    // read.
+    if (!this.areaBuilt) return;
     // Physics is paused too (see togglePause) — without that, gravity would
     // keep pulling the player down through a "paused" level.
     if (this.paused) return;

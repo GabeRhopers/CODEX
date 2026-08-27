@@ -12,7 +12,7 @@ import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
 import { BUILTIN_SKIN_ID, EditorUI, NO_MUSIC_ID, USE_DEFAULT_SKIN_ID } from "../editor/EditorUI";
 import { EntityPlacer, TileCoord } from "../editor/EntityPlacer";
 import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
-import { Brush, PALETTE } from "../editor/Palette";
+import { Brush, isSkinnable, PALETTE } from "../editor/Palette";
 import { TilePainter } from "../editor/TilePainter";
 import { BackgroundThumbnail, resolveBackgroundThumbnails } from "../backgrounds/backgroundLibraryLoader";
 import { addBackgroundAsset, loadBackgroundLibrary, removeBackgroundAsset } from "../backgrounds/backgroundLibraryStorage";
@@ -20,7 +20,7 @@ import { isEnemyType } from "../gameplay/EnemyBehaviors";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
-import { CANVAS_BACKGROUND_COLOR, GROUND_SKINS, groundTilesetKey } from "../level/groundSkins";
+import { CANVAS_BACKGROUND_COLOR, GroundSkin, GROUND_SKINS } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
 import { AreaKey, createEmptyArea, createEmptyLevel, DEFAULT_ENEMY_SIZE, EMPTY_TILE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
 import { backgroundDisplayLabel, resolveStaticBackground, STATIC_BACKGROUNDS, StaticBackgroundId } from "../level/staticBackgrounds";
@@ -29,6 +29,7 @@ import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musi
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { loadActiveProfile } from "../profile/Profile";
+import { builtInGroundTilesets, composeGroundTilesets, sameGroundTilesets } from "../skins/groundTileset";
 import { resolveSkinTextureKeys, resolveSkinThumbnails } from "../skins/skinLoader";
 import { addCustomSkin, removeCustomSkin, setActiveSkin } from "../skins/skinStorage";
 import { withLevelSkin } from "../skins/skinSelection";
@@ -135,6 +136,12 @@ export class EditorScene extends Phaser.Scene {
   // handed to the UI/EntityPlacer; rebuildVisualsFromLevel re-applies it
   // to whatever fresh EntityPlacer it creates so Clear/Load never lose it.
   private skinTextureKeys = new Map<string, string>();
+  // Which texture each ground skin's tileset strip is drawn from — the four
+  // built-in images until a block skin resolves, then a composed copy with
+  // the painted frames overpainted into it (see groundTileset.ts). Held on
+  // the scene rather than looked up inside createGroundLayer because that
+  // runs on every area switch and must stay synchronous.
+  private groundTilesetKeys: Record<GroundSkin, string> = builtInGroundTilesets();
   // Last-resolved contents of the shared background/music libraries — kept
   // around purely so onSelectBackground/onSelectMusic (given only the
   // picked item's id, per AssetPickerMenu's callback shape) can look up its
@@ -753,8 +760,12 @@ export class EditorScene extends Phaser.Scene {
       width: area.width,
       height: area.height,
     });
+    // `groundTilesetKeys`, not groundTilesetKey(skin): the built-in image
+    // unless a block skin has been composed over it (see groundTileset.ts).
+    // Already resolved by the time this runs — composing here would make an
+    // area switch async.
     const tilesets = GROUND_SKINS.map((skin, i) => {
-      const key = groundTilesetKey(skin);
+      const key = this.groundTilesetKeys[skin];
       return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
     });
     this.groundLayer = map.createBlankLayer("ground", tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
@@ -956,6 +967,19 @@ export class EditorScene extends Phaser.Scene {
    * defaults instead. */
   private async reresolveSkins(): Promise<void> {
     this.applySkinTextureKeys(await resolveSkinTextureKeys(this, this.level.skins));
+
+    // Blocks don't have a swappable sprite the way entities do — their skin is
+    // painted into the tileset texture itself (see groundTileset.ts), so the
+    // only way to show a change is to rebuild the layer against the new
+    // texture. Skipped entirely when the composed keys come out the same,
+    // which is every re-resolve that touched only an entity skin.
+    const groundKeys = await composeGroundTilesets(this, this.level.skins);
+    if (sameGroundTilesets(groundKeys, this.groundTilesetKeys)) return;
+    this.groundTilesetKeys = groundKeys;
+    this.createGroundLayer();
+    // Repaints the current area onto the freshly built layer and hands the
+    // painter/entityPlacer the new one — the old layer is gone.
+    this.rebuildVisualsFromLevel();
   }
 
   /** Called by EditorUI once its skin picker's "Upload" tile has a file —
@@ -970,8 +994,8 @@ export class EditorScene extends Phaser.Scene {
    * default. Set as default is how that happens now. */
   private uploadSkin(file: File): void {
     const brush = this.currentBrush;
-    if (!brush.entityType) {
-      this.ui.setStatus("Only Markers/Enemies/Items/Decor can be reskinned");
+    if (!isSkinnable(brush)) {
+      this.ui.setStatus("That brush can't be reskinned");
       return;
     }
     const uploadedBy = loadActiveProfile() ?? "unknown";
@@ -1006,7 +1030,7 @@ export class EditorScene extends Phaser.Scene {
    * edits. */
   private onSkinPickerOpen(): void {
     const brush = this.currentBrush;
-    if (!brush.entityType) return; // EditorUI's canOpen already guards this; defensive no-op
+    if (!isSkinnable(brush)) return; // EditorUI's canOpen already guards this; defensive no-op
     void resolveSkinThumbnails(this, brush.id, brush.label).then((thumbnails) => {
       // Just "Use default" — the "(built-in)" suffix that used to say what the
       // default currently *was* wrapped over three lines in a 63px-wide picker
@@ -1044,7 +1068,7 @@ export class EditorScene extends Phaser.Scene {
    */
   private onSelectSkin(choice: string | null | undefined): void {
     const brush = this.currentBrush;
-    if (!brush.entityType) return;
+    if (!isSkinnable(brush)) return;
     this.setLevelSkin(brush.id, choice);
     void this.reresolveSkins().catch((err: unknown) => {
       console.error("Skin selection failed:", err);
@@ -1060,7 +1084,7 @@ export class EditorScene extends Phaser.Scene {
    */
   private setAsDefaultSkin(): void {
     const brush = this.currentBrush;
-    if (!brush.entityType) return;
+    if (!isSkinnable(brush)) return;
     // Whatever this level resolves to right now, including "built-in art",
     // which is a legitimate thing to make the default.
     const choice = this.level.skins?.[brush.id];
@@ -1087,7 +1111,7 @@ export class EditorScene extends Phaser.Scene {
    * thumbnail disappears right away. */
   private onDeleteSkin(skinId: string): void {
     const brush = this.currentBrush;
-    if (!brush.entityType) return;
+    if (!isSkinnable(brush)) return;
     removeCustomSkin(brush.id, skinId)
       .then(() => this.reresolveSkins())
       .then(

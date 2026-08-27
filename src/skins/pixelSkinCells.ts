@@ -43,7 +43,7 @@ const DECODE_TIMEOUT_MS = 10_000;
  * list usable so it can be retried. It does not make a lost event impossible —
  * it makes it sayable, which is what the un-diagnosable version was not.
  */
-function loadImage(dataUrl: string, errorMessage: string): Promise<HTMLImageElement> {
+export function loadImage(dataUrl: string, errorMessage: string): Promise<HTMLImageElement> {
   const image = new Image();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Timed out decoding that image")), DECODE_TIMEOUT_MS);

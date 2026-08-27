@@ -13,7 +13,7 @@ import { AreaKey, EnemySize } from "../level/LevelSchema";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { AssetPickerItem, AssetPickerMenu } from "./AssetPickerMenu";
 import { LevelNameInput } from "./LevelNameInput";
-import { Brush, BrushCategory, CATEGORIES, PALETTE, UP_BASKET_TINT_COLOR } from "./Palette";
+import { Brush, BrushCategory, CATEGORIES, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
 
 export interface EditorUICallbacks {
@@ -402,8 +402,8 @@ export class EditorUI {
       dropdownDepth: DROPDOWN_DEPTH,
       canOpen: () => {
         const brush = this.selectedBrush();
-        if (brush && this.isSkinnable(brush)) return true;
-        this.setStatus("Only Markers/Enemies/Items/Decor can be reskinned");
+        if (brush && isSkinnable(brush)) return true;
+        this.setStatus("That brush can't be reskinned");
         return false;
       },
       onToggleOpen: (isOpen) => {
@@ -950,22 +950,12 @@ export class EditorUI {
     return PALETTE.find((brush) => brush.id === this.selectedBrushId);
   }
 
-  /** Only Markers/Enemies/Items/Decor's real placeable brushes are
-   * skinnable. Blocks render through Phaser's tilemap system (a shared,
-   * GID-indexed spritesheet per ground skin — see groundAutotile.ts)
-   * rather than one swappable image per brush the way every entity does,
-   * so reskinning them isn't a "just upload an image" change and isn't
-   * supported here. */
-  private isSkinnable(brush: Brush): boolean {
-    return brush.entityType !== undefined;
-  }
-
   /** Reports *where the look came from*, not merely whether it is custom: with
    * two layers, "Custom" alone can't tell a choice this level made from one it
    * inherited, and inheriting means it changes if the default does. */
   private skinTriggerLabel(): string {
     const brush = this.selectedBrush();
-    if (!brush || !this.isSkinnable(brush)) return "Skin: N/A";
+    if (!brush || !isSkinnable(brush)) return "Skin: N/A";
     // Nothing resolved means built-in art, whichever layer decided that.
     if (!this.skinTextureKeys.has(brush.id)) return "Skin: Built-in ▾";
     // Something resolved: this level's own pick, or one it inherited.
@@ -974,7 +964,7 @@ export class EditorUI {
 
   private setSkinPickerLabel(): void {
     this.skinPicker.setTriggerLabel(this.skinTriggerLabel());
-    const skinnable = !!this.selectedBrush() && this.isSkinnable(this.selectedBrush()!);
+    const skinnable = !!this.selectedBrush() && isSkinnable(this.selectedBrush()!);
     this.setDefaultSkinButton.setVisible(skinnable);
     this.disarmSetDefault();
   }

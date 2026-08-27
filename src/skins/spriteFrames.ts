@@ -39,6 +39,24 @@ export type CharacterFrameName = (typeof CHARACTER_FRAMES)[number];
 export const LOOP_FRAMES = ["0", "1", "2", "3"] as const;
 
 /**
+ * A block's two autotile frames: the surface, and the one used when another
+ * cell of the same kind sits directly above it — see groundAutotile.ts, which
+ * derives which of the two a cell renders as and is the single source of truth
+ * for that. Ground and hazards both work this way; brick and bounce are one
+ * fixed look and stay single-frame.
+ *
+ * `top` first because it is the base frame, so painting only that is a
+ * complete skin whose buried tiles simply match its surface.
+ */
+export const TILE_FRAMES = ["top", "fill"] as const;
+
+/** The block brushes whose look autotiles between two frames. An explicit list
+ * rather than a name test, for the same reason LOOP_BRUSH_IDS is one: a brush
+ * that merely happens to be named like ground should not silently acquire a
+ * second frame. */
+const TILE_BRUSH_IDS = new Set(["ground-grass", "ground-desert", "ground-castle", "ground-snow", "water", "lava"]);
+
+/**
  * 48 for the character against 32 for everything else, because Grampa renders
  * 48px tall (FRAME_HEIGHT in wizardAnimation.ts). Painting a character on the
  * 32-grid would mean scaling it up 1.5x to stand beside the built-in art, so
@@ -55,7 +73,8 @@ export const ENTITY_GRID_SIZE = 32;
 
 export type FramePlan =
   | { kind: "character"; gridSize: number; frames: readonly string[] }
-  | { kind: "loop"; gridSize: number; frames: readonly string[] };
+  | { kind: "loop"; gridSize: number; frames: readonly string[] }
+  | { kind: "tile"; gridSize: number; frames: readonly string[] };
 
 /** The brushes whose skins animate on a timer. Kept as an explicit list rather
  * than an `id.startsWith("enemy-")` test so adding a brush that merely happens
@@ -74,6 +93,9 @@ export function framePlanFor(targetId: string): FramePlan | null {
   if (LOOP_BRUSH_IDS.has(targetId)) {
     return { kind: "loop", gridSize: ENTITY_GRID_SIZE, frames: LOOP_FRAMES };
   }
+  if (TILE_BRUSH_IDS.has(targetId)) {
+    return { kind: "tile", gridSize: ENTITY_GRID_SIZE, frames: TILE_FRAMES };
+  }
   return null;
 }
 
@@ -88,7 +110,9 @@ export function gridSizeFor(targetId: string): number {
  * have, because it's the one the editor starts you on and the one `imageData`
  * mirrors. */
 export function baseFrameOf(plan: FramePlan): string {
-  return plan.kind === "character" ? "idle" : "0";
+  if (plan.kind === "character") return "idle";
+  if (plan.kind === "tile") return "top";
+  return "0";
 }
 
 /**

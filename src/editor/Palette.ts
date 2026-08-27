@@ -12,6 +12,7 @@ import {
   WATER_TILE,
 } from "../level/LevelSchema";
 import { blockIconKey, groundIconKey } from "../level/groundSkins";
+import { isSkinnableBlockId } from "../skins/groundStrip";
 
 export type BrushKind = "tile" | "entity";
 export type BrushCategory = "blocks" | "markers" | "enemies" | "items" | "decor";
@@ -189,3 +190,22 @@ export const PALETTE: Brush[] = [
 // check) — a user's own uploaded art shouldn't get an involuntary tint
 // forced onto it.
 export const UP_BASKET_TINT_COLOR = 0xffc266;
+
+/**
+ * Whether a brush can wear a painted skin — every entity, and (since blocks
+ * became skinnable) every block that the ground tileset has a frame for.
+ *
+ * Blocks used to be excluded by construction: they render through Phaser's
+ * tilemap as a frame index into a shared, gid-addressed spritesheet rather than
+ * as one swappable image per brush, so there was no texture to point at a
+ * skin. There is now — the strip is composed with the painted frames overpainted
+ * into it (see skins/groundTileset.ts) — and `isSkinnableBlockId` is derived
+ * from that composer's own frame table, so a block can only be offered a skin
+ * picker if something would actually render it.
+ *
+ * Shared by EditorUI (which gates the picker) and EditorScene (which gates
+ * every operation behind it) so the two can't disagree about what is skinnable.
+ */
+export function isSkinnable(brush: Brush): boolean {
+  return brush.entityType !== undefined || isSkinnableBlockId(brush.id);
+}

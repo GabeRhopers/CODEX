@@ -112,6 +112,61 @@ function frameTextureKey(targetId: string, skinId: string, frame: string): strin
   return `skin-frame-${targetId}-${skinId}-${frame}`;
 }
 
+/** One frame's painted art, and which frame actually supplied it — `name`
+ * itself normally, or the skin's base frame when `name` was never painted (see
+ * spriteFrames.resolveFrame). Callers key their textures off `suppliedBy` so
+ * frames sharing one image share one texture. */
+export interface ResolvedSkinFrame {
+  dataUrl: string;
+  suppliedBy: string;
+}
+
+/** The active skin's painted art for one target, resolved through its frame
+ * plan. `frame()` returns null for a frame this skin can't supply at all. */
+export interface ActiveSkinArt {
+  id: string;
+  frame(name?: string): ResolvedSkinFrame | null;
+}
+
+/** The single-frame case has no frame *names* — one image, no plan, nothing to
+ * fall back to. Used as `suppliedBy` so a texture key stays well-formed. */
+const SINGLE_FRAME = "single";
+
+/**
+ * Whichever skin `targetId` is wearing in this level, as raw art rather than as
+ * registered textures — for callers that need the pixels themselves.
+ *
+ * Blocks are why this exists: a block's skin isn't a texture a Sprite swaps to,
+ * it's a 32x32 patch painted into a shared tileset strip (see
+ * groundTileset.ts), so the loader-shaped "here is a texture key" answer is the
+ * wrong shape for it. Everything about *which* skin is chosen — the level's own
+ * pick over the library default over the built-in art — stays in one place.
+ *
+ * Works for single-frame targets too, which have no plan at all: `frame()` then
+ * ignores its argument and always hands back the skin's one image.
+ */
+export async function resolveActiveSkinArt(targetId: string, levelSkins?: LevelSkins): Promise<ActiveSkinArt | null> {
+  const skins = await loadCustomSkins();
+  const active = chosenSkin(skins, targetId, levelSkins);
+  if (!active) return null;
+  const plan = framePlanFor(targetId);
+  if (!plan) {
+    return { id: active.id, frame: () => ({ dataUrl: active.imageData, suppliedBy: SINGLE_FRAME }) };
+  }
+  // A skin saved before multi-frame support has no `frames` at all; treat its
+  // single `imageData` as the base frame so it reads as a one-frame still
+  // rather than being skipped entirely.
+  const painted: Record<string, string> = active.frames ?? { [baseFrameOf(plan)]: active.imageData };
+  return {
+    id: active.id,
+    frame: (name = baseFrameOf(plan)) => {
+      const dataUrl = resolveFrame(plan, painted, name);
+      if (!dataUrl) return null;
+      return { dataUrl, suppliedBy: painted[name] ? name : baseFrameOf(plan) };
+    },
+  };
+}
+
 /** Every frame of one skin, resolved to a live Phaser texture key and keyed
  * by frame name — what the runtime animates through. */
 export type FrameTextureKeys = Map<string, string>;
@@ -141,24 +196,17 @@ export async function resolveFrameTextureKeys(
 ): Promise<FrameTextureKeys | null> {
   const plan = framePlanFor(targetId);
   if (!plan) return null;
-  const skins = await loadCustomSkins();
-  const active = chosenSkin(skins, targetId, levelSkins);
-  if (!active) return null;
-
-  // A skin saved before multi-frame support has no `frames` at all; treat its
-  // single `imageData` as the base frame so it animates as a one-frame still
-  // rather than being skipped entirely.
-  const painted: Record<string, string> = active.frames ?? { [baseFrameOf(plan)]: active.imageData };
+  const art = await resolveActiveSkinArt(targetId, levelSkins);
+  if (!art) return null;
 
   const keys: FrameTextureKeys = new Map();
   for (const name of plan.frames) {
-    const dataUrl = resolveFrame(plan, painted, name);
-    if (!dataUrl) continue;
+    const resolved = art.frame(name);
+    if (!resolved) continue;
     // Keyed by the frame that *supplied* the image, not the one being asked
     // for, so five poses falling back to one idle share a single texture
     // instead of registering the same PNG five times over.
-    const suppliedBy = painted[name] ? name : baseFrameOf(plan);
-    keys.set(name, await registerTexture(scene, frameTextureKey(targetId, active.id, suppliedBy), dataUrl));
+    keys.set(name, await registerTexture(scene, frameTextureKey(targetId, art.id, resolved.suppliedBy), resolved.dataUrl));
   }
   return keys.size > 0 ? keys : null;
 }

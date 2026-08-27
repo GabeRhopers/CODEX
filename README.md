@@ -44,7 +44,8 @@ exceeded by custom background/music uploads) onto Google Drive, gated
 behind a lightweight "Who's playing?" profile picker (Mike/Gabriel/
 Andressa) — see "Google Drive storage & profiles" under Art. Also as of
 2026-08-16, any Marker/Enemy/Item/Decor brush can be reskinned with a
-user-uploaded image, shared instantly across all 3 profiles — see
+user-uploaded image, shared instantly across all 3 profiles — and as of
+2026-08-27 so can every Block, ground and hazards included — see
 "Custom skins" under Art. Also as of 2026-08-16, the editor's menus were
 restructured into a header (Level Name/Undo/Redo/Eraser/Save/Test Play/
 Menu), a left "Palette" panel and a right "Level Settings" panel flanking
@@ -85,7 +86,7 @@ through — see "Sub/Up areas" under Art. Also as of 2026-08-17, a
 standalone **Skin Creator** (a "Skin Creator" link on the Menu, not
 nested in the level Editor) lets you paint a 32x32 pixel-art skin from
 scratch — pick one of 5 preset color palettes, paint on a checkerboard
-canvas, save — for any of the ~26 skinnable Marker/Enemy/Item/Decor
+canvas, save — for any of the ~37 skinnable Block/Marker/Enemy/Item/Decor
 brushes, feeding straight into the same shared skin library the ordinary
 upload path already used — see "Skin Creator" under Art. See the plan doc §9.1
 for the exact MVP scope and §9.2/§9.3 for
@@ -186,7 +187,7 @@ Open the dev server URL in a browser. Controls:
   canvas to draw over, and **Trace in** stamps it in as a starting point.
   Otherwise: pick an existing
   pixel-drawn skin to re-edit, or **+ New Skin** and choose which of the
-  ~26 skinnable brushes it's for. **Save** adds it to that brush's shared
+  ~37 skinnable brushes it's for. **Save** adds it to that brush's shared
   skin library and makes it active immediately, same as an ordinary
   upload — see the Custom skins bullet below. Its own canvas has **Undo/
   Redo** (buttons or Ctrl+Z/Ctrl+Y), **Pan/Paint/Erase/Fill/Pick** tools
@@ -278,8 +279,9 @@ Open the dev server URL in a browser. Controls:
   `Custom` (this level picked it), `Default` (inherited, so it changes if
   the default does) or `Built-in`. **Set as default** underneath, two-tap
   confirmed, is the only thing that moves the shared default that levels
-  fall back to; painting or uploading a skin never does. Blocks aren't
-  reskinnable yet. Backgrounds and music share this exact same
+  fall back to; painting or uploading a skin never does. Blocks are
+  reskinnable too as of 2026-08-27 (all ten of them, hazards included) —
+  see "Custom skins" under Art. Backgrounds and music share this exact same
   trigger-and-thumbnail-submenu shape — see "Skin/background/music
   libraries" under Art, and "A level owns its skins" for the layering.
 - **Test Play** (button or Space): plays the level you've built. Requires
@@ -824,14 +826,56 @@ Skins apply everywhere that brush is used — the palette icon, every
 already-placed instance in the current level, and actual gameplay — not
 just future placements.
 
-Blocks aren't reskinnable (the **Skin** trigger reads "Skin: N/A" for
-them and can't be opened): all block rendering goes through Phaser's
-tilemap system, drawing from one shared, GID-indexed spritesheet per
-ground skin (`groundAutotile.ts`), not one swappable image per brush the
-way every entity (a plain `scene.add.image`) works. Reskinning a block
-would mean patching a specific frame inside that shared spritesheet
-texture rather than swapping a texture key — a meaningfully bigger change
-than "upload an image," and not part of this pass.
+**Blocks are reskinnable too, as of 2026-08-27.** They were the one
+category the whole skin system never reached, and the reason was real:
+block rendering goes through Phaser's tilemap, drawing from one shared,
+GID-indexed spritesheet per ground skin (`groundAutotile.ts`) rather than
+one swappable image per brush the way every entity does. So there was no
+texture key to point a skin at — the **Skin** trigger read "Skin: N/A"
+and wouldn't open. Since ground is most of what a level is made of, that
+was also the reskin that would change a level's look the most.
+
+The fix turned out to be much smaller than that framing suggests. The gid
+maths never asks which *texture* a frame came from: `EditorScene` and
+`PlayScene` both build the layer with
+`GROUND_SKINS.map((skin, i) => map.addTilesetImage(key, key, 32, 32, 0, 0, i * 6))`,
+so reskinning a block means handing `addTilesetImage` a **different
+192x32 image with the same six frames in the same order**. Nothing about
+gids, autotiling, collision, `BOUNCE_FRAMES`, `WATER_FRAMES` or
+`HAZARD_FRAMES` changes, because all of those key off the frame *index*
+and the index doesn't move — only the pixels behind it do. A skinned
+Water tile is still swimmable and a skinned Lava tile still kills.
+
+`src/skins/groundStrip.ts` is that image's contents as data — "slot *i*
+of skin *X* is painted by brush *B*'s frame *F*", the exact inverse of
+`groundAutotile.ts`'s lookup, and its tests derive the expected slots
+from `groundFrameAt` rather than restating the numbers.
+`src/skins/groundTileset.ts` composes it, by **overpainting rather than
+assembling**: draw the shipped tileset onto a 192x32 canvas, then replace
+only the frames whose brush actually has a skin. That gives per-frame
+fallback for free — an unskinned frame is literally the shipped art, byte
+for byte — and it means a level with no block skins registers no textures
+at all and behaves exactly as it did before this existed. Composed keys
+name every source image they were built from, so a composed texture is
+permanent and never overwritten while a live `TilemapLayer` points at it
+(the confirmed WebGL crash described under "Skin/background/music
+libraries" below).
+
+Two consequences worth knowing. Ground, Water and Lava skins are painted
+in **two frames** — `top` (the exposed surface) and `fill` (the buried
+variant, used when another cell of the same kind sits directly above) —
+and painting only `top` is a complete skin whose buried tiles simply
+match its surface. And Brick, Bounce and Water are shared pixel-for-pixel
+across grass/desert/snow, all resolving to *grass's* slot, so skinning
+Brick changes brick everywhere **except** Castle, which has its own
+brush (`brick-castle`) and its own slot. That's pre-existing tileset
+behaviour surfacing, not a new limitation.
+
+Composition happens **once per scene build**, before any tilemap is
+created — never inside `createGroundLayer`, which runs on every area
+switch and has to stay synchronous. In `PlayScene` that means `create()`
+now awaits the composed keys before its first `enterArea`, so `update()`
+gained an `areaBuilt` guard for the frames in between.
 
 *Shared across all 3 profiles, not per-level.* Unlike a level's own
 custom background/music (inline in that level's own JSON, private to

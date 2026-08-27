@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { AssetPickerItem, AssetPickerMenu } from "../editor/AssetPickerMenu";
-import { Brush, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
+import { Brush, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
 import { LevelNameInput } from "../editor/LevelNameInput";
 import { CanvasView, PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { FIT_INDEX, formatZoom, VIEWPORT_SIZE } from "../editor/canvasZoom";
@@ -117,9 +117,11 @@ const CHARACTER_BRUSH: Brush = {
 };
 
 /** Every target the Skin Creator can paint: the character first, since it's
- * the one most people are looking for, then every skinnable brush. */
+ * the one most people are looking for, then every skinnable brush — which as
+ * of the block-skin pass includes the Blocks category, so the ground a level is
+ * mostly made of can finally be painted here too. */
 function skinTargets(): Brush[] {
-  return [CHARACTER_BRUSH, ...PALETTE.filter((b) => b.entityType)];
+  return [CHARACTER_BRUSH, ...PALETTE.filter(isSkinnable)];
 }
 
 /**
@@ -564,12 +566,17 @@ export class SkinEditorScene extends Phaser.Scene {
   private buildPickBrush(): void {
     this.addBackButton(() => this.goTo("browse"));
     this.add
-      .text(GAME_WIDTH / 2, 24, "Choose an entity to paint a skin for", { fontSize: "18px", color: "#ffffff" })
+      .text(GAME_WIDTH / 2, 24, "Choose something to paint a skin for", { fontSize: "18px", color: "#ffffff" })
       .setOrigin(0.5, 0);
 
     const skinnable = skinTargets();
-    const columns = 6;
-    const cellW = 150;
+    // 8 columns of 125 rather than 6 of 150. Adding the ten block brushes took
+    // the grid from 28 targets to 38, which at 6 columns is 7 rows — and row 6
+    // starts at y=474 on a 468-tall canvas, i.e. the last six targets would
+    // simply not be on screen. 8 x 125 is 1000 wide (inside GAME_WIDTH) and
+    // brings it back to 5 rows, ending well clear of the bottom edge.
+    const columns = 8;
+    const cellW = 125;
     const cellH = 64;
     const gridWidth = columns * cellW;
     const x0 = (GAME_WIDTH - gridWidth) / 2;
