@@ -2434,15 +2434,49 @@ as a new `e2e` job the Pages `deploy` job now depends on alongside
 `build` — a genuine regression blocks the deploy the same way a failing
 build already does.
 
-*Since then it has grown to* **41 tests across 15 specs**, alongside 191
-Vitest unit tests. Worth naming the bias while it is still fixable: coverage
-has followed *recency*, not *risk*. The Skin Creator — the last eight commits'
-worth of work — carries 18 e2e and 64 unit tests. Worlds, which has its own
-schema, two scenes and two storage adapters across 520 lines, carries none;
-neither do Templates, My Levels' delete, music upload, background upload or the
-Profile gate, and every one of those is a path a real player walks. The suite
-is large now, but it is not yet *aimed*. See the Priority Matrix's "01 · TEST
-NEXT" card for the order to close that in.
+*Since then it has grown to* **75 tests across 22 specs**, alongside 327
+Vitest unit tests. The bias worth naming was that coverage followed *recency*,
+not *risk*: the Skin Creator carried 18 e2e and 64 unit tests while Worlds — its
+own schema, two scenes and two storage adapters across 520 lines — carried none,
+and neither did Templates, My Levels' delete, music upload, background upload or
+the Profile gate, every one of them a path a real player walks. The Priority
+Matrix's "01 · TEST NEXT" card tracks the order that is being closed in. Done so
+far: **Worlds** (38 unit + 5 e2e), **My Levels' delete** (3 e2e), and
+**Templates** (45 unit + 4 e2e — see below). Still open, in order: the **Profile
+gate**, **background upload**, **music upload**.
+
+**Templates (2026-08-27).** The six bundled levels are the first thing a new
+player opens — MenuScene's empty state points anyone with nothing saved straight
+at "Browse Templates" — and they were also the least defended data in the
+project. `levelFromRows` builds each one from hand-edited ASCII art, taking the
+level's width from `rows[0].length` alone and mapping any character it does not
+recognise to empty air, so a row one character short, a typo'd map character, an
+entity coordinate off the grid or a missing spawn/goal were all silent.
+`src/level/templateLevels.test.ts` runs the integrity checks over every template
+(and over a seventh the day one is added): rectangularity against the declared
+width/height, known tile values, exactly one spawn and one goal, entities in
+bounds, the spawn standing in open air on something solid, current schema/tile
+size, and that `cloneLevel` really deep-copies. All six passed on the first run —
+worth recording, since the point was that nothing had ever checked.
+
+`tests/e2e/templates.spec.ts` covers what only a browser can. Two details there
+were found by mutation-testing rather than by design, and both are the sort of
+thing that makes a green test meaningless:
+
+- The "every template starts" test originally slept 900ms and then asserted the
+  outcome was still `playing`. Moving a spawn over a pit *passed* that. The fall
+  loss threshold is 200px below the grid and the world's bottom edge is
+  deliberately non-collidable, so the fall takes ~700ms of **game** time — and
+  under software WebGL the loop runs well behind wall clock (the same effect
+  documented above, where a 1.8s walk took over 6s under load). It now waits on
+  game state instead: the player must actually come to rest on a tile
+  (`body.blocked.down`), which a spawn over a pit never does and a spawn in lava
+  loses before reaching.
+- The "Use This Template edits a copy" test originally re-opened the template and
+  asserted a blank id. That passed even when `useTemplate` handed over the
+  shipped level itself, because `useTemplate` blanks the id on its way out
+  regardless. The id has to be read through **Play**, which clones and keeps it —
+  a UUID there means Save wrote straight through onto the template.
 
 The real engineering problem was persistence: this app's only storage
 backend is Google Drive (`GoogleDriveStorageAdapter`/`driveClient.ts`),
