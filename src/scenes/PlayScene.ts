@@ -44,6 +44,7 @@ import { recordCompletion } from "../world/worldProgress";
 import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
+import { buildEdgeGrid, EDGE_GID_BASE, GROUND_EDGE_TEXTURE_KEY } from "../level/groundEdges";
 import { CANVAS_BACKGROUND_COLOR, GroundSkin, GROUND_SKINS } from "../level/groundSkins";
 import { AreaKey, DEFAULT_ENEMY_SIZE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
@@ -274,6 +275,9 @@ export class PlayScene extends Phaser.Scene {
   // checks.
   private runToken = 0;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
+  // Purely visual silhouette above groundLayer (see groundEdges.ts) — no
+  // collider of its own, and rebuilt with the tilemap it shares.
+  private edgeLayer!: Phaser.Tilemaps.TilemapLayer;
   // Rebuilt alongside groundLayer on every enterArea call — Phaser doesn't
   // automatically drop a collider just because the TilemapLayer it
   // referenced got destroyed, so the old one needs explicit removal
@@ -724,6 +728,34 @@ export class PlayScene extends Phaser.Scene {
       return map.addTilesetImage(tilesetKey, tilesetKey, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
     });
     this.groundLayer = map.createLayer(0, tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
+    // A second layer on the same map, drawing the mass's outline (see
+    // groundEdges.ts). Blank then filled rather than data-constructed because
+    // the map already took its size from the ground data above.
+    const edgeTileset = map.addTilesetImage(
+      GROUND_EDGE_TEXTURE_KEY,
+      GROUND_EDGE_TEXTURE_KEY,
+      TILE_SIZE,
+      TILE_SIZE,
+      0,
+      0,
+      EDGE_GID_BASE,
+    )!;
+    this.edgeLayer = map.createBlankLayer("ground-edges", edgeTileset, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
+    const edges = buildEdgeGrid(area.layers.ground);
+    for (let y = 0; y < edges.length; y++) {
+      for (let x = 0; x < edges[y].length; x++) {
+        const mask = edges[y][x];
+        if (mask !== -1) this.edgeLayer.putTileAt(EDGE_GID_BASE + mask, x, y);
+      }
+    }
+    // Explicit rather than by creation order, which is genuinely wrong here: a
+    // basket teleport rebuilds the tilemap while *reusing* the live player, so
+    // both layers are appended after it and would draw over it. Nearly
+    // invisible for the ground layer alone (the player stands in empty cells),
+    // but not once there's an overlay. The background sits at -100 and
+    // everything else at 0 or above.
+    this.groundLayer.setDepth(-2);
+    this.edgeLayer.setDepth(-1);
     // Lava isn't solid — standing in it is an instant hazard (see the
     // per-frame check in update()), not a floor to stand on. Water isn't
     // solid either, but for the opposite reason: it's swimmable, not a

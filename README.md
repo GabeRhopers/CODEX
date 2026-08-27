@@ -511,6 +511,56 @@ the prep script crops that border away before upscaling, for ground tiles
 only; Brick keeps its border on purpose (see below) since it's meant to
 read as a distinct block, not merging terrain.
 
+**Outlined edges (2026-08-27).** Cropping the border was right for the
+*interior* and left the *silhouette* with nothing: grass's `top` frame is a
+green cap over bare dirt and its `fill` frame is bare dirt on all four
+sides, so a platform simply stopped. `src/level/groundEdges.ts` puts an
+edge back only where the mass actually ends — a band down each exposed
+side and along the underside.
+
+The useful realisation is that an outline **composes**, so this is *three
+bits* (left/right/bottom exposed), not a 16- or 47-tile autotile set.
+Convex corners are two bands meeting inside one cell; concave ones are two
+bands in two *different* cells meeting at the grid point they share, which
+nothing has to encode; two masses touching only diagonally each keep a full
+rim. Eight frames, generated procedurally (`drawGroundEdges` in
+generateTextures.ts) from the same `edgeBandRects` the tests check, and
+drawn by a second TilemapLayer registered at `EDGE_GID_BASE` — past the
+four ground strips' 0-23, since gids are per-*tilemap*, not per-layer.
+
+Three decisions worth knowing:
+
+- **Translucent black, not a colour per skin.** One texture instead of
+  four, and a darkening reads as "a shadowed rim of whatever is under it",
+  so it also looks right over a block skin somebody painted themselves.
+- **What counts as a neighbour** is a tile whose art *fills its whole
+  cell*: the four grounds plus Brick and Castle Brick. Bounce is a pad
+  (transparent above y=10) and water/lava are fluid, so ground draws an
+  edge against water — a shoreline. Two different ground skins meeting
+  draw nothing between them: one mass, one material change.
+- **The level boundary counts as open air**, so ground running to the edge
+  is outlined there. That matches the rule `groundFrameAt` already follows
+  for the row above (a tile on row 0 shows its cap, not a buried fill), and
+  it is one constant, `OUT_OF_BOUNDS_FILLS_CELL`.
+
+Only ground is outlined; Brick already has its own border, and boxing water
+or lava in would make them read as solid. There is no *top* band either —
+each ground kind's `top` frame is already its own edge treatment.
+
+Painting one cell changes what its four orthogonal neighbours look like, so
+`TilePainter.paint` re-renders a plus shape rather than just the cell and
+the one below it. Diagonals are deliberately left alone: neither the
+autotile rule nor the edge rule reads them.
+
+This also forced out a latent depth bug. The ground layer and the player
+were both at an implicit depth 0, and ground only drew *under* the player
+because it happened to be created first — which a basket teleport breaks,
+since `enterArea` rebuilds the tilemap while reusing the live player.
+Nearly invisible with just the ground layer (the player stands in empty
+cells), obvious with an overlay. Both scenes now set ground to `-2` and the
+overlay to `-1` explicitly; the background is at `-100` and everything else
+at 0 or above, so nothing else moved.
+
 **Templates & ground skins.** Ground/Brick/Bounce/hazard blocks each come
 in a "skin" — grass, desert, castle, or snow — but a skin is a property
 of the individual *block*, not the level: `LevelData` has no `theme`

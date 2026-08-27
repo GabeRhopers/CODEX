@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { TILE_SIZE } from "../config/gameConfig";
 import { blockIconKey, groundIconKey, groundTilesetKey, SKIN_COLORS, SkinColors } from "../level/groundSkins";
+import { EDGE_FRAME_COUNT, edgeBandRects, GROUND_EDGE_TEXTURE_KEY } from "../level/groundEdges";
 
 /**
  * Procedurally generated pixel art for the pieces that still don't have a
@@ -134,6 +135,38 @@ const SLIPPER_CLAW = 0xff8c3c;
  * heart/shield/speed all read as an outlined badge with a symbol inside),
  * even though there's no source tile to match pixel-for-pixel: a white
  * slipper sole with three orange chicken-foot claws poking out the toe. */
+/**
+ * The ground-edge overlay strip: one 32x32 frame per exposed-side mask, drawn
+ * over the ground layer so a mass has a visible silhouette (see
+ * groundEdges.ts for why three bits are enough, and why the source art has no
+ * border of its own to fall back on).
+ *
+ * One flat, translucent black rather than a colour per ground skin. That is not
+ * only four fewer textures: a darkening reads as "a shadowed rim of whatever is
+ * under it", so it works over grass, sand, stone, snow *and* over a skin
+ * somebody painted themselves — which a hard-coded brown would not.
+ *
+ * The rectangles come from `edgeBandRects` rather than being drawn here, so the
+ * shape the tests check is literally the shape that gets drawn, and the
+ * non-overlap it guarantees is what keeps alpha from compounding into a darker
+ * dot on every convex corner.
+ */
+function drawGroundEdges(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(GROUND_EDGE_COLOR, GROUND_EDGE_ALPHA);
+  for (let mask = 0; mask < EDGE_FRAME_COUNT; mask++) {
+    const offsetX = mask * TILE_SIZE;
+    for (const rect of edgeBandRects(mask)) {
+      g.fillRect(offsetX + rect.x, rect.y, rect.width, rect.height);
+    }
+  }
+}
+
+/** Black, and light enough to read as a shadowed rim rather than a drawn-on
+ * frame. Tuned against the real tilesets — grass's dirt is the lightest of the
+ * four, so it is the one that sets the floor for how strong this has to be. */
+const GROUND_EDGE_COLOR = 0x000000;
+const GROUND_EDGE_ALPHA = 0.34;
+
 function drawChickenSlipperIcon(g: Phaser.GameObjects.Graphics): void {
   g.fillStyle(SLIPPER_BADGE, 1);
   g.fillRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 6);
@@ -311,6 +344,14 @@ export function generateTextures(scene: Phaser.Scene): void {
   // there's no "deeper lava" look to draw here).
   drawLava(g, TILE_SIZE * 5);
   g.generateTexture(groundTilesetKey("castle"), TILE_SIZE * 6, TILE_SIZE);
+
+  // Shared by all four ground skins and by every custom block skin — see
+  // drawGroundEdges. Registered here rather than shipped as art because it is
+  // pure geometry, and because keeping it derived from edgeBandRects means the
+  // texture cannot drift from the masks the editor and runtime compute.
+  g.clear();
+  drawGroundEdges(g);
+  g.generateTexture(GROUND_EDGE_TEXTURE_KEY, TILE_SIZE * EDGE_FRAME_COUNT, TILE_SIZE);
 
   // Single-frame Palette icons matching castle's own procedural brick/
   // bounce/lava above — without these the palette would keep showing the

@@ -20,6 +20,7 @@ import { isEnemyType } from "../gameplay/EnemyBehaviors";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
+import { buildEdgeGrid, EDGE_GID_BASE, GROUND_EDGE_TEXTURE_KEY } from "../level/groundEdges";
 import { CANVAS_BACKGROUND_COLOR, GroundSkin, GROUND_SKINS } from "../level/groundSkins";
 import { cloneLevel } from "../level/LevelSerializer";
 import { AreaKey, createEmptyArea, createEmptyLevel, DEFAULT_ENEMY_SIZE, EMPTY_TILE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
@@ -71,6 +72,10 @@ export class EditorScene extends Phaser.Scene {
   // by switchArea whenever this changes.
   private currentAreaKey: AreaKey = "main";
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
+  // The silhouette overlay above `groundLayer` — see groundEdges.ts. Lives on
+  // the same tilemap, so createGroundLayer's single `tilemap.destroy()` tears
+  // both down together and the same stale-reference care applies to both.
+  private edgeLayer!: Phaser.Tilemaps.TilemapLayer;
   private painter!: TilePainter;
   private entityPlacer!: EntityPlacer;
   private ui!: EditorUI;
@@ -191,7 +196,7 @@ export class EditorScene extends Phaser.Scene {
     }
 
     this.createGroundLayer();
-    this.painter = new TilePainter(this.level, this.groundLayer);
+    this.painter = new TilePainter(this.level, this.groundLayer, this.edgeLayer);
     this.entityPlacer = new EntityPlacer(this, this.level, TILE_SIZE);
 
     this.highlight = this.add.image(-100, -100, "highlight").setDepth(9);
@@ -769,6 +774,26 @@ export class EditorScene extends Phaser.Scene {
       return map.addTilesetImage(key, key, TILE_SIZE, TILE_SIZE, 0, 0, i * 6)!;
     });
     this.groundLayer = map.createBlankLayer("ground", tilesets, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
+    // Its own tileset on the same map, claiming the gid range immediately after
+    // the four ground strips (see EDGE_GID_BASE). No collision is ever set on
+    // this layer — the ground layer alone owns that.
+    const edgeTileset = map.addTilesetImage(
+      GROUND_EDGE_TEXTURE_KEY,
+      GROUND_EDGE_TEXTURE_KEY,
+      TILE_SIZE,
+      TILE_SIZE,
+      0,
+      0,
+      EDGE_GID_BASE,
+    )!;
+    this.edgeLayer = map.createBlankLayer("ground-edges", edgeTileset, GRID_ORIGIN_X, GRID_ORIGIN_Y)!;
+    // Explicit, rather than relying on creation order. Both layers are rebuilt
+    // on every area switch and would otherwise be appended *after* whatever
+    // already exists — see PlayScene, where the same reliance on ordering is a
+    // real (if nearly invisible) bug across a basket teleport. Everything else
+    // sits at 0 or above, and the background at -100.
+    this.groundLayer.setDepth(-2);
+    this.edgeLayer.setDepth(-1);
   }
 
   private undo(): void {
@@ -1323,12 +1348,18 @@ export class EditorScene extends Phaser.Scene {
    * changes. */
   private rebuildVisualsFromLevel(): void {
     const area = this.area();
-    this.painter = new TilePainter(area, this.groundLayer);
+    this.painter = new TilePainter(area, this.groundLayer, this.edgeLayer);
+    const edges = buildEdgeGrid(area.layers.ground);
     for (let y = 0; y < area.height; y++) {
       for (let x = 0; x < area.width; x++) {
         const index = area.layers.ground[y][x];
         if (index === -1) this.groundLayer.removeTileAt(x, y);
         else this.groundLayer.putTileAt(groundFrameAt(area.layers.ground, x, y), x, y);
+        // buildEdgeGrid hands back raw masks, so the gid offset is applied here
+        // — the same split TilePainter uses.
+        const mask = edges[y][x];
+        if (mask === -1) this.edgeLayer.removeTileAt(x, y);
+        else this.edgeLayer.putTileAt(EDGE_GID_BASE + mask, x, y);
       }
     }
     // Destroys the *previous* entityPlacer's marker sprites before
