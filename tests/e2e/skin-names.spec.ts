@@ -211,10 +211,13 @@ test("a blank name falls back to a default instead of saving an empty label", as
   await saveSkin(page);
   await clickByText(page, "SkinEditor", "← Back");
 
+  // Polled, like every other read of this list in the file. The browse rows
+  // are rendered from an async `listPixelSkins()`, so reading straight after
+  // "← Back" can catch the list still empty — which is what this one lone bare
+  // read was doing, intermittently, and reporting as `[]`.
+  await expect.poll(() => browseRowNames(page)).toEqual(["Ghost 1"]);
   const names = await browseRowNames(page);
-  expect(names).toHaveLength(1);
   expect(names[0].trim()).not.toBe("");
-  expect(names[0]).toBe("Ghost 1");
 });
 
 // --- 5. two skins for one brush --------------------------------------------

@@ -249,3 +249,64 @@ export async function installMockDrive(page: Page): Promise<void> {
   await installMockGoogleIdentity(page);
   await installMockDriveApi(page);
 }
+
+/** The request shapes that *change* something, as opposed to reading it — see
+ * handleDriveRoute above for where each is served normally. */
+function isDriveWrite(url: URL, method: string): boolean {
+  if (url.pathname.startsWith("/upload/drive/v3/files")) return method === "POST" || method === "PATCH";
+  // PATCH /drive/v3/files/:id — trash (delete) and rename.
+  return method === "PATCH" && /\/drive\/v3\/files\/[^/]+$/.test(url.pathname);
+}
+
+/**
+ * Whether writes are currently being failed, per page.
+ *
+ * A flag rather than adding and removing the route, because unrouting would
+ * take the base mock with it and reinstalling would hand back an **empty
+ * store** — losing exactly the saved data a recovery test needs to still be
+ * there. The handler is registered once and consults this.
+ */
+const writeFailures = new WeakMap<Page, { failing: boolean }>();
+
+/**
+ * Makes every Drive **write** fail, leaving reads working.
+ *
+ * That split is the point: with reads intact a spec can still assert the level
+ * is on screen, still dirty, and still has its tiles — which is what "a failed
+ * save never drops the in-memory level" actually means. Failing everything
+ * would prove far less, because half the app would be broken for unrelated
+ * reasons.
+ *
+ * Registered *after* installMockDrive on purpose. Playwright matches routes
+ * last-registered-first, so this shadows the working mock for writes and falls
+ * through to it (via `route.fallback()`) for everything else, rather than
+ * having to reimplement any of it.
+ *
+ * 503 rather than 500: "temporarily unavailable" is the failure this is really
+ * modelling, and it is what a real Drive outage returns.
+ */
+export async function failDriveWrites(page: Page): Promise<void> {
+  const existing = writeFailures.get(page);
+  if (existing) {
+    existing.failing = true;
+    return;
+  }
+  const state = { failing: true };
+  writeFailures.set(page, state);
+  await page.route("https://www.googleapis.com/**", async (route) => {
+    const request = route.request();
+    if (state.failing && isDriveWrite(new URL(request.url()), request.method())) {
+      await route.fulfill({ status: 503, json: { error: { message: "mock: Drive unavailable" } } });
+      return;
+    }
+    await route.fallback();
+  });
+}
+
+/** Lifts the block, keeping everything already stored. One spec can then cover
+ * the failure *and* the recovery — "it told me and kept my work" is only half
+ * the guarantee; "and then it saved once storage came back" is the other. */
+export function stopFailingDriveWrites(page: Page): void {
+  const state = writeFailures.get(page);
+  if (state) state.failing = false;
+}

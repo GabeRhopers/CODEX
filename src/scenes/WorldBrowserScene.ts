@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GAME_WIDTH } from "../config/gameConfig";
 import { getWorldStorage } from "../persistence/storage";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
+import { ConfirmButton } from "../ui/confirmButton";
 import { WorldSummary } from "../world/WorldSchema";
 
 const ROW_START_Y = 90;
@@ -13,6 +14,9 @@ const ROW_HEIGHT = 44;
 export class WorldBrowserScene extends Phaser.Scene {
   private worldStorage: WorldStorageAdapter = getWorldStorage();
   private listContainer!: Phaser.GameObjects.Container;
+  private statusText!: Phaser.GameObjects.Text;
+  /** See LevelBrowserScene's own field — arming one row stands the rest down. */
+  private deleteButtons: ConfirmButton[] = [];
 
   constructor() {
     super("WorldBrowser");
@@ -42,12 +46,19 @@ export class WorldBrowserScene extends Phaser.Scene {
 
     this.add.text(GAME_WIDTH / 2, 24, "My Worlds", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
 
+    // Back after Play moved to the map, which took the old one with it — a
+    // failed delete needs somewhere to say so.
+    this.statusText = this.add
+      .text(GAME_WIDTH / 2, ROW_START_Y - 22, "", { fontSize: "11px", color: "#a6a6c8" })
+      .setOrigin(0.5);
+
     this.listContainer = this.add.container(0, 0);
     void this.refresh();
   }
 
   private async refresh(): Promise<void> {
     this.listContainer.removeAll(true);
+    this.deleteButtons = [];
     const worlds = await this.worldStorage.list();
 
     if (worlds.length === 0) {
@@ -83,11 +94,21 @@ export class WorldBrowserScene extends Phaser.Scene {
     const editBtn = this.makeSmallButton(GAME_WIDTH - 240, y + (ROW_HEIGHT - 8) / 2, "Edit", () =>
       void this.editWorld(world.id),
     );
-    const deleteBtn = this.makeSmallButton(GAME_WIDTH - 140, y + (ROW_HEIGHT - 8) / 2, "Delete", () =>
-      void this.deleteWorld(world.id),
-    );
+    // Two taps, matching My Levels and every other destructive action.
+    const deleteBtn = new ConfirmButton({
+      scene: this,
+      x: GAME_WIDTH - 140,
+      y: y + (ROW_HEIGHT - 8) / 2,
+      label: "Delete",
+      armedLabel: "Delete? Tap again",
+      onConfirm: () => void this.deleteWorld(world.id),
+    });
+    deleteBtn.text.on("pointerdown", () => {
+      for (const other of this.deleteButtons) if (other !== deleteBtn) other.disarm();
+    });
+    this.deleteButtons.push(deleteBtn);
 
-    this.listContainer.add([rowBg, name, meta, playBtn, editBtn, deleteBtn]);
+    this.listContainer.add([rowBg, name, meta, playBtn, editBtn, deleteBtn.text]);
   }
 
   private makeSmallButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
@@ -126,7 +147,15 @@ export class WorldBrowserScene extends Phaser.Scene {
   }
 
   private async deleteWorld(id: string): Promise<void> {
-    await this.worldStorage.remove(id);
+    try {
+      await this.worldStorage.remove(id);
+    } catch (err) {
+      // Same unguarded shape My Levels had — see LevelBrowserScene.deleteLevel.
+      this.statusText.setText("Couldn't delete that world — check your connection and try again.").setColor("#ff6666");
+      console.error("World delete failed:", err);
+      return;
+    }
+    this.statusText.setText("").setColor("#a6a6c8");
     void this.refresh();
   }
 }

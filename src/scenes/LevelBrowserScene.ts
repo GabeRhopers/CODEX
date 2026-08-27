@@ -3,6 +3,7 @@ import { GAME_WIDTH } from "../config/gameConfig";
 import { LevelSummary } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
+import { ConfirmButton } from "../ui/confirmButton";
 
 const ROW_START_Y = 90;
 const ROW_HEIGHT = 44;
@@ -13,6 +14,10 @@ const ROW_HEIGHT = 44;
 export class LevelBrowserScene extends Phaser.Scene {
   private storage: StorageAdapter = getLevelStorage();
   private listContainer!: Phaser.GameObjects.Container;
+  private statusText!: Phaser.GameObjects.Text;
+  /** Every row's Delete, so arming one can stand the others down — two rows
+   * both reading "Delete? Tap again" is a way to delete the wrong level. */
+  private deleteButtons: ConfirmButton[] = [];
 
   constructor() {
     super("LevelBrowser");
@@ -42,12 +47,18 @@ export class LevelBrowserScene extends Phaser.Scene {
 
     this.add.text(GAME_WIDTH / 2, 24, "My Levels", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
 
+    this.statusText = this.add
+      .text(GAME_WIDTH / 2, ROW_START_Y - 22, "", { fontSize: "11px", color: "#a6a6c8" })
+      .setOrigin(0.5);
+
     this.listContainer = this.add.container(0, 0);
     void this.refresh();
   }
 
   private async refresh(): Promise<void> {
     this.listContainer.removeAll(true);
+    // The Texts these wrap are destroyed by removeAll above.
+    this.deleteButtons = [];
     const levels = await this.storage.list();
 
     if (levels.length === 0) {
@@ -77,11 +88,23 @@ export class LevelBrowserScene extends Phaser.Scene {
     const editBtn = this.makeSmallButton(GAME_WIDTH - 240, y + (ROW_HEIGHT - 8) / 2, "Edit", () =>
       this.editLevel(level.id),
     );
-    const deleteBtn = this.makeSmallButton(GAME_WIDTH - 140, y + (ROW_HEIGHT - 8) / 2, "Delete", () =>
-      this.deleteLevel(level.id),
-    );
+    // Two taps, like every other destructive action here. This was a single
+    // click that permanently removed a saved level, sitting immediately beside
+    // Edit, with no undo.
+    const deleteBtn = new ConfirmButton({
+      scene: this,
+      x: GAME_WIDTH - 140,
+      y: y + (ROW_HEIGHT - 8) / 2,
+      label: "Delete",
+      armedLabel: "Delete? Tap again",
+      onConfirm: () => void this.deleteLevel(level.id),
+    });
+    deleteBtn.text.on("pointerdown", () => {
+      for (const other of this.deleteButtons) if (other !== deleteBtn) other.disarm();
+    });
+    this.deleteButtons.push(deleteBtn);
 
-    this.listContainer.add([rowBg, name, updated, editBtn, deleteBtn]);
+    this.listContainer.add([rowBg, name, updated, editBtn, deleteBtn.text]);
   }
 
   private makeSmallButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
@@ -107,7 +130,18 @@ export class LevelBrowserScene extends Phaser.Scene {
   }
 
   private async deleteLevel(id: string): Promise<void> {
-    await this.storage.remove(id);
+    try {
+      await this.storage.remove(id);
+    } catch (err) {
+      // Was unguarded: a failed Drive delete threw, refresh() never ran, and
+      // the row simply stayed put saying nothing — indistinguishable from a
+      // click that missed. The level genuinely still exists, so leaving the row
+      // is right; saying so is what was missing.
+      this.statusText.setText("Couldn't delete that level — check your connection and try again.").setColor("#ff6666");
+      console.error("Level delete failed:", err);
+      return;
+    }
+    this.statusText.setText("").setColor("#a6a6c8");
     void this.refresh();
   }
 

@@ -2756,6 +2756,43 @@ engage unless `outcome === "playing"`, so a PAUSED card can never end up sitting
 on the win or lose screen, and Start can never un-pause the physics that `onWin`
 deliberately froze. **P** does the same thing from the keyboard.
 
+**A failed save can't lose your work — now proven (2026-08-27).** The Priority
+Matrix's last unverified **Tier 1** row. The handling was already right, but
+nothing exercised it, and the guarantee rests on a single line in
+`EditorScene.leaveToMenu`: it re-checks `dirty` *after* awaiting the save and
+refuses to navigate. Without it, clicking Menu during a Drive outage discards
+everything you painted, silently.
+
+`mockDrive` gained `failDriveWrites`, which fails **writes only** — reads keep
+working, which is what makes "the level is still on screen, still dirty, still
+has its tiles" a real assertion rather than a tautology. It is a per-page flag
+rather than adding and removing the route, because unrouting would take the base
+mock with it and reinstalling would hand back an *empty store*, losing exactly
+the data a recovery test needs. Three e2e now cover failure, the refusal to
+leave, and recovery once storage comes back. The leave-guard was mutation-checked
+— delete that line and the test fails.
+
+**Deleting a level was one click, permanently (2026-08-27).**
+`LevelBrowserScene.deleteLevel` called `storage.remove` straight from a
+`pointerdown` on a button sitting **next to Edit**, with no confirmation and no
+undo — while every other destructive action in the app was already two-tap. It
+also had no `try/catch`: a failed Drive delete threw, `refresh()` never ran, and
+the row just sat there, indistinguishable from a click that missed. `My Worlds`
+was identical.
+
+Both now use `ConfirmButton` (`src/ui/confirmButton.ts`) — **Delete → Delete?
+Tap again → gone**, auto-disarming after 3s, and arming one row stands the
+others down so two rows can never both be armed. It is deliberately *not*
+retrofitted onto `EditorUI`'s Clear: that is a `PanelButton` (separate bg rect +
+label) where these are plain `Text`, so sharing would mean generalising over two
+shapes for no gain.
+
+*A test bug found in passing:* `skin-names`' blank-name case was the **only** one
+of seven reads of the browse list that didn't poll. The rows render from an async
+`listPixelSkins()`, so reading straight after "← Back" could catch the list still
+empty — reported as a bare `[]`. That is a second, distinct signature of the
+long-running save/reopen flake; the decode-hang one was bounded the day before.
+
 **The save/reopen flake, finally named (2026-08-26).** Three specs
 (`skin-roundtrip`, `skin-reuse`, `skin-names`) had been failing on CI on and off
 for days without ever being root-caused. The `waitForSkinCanvas` diagnostic
