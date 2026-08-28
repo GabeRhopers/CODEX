@@ -29,6 +29,16 @@ function loadCustomAudio(scene: Phaser.Scene, dataUrl: string): Promise<string |
     // A corrupted/undecodable upload shouldn't break Play — fall back to
     // silence rather than leaving the caller's promise unresolved.
     scene.load.once(Phaser.Loader.Events.FILE_LOAD_ERROR, () => resolve(null));
+    // FILE_LOAD_ERROR alone doesn't actually deliver that, though, for the one
+    // input this path ever gets: Phaser emits it only when the *fetch* fails,
+    // and a data URL never fails to fetch. Audio that downloads fine and then
+    // fails decodeAudioData goes through File.onProcessError, which logs and
+    // emits nothing at all — so without this the promise stayed pending
+    // forever. COMPLETE fires once the queue drains either way, and "the key
+    // never reached the cache" is the failure.
+    scene.load.once(Phaser.Loader.Events.COMPLETE, () => {
+      if (!scene.cache.audio.exists(CUSTOM_MUSIC_KEY)) resolve(null);
+    });
     scene.load.audio(CUSTOM_MUSIC_KEY, dataUrl);
     scene.load.start();
   });

@@ -198,6 +198,80 @@ export async function clickIconWithLabel(page: Page, sceneKey: string, label: st
   await clickScenePoint(page, point.x, point.y);
 }
 
+/**
+ * Clicks the small "x" delete badge on an asset picker's tile for `label`.
+ *
+ * The badge is a bare interactive Rectangle rather than the icon+label pair
+ * `clickIconWithLabel` looks for (AssetPickerMenu draws it above and to the
+ * right of the tile's icon), so it has no text to find it by. Rather than
+ * hardcoding AssetPickerMenu's badge offsets here — where they would silently
+ * rot the moment the picker's layout changed — this finds the tile by its label
+ * and then takes the interactive Rectangle nearest that tile's top-right
+ * corner, which is what the badge *is* regardless of the exact numbers.
+ */
+export async function clickDeleteBadgeFor(page: Page, sceneKey: string, label: string): Promise<void> {
+  const point = await waitForScenePoint(
+    page,
+    ({ sceneKey, label }) => {
+      const scene = window.__debugGame!.scene.getScene(sceneKey);
+      if (!scene) return null;
+      type Bounds = { x: number; y: number; width: number; height: number };
+      type Listable = {
+        list?: Listable[];
+        type?: string;
+        text?: string;
+        input?: unknown;
+        getBounds?: () => Bounds;
+      };
+
+      const flat: Listable[] = [];
+      const walk = (list: Listable[]) => {
+        for (const child of list) {
+          flat.push(child);
+          if (child.list) walk(child.list);
+        }
+      };
+      walk((scene.children.list as unknown as Listable[]) ?? []);
+
+      // The tile: the nearest Image *before* the Text label. Not simply the
+      // preceding entry, the way clickIconWithLabel assumes — the picker draws
+      // a highlight Rectangle between the icon and its label for whichever tile
+      // is currently active, and the tile being deleted is very often that one.
+      let tile: Bounds | null = null;
+      for (let i = 1; i < flat.length && !tile; i++) {
+        if (flat[i].type !== "Text" || flat[i].text !== label) continue;
+        for (let j = i - 1; j >= 0 && i - j <= 3; j--) {
+          if (flat[j].type === "Image") {
+            tile = flat[j].getBounds?.() ?? null;
+            break;
+          }
+        }
+      }
+      if (!tile) return null;
+
+      const cornerX = tile.x + tile.width;
+      const cornerY = tile.y;
+      let best: { x: number; y: number; distance: number } | null = null;
+      for (const child of flat) {
+        if (child.type !== "Rectangle" || !child.input) continue;
+        const b = child.getBounds?.();
+        if (!b) continue;
+        const x = b.x + b.width / 2;
+        const y = b.y + b.height / 2;
+        const distance = Math.hypot(x - cornerX, y - cornerY);
+        if (!best || distance < best.distance) best = { x, y, distance };
+      }
+      // Guards against picking up some unrelated Rectangle elsewhere on screen
+      // when the badge simply isn't there (a non-deletable tile).
+      if (!best || best.distance > Math.max(tile.width, tile.height)) return null;
+      return { x: best.x, y: best.y };
+    },
+    { sceneKey, label },
+    `clickDeleteBadgeFor: no delete badge beside "${label}" found in scene "${sceneKey}"`,
+  );
+  await clickScenePoint(page, point.x, point.y);
+}
+
 /** Opens EditorUI's category dropdown (its chip always reads
  * "<current label> ▾" — see EditorUI.chipLabel) and clicks the row for
  * `label`, exactly the two real clicks a designer makes to change tabs. */

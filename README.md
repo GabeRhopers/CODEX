@@ -2434,16 +2434,17 @@ as a new `e2e` job the Pages `deploy` job now depends on alongside
 `build` — a genuine regression blocks the deploy the same way a failing
 build already does.
 
-*Since then it has grown to* **75 tests across 22 specs**, alongside 327
+*Since then it has grown to* **97 tests across 24 specs**, alongside 342
 Vitest unit tests. The bias worth naming was that coverage followed *recency*,
 not *risk*: the Skin Creator carried 18 e2e and 64 unit tests while Worlds — its
 own schema, two scenes and two storage adapters across 520 lines — carried none,
 and neither did Templates, My Levels' delete, music upload, background upload or
 the Profile gate, every one of them a path a real player walks. The Priority
-Matrix's "01 · TEST NEXT" card tracks the order that is being closed in. Done so
-far: **Worlds** (38 unit + 5 e2e), **My Levels' delete** (3 e2e), **Templates**
-(45 unit + 4 e2e), the **Profile gate** (11 unit + 7 e2e) and **background
-upload** (6 e2e) — all described below. One left: **music upload**.
+Matrix's "01 · TEST NEXT" card tracked the order they were closed in, and as of
+2026-08-28 that list is **empty**: **Worlds** (38 unit + 5 e2e), **My Levels'
+delete** (3 e2e), **Templates** (45 unit + 4 e2e), the **Profile gate** (11 unit
++ 7 e2e), **background upload** (6 e2e) and **music upload** (4 unit + 9 e2e) —
+all described below.
 
 **Templates (2026-08-27).** The six bundled levels are the first thing a new
 player opens — MenuScene's empty state points anyone with nothing saved straight
@@ -2488,6 +2489,59 @@ One thing left alone deliberately: on a Drive failure the editor reports
 `uploadBackground` chains the read and the store into a single rejection
 handler. The test asserts on `"Couldn't"` rather than the whole string so the
 wording is free to improve without breaking it.
+
+**Music upload (2026-08-28).** The last item on the list, and the only one that
+turned up a live bug rather than just uncovered ground.
+
+The feature itself is backgrounds' twin with one deliberate difference: audio
+**cannot** be re-encoded client-side without a real transcoder, so where
+`customBackgroundUpload` shrinks an oversized image to 1600px, `musicUpload.ts`
+simply refuses anything over 4MB. That guard is the entire defence on the path,
+which makes exactly where its boundary sits worth pinning — `src/editor/
+musicUpload.test.ts` (4 tests) covers the rejection, its user-facing message,
+the read-failure path, and that a file of *precisely* 4MB is allowed through
+(`>`, not `>=`). `tests/e2e/music-upload.spec.ts` (9 tests) covers the rest:
+that a track is stored by reference and byte-for-byte identical to what was
+uploaded, that Test Play really decodes and plays it, that a second level picks
+it from the shared library without re-uploading, that "None" clears the legacy
+embedded fields as well as the id, and that deleting a track clears the area
+still pointing at it — backgrounds can fall back to Meadow, music has no default
+to land on, so a dangling `customMusicId` would leave the trigger naming a track
+that no longer exists anywhere.
+
+**The bug.** `musicLoader.ts`'s `loadCustomAudio` documented a fallback to
+silence "rather than leaving the caller's promise unresolved", implemented by
+listening for `Phaser.Loader.Events.FILE_LOAD_ERROR`. Traced through Phaser's
+source, that listener **cannot fire for the only input this path ever gets**:
+`AudioFile.getAudioURL` passes a `data:` URL straight through, a data URL never
+fails the *fetch*, and `FILE_LOAD_ERROR` is emitted only for fetch failures. A
+`decodeAudioData` failure instead reaches `File.onProcessError`, which logs and
+emits nothing at all — so an undecodable upload left the promise pending
+forever, plus a live `filecomplete-audio-` listener a later load could resolve
+with the wrong data. Not a crash, since `PlayScene` voids the promise, but
+precisely the state the comment claimed to prevent. The fix also listens for
+`COMPLETE`, which fires once the queue drains either way, and treats "the key
+never reached the cache" as the failure. Removing it again makes the spec's last
+test hang to its timeout, which is how it is kept honest.
+
+Two harness notes. `tests/e2e/support/audio.ts` generates a PCM WAV of a chosen
+length (a 30-second one clears 4MB comfortably) for the same reason
+`support/images.ts` generates PNGs — a multi-megabyte fixture has no business in
+a git history. And `clickIconWithLabel` cannot reach an asset picker's delete
+badge: the badge is a bare interactive `Rectangle` with no text, and the picker
+draws a highlight `Rectangle` *between* the icon and its label for whichever
+tile is active, which breaks that helper's "Image immediately followed by Text"
+assumption for exactly the tile a delete test cares about. `clickDeleteBadgeFor`
+finds the tile by label and takes the interactive rectangle nearest its
+top-right corner, so it does not hardcode `AssetPickerMenu`'s offsets.
+
+One test was wrong before it was right, in the now-familiar way: "None clears
+every music field, legacy ones included" passed with the clearing removed,
+because nothing writes `customMusicData`/`customMusicName` anymore and the
+assertion was reading fields that had never been set. It now seeds a pre-rework
+level so the clearing is actually observable. Same wording caveat as backgrounds
+applies here too — a *store* failure reports "Couldn't load that file", so the
+test pins the substring, not the sentence.
 
 **The Profile gate (2026-08-28).** Two separate gaps, and the second is the one
 that mattered. First, the gate was *never walked*: `gotoApp` seeds
