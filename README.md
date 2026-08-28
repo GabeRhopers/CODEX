@@ -2442,8 +2442,8 @@ and neither did Templates, My Levels' delete, music upload, background upload or
 the Profile gate, every one of them a path a real player walks. The Priority
 Matrix's "01 · TEST NEXT" card tracks the order that is being closed in. Done so
 far: **Worlds** (38 unit + 5 e2e), **My Levels' delete** (3 e2e), **Templates**
-(45 unit + 4 e2e) and the **Profile gate** (11 unit + 7 e2e) — both described
-below. Still open, in order: **background upload**, then **music upload**.
+(45 unit + 4 e2e), the **Profile gate** (11 unit + 7 e2e) and **background
+upload** (6 e2e) — all described below. One left: **music upload**.
 
 **Templates (2026-08-27).** The six bundled levels are the first thing a new
 player opens — MenuScene's empty state points anyone with nothing saved straight
@@ -2458,6 +2458,36 @@ width/height, known tile values, exactly one spawn and one goal, entities in
 bounds, the spawn standing in open air on something solid, current schema/tile
 size, and that `cloneLevel` really deep-copies. All six passed on the first run —
 worth recording, since the point was that nothing had ever checked.
+
+**Background upload (2026-08-28).** The largest untested *feature* rather than
+screen: three modules and a whole rework nobody had ever run.
+`customBackgroundUpload.ts` downscales to 1600px and re-encodes as JPEG because
+the image used to live inline in the level's own saved JSON;
+`backgroundLibraryStorage.ts` was the 2026-08-16 fix for that, making uploads a
+**shared library** with levels storing a small `customBackgroundId` reference;
+and `backgroundLoader.ts` falls back to the built-in default when that id no
+longer resolves. `tests/e2e/background-upload.spec.ts` covers all three,
+including the two that were only ever documented — a second level picking the
+same upload without re-uploading it, and a level whose background was deleted
+from the library still opening on Meadow.
+
+Two things worth recording. First, the obvious assumption about the file inputs
+is wrong: skins and backgrounds both use `accept="image/*"`, so it looks as
+though a `.nth()` selector is needed — but `AssetPickerMenu` creates its
+`FileInputOverlay` only while a dropdown is *rendered* and destroys it on close,
+and `FileInputOverlay.destroy()` calls `input.remove()`. Exactly **one**
+`<input type="file">` exists at a time, so `page.locator('input[type="file"]')`
+is unambiguous once a picker is open. Second, `tests/e2e/support/images.ts`
+generates a real PNG at whatever size the test names (Node `zlib`, filter byte 0
+per row) rather than committing a 2400px binary fixture for one assertion — the
+downscale test needs to choose the input size for the assertion to mean
+anything.
+
+One thing left alone deliberately: on a Drive failure the editor reports
+*"Couldn't load that image"*, but the image loaded fine — the save failed.
+`uploadBackground` chains the read and the store into a single rejection
+handler. The test asserts on `"Couldn't"` rather than the whole string so the
+wording is free to improve without breaking it.
 
 **The Profile gate (2026-08-28).** Two separate gaps, and the second is the one
 that mattered. First, the gate was *never walked*: `gotoApp` seeds
