@@ -2434,7 +2434,7 @@ as a new `e2e` job the Pages `deploy` job now depends on alongside
 `build` — a genuine regression blocks the deploy the same way a failing
 build already does.
 
-*Since then it has grown to* **97 tests across 24 specs**, alongside 342
+*Since then it has grown to* **111 tests across 25 specs**, alongside 350
 Vitest unit tests. The bias worth naming was that coverage followed *recency*,
 not *risk*: the Skin Creator carried 18 e2e and 64 unit tests while Worlds — its
 own schema, two scenes and two storage adapters across 520 lines — carried none,
@@ -2489,6 +2489,70 @@ One thing left alone deliberately: on a Drive failure the editor reports
 `uploadBackground` chains the read and the store into a single rejection
 handler. The test asserts on `"Couldn't"` rather than the whole string so the
 wording is free to improve without breaking it.
+
+**The World Maker, repaired (2026-08-28).** Reported as "not working properly
+and UI is terrible". Both halves were true, and specific.
+
+**Nodes moved on their own.** `drawMap` resolved a layout for drawing but stored
+only cells someone had *deliberately* dragged, so every other node was
+re-derived from scratch on each redraw. Three levels auto-arrange to
+`(0,2) (4,2) (7,2)`; dropping the third onto the first's cell sent the *first*
+to `(0,0)`. The original reasoning for storing only deliberate placements is in
+the old comment and was sound about *adding* — pinning a node the moment it was
+auto-placed would freeze each intermediate arrangement — but applying it to
+dragging too is what produced the teleport. `worldLayout.placeNode` splits the
+two: a world nobody has arranged stores no layout at all and keeps re-spreading
+as it grows, and the first deliberate drop freezes the whole board, after which
+nothing moves that the player did not move. The occupancy check moved to the
+*resolved* layout at the same time, so the guard that claimed to stop a drop
+"onto a cell someone else holds" finally does — it previously only knew about
+pinned nodes and would silently bump an auto-placed one.
+
+**Removing a level was a coin flip.** Drag and remove shared one pointer,
+separated by a `dragged` flag, against Phaser's `dragDistanceThreshold` of `0`
+— so a pixel of wobble swallowed the click, and a perfectly still click deleted
+the node outright with no confirmation. `ui/confirmButton.ts` exists precisely
+because single-click destruction was fixed in both browsers; the map node was
+missed. Clicking now *selects*, and a toolbar under the map removes (two-tap,
+via the existing `ConfirmButton`) or reorders. `dragend` also reads the node's
+own centre rather than `pointer.x/y`, so grabbing a node off-centre no longer
+drops it a cell away.
+
+**Ten saved levels broke the list.** Rows ran from y=90 at 34px on a 468px
+canvas, so row 10 landed on top of the "Map backdrop" button and row 12 was off
+the bottom edge — with no scrolling anywhere in the app, the tenth level could
+not be seen, let alone added, even though `MAX_NODES` is 40. The list now pages,
+with the page size derived from the space that actually exists rather than
+written down twice.
+
+**Every world was called "Untitled World."** `createEmptyWorld` set that name
+and nothing ever changed it — there was no name field. There is now, reusing
+`LevelNameInput`, which had already been parameterised with `fallback` and
+`placeholder` (2026-08-26) so a second screen could adopt it without
+re-introducing its capture-phase-blur and keydown bugs.
+
+Play order is editable at last: it is still `levelIds` order, exactly as
+`WorldSchema` promises, but Earlier/Later act on the selection rather than
+requiring a second list — the map long ago replaced the ordered list this screen
+used to have.
+
+`tests/e2e/world-maker.spec.ts` is new (14 tests); the maker previously had no
+spec of its own, since `world-map.spec.ts` covers the map you *play* and only
+ever added three levels here. `worldLayout.test.ts` gained 8 for the freeze rule.
+
+Three notes worth keeping. First, the headline "dragging teleports a node" test
+initially caught nothing: dropping onto an *empty* cell leaves everyone else's
+preferred cell free, so the buggy code sat still too. The mutation run found it,
+and the real cover is now the add-after-arranging and remove-after-arranging
+cases. Second, an explicit `nameInput.destroy()` on shutdown turned out to be
+dead code — `LevelNameInput` already registers its own SHUTDOWN handler — so it
+was removed rather than left in looking load-bearing. Third, reading node
+positions straight after a drag reads *mid-drag pixels*: `dragend` writes the
+layout and starts an async refresh, and only that redraw snaps the node onto its
+cell, so the spec waits for the snap rather than racing it.
+
+Still true elsewhere and deliberately not widened into: `LevelBrowserScene` and
+`WorldBrowserScene` have the same row-overflow ceiling and no scrolling either.
 
 **Music upload (2026-08-28).** The last item on the list, and the only one that
 turned up a live bug rather than just uncovered ground.

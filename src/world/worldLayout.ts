@@ -145,6 +145,44 @@ export function resolveLayout(levelIds: readonly string[], stored?: WorldLayout)
   return resolved;
 }
 
+/**
+ * Move one level to `cell`, keeping every other node exactly where it appears.
+ *
+ * Returns the new layout, or `null` when `cell` already belongs to a different
+ * level — the caller snaps that node back rather than stacking two.
+ *
+ * The freezing is the point. A layout used to hold *only* the cells someone had
+ * dragged, on the reasoning that pinning a node the moment it was auto-placed
+ * would lock in each intermediate arrangement (adding a second level would nail
+ * the first where it had been centred on its own). That reasoning was right
+ * about `add`, but applying it to `drag` too meant every unpinned node was
+ * re-derived on every redraw — so dragging one node visibly teleported another:
+ * with three levels auto-arranged to (0,2) (4,2) (7,2), dropping the third onto
+ * (0,2) sent the *first* to (0,0), which nobody had touched.
+ *
+ * Freezing on a deliberate placement and only then splits the two cases cleanly:
+ * a world nobody has arranged still re-spreads as levels are added (no stored
+ * layout, so `resolveLayout` auto-arranges the whole set), and a world someone
+ * has arranged never moves under them — a newcomer takes the next free cell and
+ * nothing else shifts.
+ */
+export function placeNode(
+  levelIds: readonly string[],
+  stored: WorldLayout | undefined,
+  id: string,
+  cell: Cell,
+): WorldLayout | null {
+  if (!inBounds(cell)) return null;
+  const resolved = resolveLayout(levelIds, stored);
+  // Against the *resolved* layout, not the stored one: an auto-placed node
+  // occupies its cell on screen just as much as a dragged one does, and
+  // checking only stored cells is what let a drop bump it.
+  for (const [otherId, taken] of Object.entries(resolved)) {
+    if (otherId !== id && cellKey(taken) === cellKey(cell)) return null;
+  }
+  return { ...resolved, [id]: { col: cell.col, row: cell.row } };
+}
+
 /** Cell -> the pixel point at its centre, inside whatever rect the caller
  * draws its map in. */
 export function cellCenter(cell: Cell, rect: MapRect): { x: number; y: number } {

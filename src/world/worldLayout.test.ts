@@ -8,6 +8,7 @@ import {
   MAP_ROWS,
   MAX_NODES,
   orderedCells,
+  placeNode,
   resolveLayout,
   serpentineCell,
   type Cell,
@@ -134,6 +135,74 @@ describe("resolveLayout", () => {
     const resolved = resolveLayout(["a"], stored);
     resolved.a.col = 7;
     expect(stored.a.col).toBe(1);
+  });
+});
+
+describe("placeNode", () => {
+  const IDS = ["a", "b", "c"];
+
+  it("moves the node it was asked to move", () => {
+    const moved = placeNode(IDS, undefined, "c", { col: 1, row: 0 });
+    expect(moved?.c).toEqual({ col: 1, row: 0 });
+  });
+
+  it("leaves every other node exactly where it already appeared", () => {
+    // The bug this function exists for. Three levels auto-arrange to
+    // (0,2) (4,2) (7,2); dropping the third onto the first's cell used to send
+    // *a* to (0,0) — a node nobody had touched — because only deliberately
+    // placed cells were stored and everyone else was re-derived on each redraw.
+    const before = resolveLayout(IDS);
+    const after = placeNode(IDS, undefined, "c", { col: 1, row: 0 })!;
+    expect(after.a).toEqual(before.a);
+    expect(after.b).toEqual(before.b);
+  });
+
+  it("refuses a cell another level already occupies, even an auto-placed one", () => {
+    // `stored` is empty here, so a/b hold their cells only by auto-arrangement.
+    // Checking stored cells alone would allow this drop and silently bump `a`.
+    const occupied = resolveLayout(IDS).a;
+    expect(placeNode(IDS, undefined, "c", occupied)).toBeNull();
+  });
+
+  it("allows a node to be dropped back on its own cell", () => {
+    const own = resolveLayout(IDS).c;
+    expect(placeNode(IDS, undefined, "c", own)).not.toBeNull();
+  });
+
+  it("refuses a cell off the grid rather than clamping onto an edge", () => {
+    for (const bad of [
+      { col: -1, row: 0 },
+      { col: MAP_COLS, row: 0 },
+      { col: 0, row: MAP_ROWS },
+    ]) {
+      expect(placeNode(IDS, undefined, "c", bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it("freezes the whole board, so a later add moves nothing that was already placed", () => {
+    // The half that makes arranging a world worth doing: once you have placed
+    // something by hand, adding a fourth level must not rearrange the first
+    // three around it.
+    const arranged = placeNode(IDS, undefined, "c", { col: 1, row: 0 })!;
+    const withFourth = resolveLayout([...IDS, "d"], arranged);
+    for (const id of IDS) expect(withFourth[id], id).toEqual(arranged[id]);
+    expect(withFourth.d).toBeDefined();
+    expect(new Set(Object.values(withFourth).map(cellKey)).size).toBe(4);
+  });
+
+  it("still lets an untouched world re-spread as it grows", () => {
+    // The behaviour the old "deliberate placements only" rule was protecting,
+    // and which freezing on *drag* rather than on every redraw keeps intact: a
+    // world nobody has arranged has no stored layout at all.
+    expect(resolveLayout(["a", "b"])).toEqual(autoArrange(["a", "b"]));
+    expect(resolveLayout(["a", "b", "c"])).toEqual(autoArrange(["a", "b", "c"]));
+    expect(resolveLayout(["a", "b"]).b).not.toEqual(resolveLayout(["a", "b", "c"]).b);
+  });
+
+  it("does not mutate the layout it was handed", () => {
+    const stored = { a: { col: 1, row: 1 } };
+    placeNode(["a"], stored, "a", { col: 4, row: 4 });
+    expect(stored.a).toEqual({ col: 1, row: 1 });
   });
 });
 

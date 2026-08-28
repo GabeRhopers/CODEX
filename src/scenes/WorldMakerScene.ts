@@ -1,45 +1,94 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
+import { LevelNameInput } from "../editor/LevelNameInput";
 import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { SAVE_STATE_DISPLAY } from "../persistence/saveState";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
+import { ConfirmButton } from "../ui/confirmButton";
 import { createEmptyWorld, WorldData } from "../world/WorldSchema";
-import { cellAt, cellCenter, MAP_COLS, MAP_ROWS, MAX_NODES, orderedCells, resolveLayout, type Cell, type MapRect } from "../world/worldLayout";
-import { BuiltinStaticBackgroundId, STATIC_BACKGROUNDS, resolveWorldBackground } from "../level/staticBackgrounds";
+import {
+  cellAt,
+  cellCenter,
+  MAP_COLS,
+  MAP_ROWS,
+  MAX_NODES,
+  orderedCells,
+  placeNode,
+  resolveLayout,
+  type MapRect,
+} from "../world/worldLayout";
+import { nextStaticBackgroundId, resolveWorldBackground, STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
 
 interface WorldMakerSceneData {
   world?: WorldData;
 }
 
-const LIST_START_Y = 90;
-const ROW_HEIGHT = 34;
 const LEFT_X = 40;
 const COLUMN_WIDTH = 380;
+const LIST_START_Y = 90;
+const ROW_HEIGHT = 30;
+/** What actually fits between the list's heading and the pager beneath it.
+ * Derived rather than guessed: the list used to run to `MAX_NODES` rows at 34px
+ * from y=90, so on a 468px canvas row 10 landed on top of the backdrop button
+ * and row 12 was off-canvas entirely — which meant a player with ten saved
+ * levels could not see, let alone add, the tenth. */
+const PAGER_Y = 362;
+const ROWS_PER_PAGE = Math.floor((PAGER_Y - LIST_START_Y) / ROW_HEIGHT);
 
 /** The map grid, in the space the "this world, in order" list used to occupy.
  * Its own rect — the map *screen* uses the full canvas — which is exactly why
  * worldLayout speaks in cells and converts with a caller-supplied rect. */
-const MAP_RECT: MapRect = { x: 460, y: 88, width: GAME_WIDTH - 460 - 24, height: 300 };
+const MAP_RECT: MapRect = { x: 460, y: 88, width: GAME_WIDTH - 460 - 24, height: 268 };
 const NODE_RADIUS = 15;
+const TOOLBAR_Y = 384;
+
+const NODE_COLOR = 0x3a5a9c;
+const NODE_SELECTED_COLOR = 0xffc93c;
+
+/** A click has to survive a little hand tremor. Phaser's own
+ * `dragDistanceThreshold` defaults to 0, so without this *any* movement between
+ * press and release is a drag — and since a drop freezes the layout, merely
+ * clicking a node would quietly pin the whole board and stop an unarranged
+ * world from re-spreading as levels were added to it. */
+const DRAG_SLOP_PX = 6;
 
 // Same debounce as EditorScene's autosave — see that file's comment on why
 // this length and why tab-close/navigate-away are handled separately.
 const AUTOSAVE_DEBOUNCE_MS = 2000;
 
-/** Course maker v1: click a saved level on the left to append it to the
- * world's play order on the right, click an entry on the right to remove
- * it. No drag-reorder, no renaming — same "very simple first" cut the rest
- * of this project makes elsewhere (levels don't get an in-app rename UI
- * either); reordering can be layered on later without touching WorldData. */
+/**
+ * Course maker: pick saved levels on the left, arrange them on a map on the
+ * right.
+ *
+ * Clicking a node **selects** it; a toolbar under the map then reorders or
+ * removes whatever is selected. That split is deliberate and was a bug fix.
+ * Removal used to be a bare click on the node itself, sharing one pointer with
+ * dragging and told apart by a `dragged` flag — which, with Phaser's zero drag
+ * threshold, made it a coin flip: a pixel of wobble silently swallowed the
+ * click, while a perfectly still one destroyed the node with no confirmation at
+ * all. Nothing else in this app deletes on a single click (see
+ * `ui/confirmButton.ts`), and the map node was simply missed.
+ *
+ * Play order is still `levelIds` order — the map's paths are drawn between
+ * consecutive entries — but it is now editable, via the toolbar's Earlier/Later
+ * rather than a second list, since the map replaced the ordered list this screen
+ * used to have and the selection is right there to act on.
+ */
 export class WorldMakerScene extends Phaser.Scene {
   private levelStorage: StorageAdapter = getLevelStorage();
   private worldStorage: WorldStorageAdapter = getWorldStorage();
   private world!: WorldData;
   private availableContainer!: Phaser.GameObjects.Container;
   private worldContainer!: Phaser.GameObjects.Container;
+  private toolbarContainer!: Phaser.GameObjects.Container;
   private statusText!: Phaser.GameObjects.Text;
   private saveStatusText!: Phaser.GameObjects.Text;
+  private backdropButton!: Phaser.GameObjects.Text;
+  /** Which level id the toolbar acts on, or null. Held by id rather than index
+   * so reordering keeps the same node selected as its number changes. */
+  private selectedId: string | null = null;
+  private page = 0;
   private dirty = false;
   private autosaveTimer?: Phaser.Time.TimerEvent;
   private readonly handlePageHide = (): void => {
@@ -52,6 +101,9 @@ export class WorldMakerScene extends Phaser.Scene {
 
   init(data: WorldMakerSceneData): void {
     this.world = data?.world ?? createEmptyWorld();
+    this.selectedId = null;
+    this.page = 0;
+    this.dirty = false;
   }
 
   create(): void {
@@ -85,10 +137,26 @@ export class WorldMakerScene extends Phaser.Scene {
       })
       .setOrigin(1, 0);
 
-    this.add.text(GAME_WIDTH / 2, 24, "World Maker", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
+    // The name field. Until this existed nothing ever set `world.name`, so
+    // every world a player made was called "Untitled World" and they were
+    // indistinguishable in the browser. Reuses LevelNameInput rather than a
+    // third DOM input: that class carries the capture-phase blur that makes
+    // clicking Save commit an in-progress edit, and the keydown
+    // stopPropagation that keeps a space in a name out of Phaser's shortcuts.
+    this.add.text(150, 27, "World:", { fontSize: "12px", color: "#c8c8e0" }).setOrigin(0, 0);
+    new LevelNameInput(
+      this,
+      { x: 200, y: 20, width: 240, height: 26 },
+      this.world.name,
+      (value) => {
+        this.world.name = value;
+        this.markDirty();
+      },
+      { fallback: "Untitled World", placeholder: "World name" },
+    );
 
     this.add.text(LEFT_X, 62, "Available levels (click to add)", { fontSize: "12px", color: "#a6a6c8" });
-    this.add.text(MAP_RECT.x, 62, "The map — drag a node to move it, click it to remove", {
+    this.add.text(MAP_RECT.x, 62, "The map — drag a node to move it, click it to select", {
       fontSize: "12px",
       color: "#a6a6c8",
     });
@@ -97,9 +165,12 @@ export class WorldMakerScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 20, "", { fontSize: "11px", color: "#a6a6c8" })
       .setOrigin(0.5);
 
+    this.input.dragDistanceThreshold = DRAG_SLOP_PX; // see DRAG_SLOP_PX
+
     this.availableContainer = this.add.container(0, 0);
     this.worldContainer = this.add.container(0, 0);
-    this.buildBackgroundPicker();
+    this.toolbarContainer = this.add.container(0, 0);
+    this.buildBackdropButton();
 
     void this.refresh();
 
@@ -109,53 +180,99 @@ export class WorldMakerScene extends Phaser.Scene {
     this.events.once("shutdown", () => {
       window.removeEventListener("pagehide", this.handlePageHide);
       this.autosaveTimer?.remove(false);
+      // The name field is a DOM element rather than a Phaser one, but it needs
+      // no cleanup here: LevelNameInput registers its own SHUTDOWN handler.
+      // (SkinEditorScene destroys one explicitly because it rebuilds *within* a
+      // scene, which shutdown never fires for.)
     });
   }
 
   private async refresh(): Promise<void> {
     const levels = await this.levelStorage.list();
     const levelNames = new Map(levels.map((l) => [l.id, l.name || "Untitled Level"]));
-
-    this.availableContainer.removeAll(true);
     const available = levels.filter((l) => !this.world.levelIds.includes(l.id));
-    available.forEach((level, i) => {
-      const y = LIST_START_Y + i * ROW_HEIGHT;
-      const row = this.makeRow(LEFT_X, y, level.name || "Untitled Level", () => {
-        // One level per cell, so the map has a hard ceiling — say so rather
-        // than accepting a level that would have nowhere to stand.
-        if (this.world.levelIds.length >= MAX_NODES) {
-          this.statusText.setText(`A world holds at most ${MAX_NODES} levels.`);
-          return;
-        }
-        this.world.levelIds.push(level.id);
-        this.markDirty();
-        void this.refresh();
-      });
-      this.availableContainer.add(row);
-    });
-    if (available.length === 0) {
-      this.availableContainer.add(
-        this.add.text(LEFT_X, LIST_START_Y, "No more saved levels to add.", { fontSize: "12px", color: "#666688" }),
-      );
-    }
 
+    // A page can empty out from under you — adding the last level on page 3
+    // leaves page 3 blank rather than showing the end of the list.
+    const pageCount = Math.max(1, Math.ceil(available.length / ROWS_PER_PAGE));
+    this.page = Math.min(this.page, pageCount - 1);
+
+    this.drawAvailable(available, pageCount);
     this.drawMap(levelNames);
+    this.drawToolbar(levelNames);
 
     const count = this.world.levelIds.length;
     this.statusText.setText(
       count === 0
         ? "Click a level on the left to drop it on the map."
-        : `${count} level${count === 1 ? "" : "s"} — paths follow the order you added them.`,
+        : `${count} level${count === 1 ? "" : "s"} — paths follow play order, which you can change below the map.`,
     );
+  }
+
+  private drawAvailable(available: { id: string; name: string }[], pageCount: number): void {
+    this.availableContainer.removeAll(true);
+
+    if (available.length === 0) {
+      this.availableContainer.add(
+        this.add.text(LEFT_X, LIST_START_Y, "No more saved levels to add.", { fontSize: "12px", color: "#666688" }),
+      );
+      return;
+    }
+
+    const start = this.page * ROWS_PER_PAGE;
+    available.slice(start, start + ROWS_PER_PAGE).forEach((level, i) => {
+      const row = this.makeRow(LEFT_X, LIST_START_Y + i * ROW_HEIGHT, level.name || "Untitled Level", () =>
+        this.addLevel(level.id),
+      );
+      this.availableContainer.add(row);
+    });
+
+    if (pageCount > 1) {
+      // Paging rather than a longer list: nine rows is what fits, and the row
+      // that used to be tenth landed on top of the backdrop button.
+      const prev = this.makeSmallButton(LEFT_X, PAGER_Y, "‹ Prev", () => {
+        if (this.page === 0) return;
+        this.page--;
+        void this.refresh();
+      });
+      const label = this.add
+        .text(LEFT_X + 90, PAGER_Y + 2, `Page ${this.page + 1} of ${pageCount}`, {
+          fontSize: "11px",
+          color: "#a6a6c8",
+        })
+        .setName("pager-label");
+      const next = this.makeSmallButton(LEFT_X + 190, PAGER_Y, "Next ›", () => {
+        if (this.page >= pageCount - 1) return;
+        this.page++;
+        void this.refresh();
+      });
+      this.availableContainer.add([prev, label, next]);
+    }
+  }
+
+  /** Appends to play order. Kept off `drawAvailable` so the cap check lives in
+   * one place whichever row was clicked. */
+  private addLevel(id: string): void {
+    // One level per cell, so the map has a hard ceiling — say so rather
+    // than accepting a level that would have nowhere to stand.
+    if (this.world.levelIds.length >= MAX_NODES) {
+      this.statusText.setText(`A world holds at most ${MAX_NODES} levels.`);
+      return;
+    }
+    this.world.levelIds.push(id);
+    // Deliberately does *not* select the newcomer. Selection arms a Remove
+    // button, and clicking a node toggles — so auto-selecting would mean the
+    // node you just added is the one node a click deselects rather than
+    // selects, which reads as the click having missed.
+    this.markDirty();
+    void this.refresh();
   }
 
   /**
    * The map: a faint cell grid, the path following play order, and one node per
    * level.
    *
-   * Drag moves a node to another cell; a click without a drag removes it. The
-   * two share a pointer, so `dragged` is what tells them apart — without it,
-   * every drag would end by deleting the node you just placed.
+   * Drag moves a node to another cell; a click selects it for the toolbar.
    */
   private drawMap(levelNames: Map<string, string>): void {
     this.worldContainer.removeAll(true);
@@ -172,16 +289,11 @@ export class WorldMakerScene extends Phaser.Scene {
     }
     this.worldContainer.add(grid);
 
-    // Resolved for drawing but deliberately **not** written back. Only a drag
-    // stores a cell.
-    //
-    // Writing the resolved layout back on every refresh froze each
-    // intermediate auto-arrangement: adding a second level pinned the first
-    // where it had been centred on its own, so by the third the newcomer had
-    // nowhere sensible left and fell back to a corner, with the path cutting
-    // right across the map. Keeping `layout` to *deliberate* placements only
-    // lets auto-arrange see the whole set every time, and is what the field's
-    // "absent means auto" contract meant in the first place.
+    // Resolved for drawing. A world nobody has arranged stores no layout at
+    // all, so it keeps re-spreading as levels are added; the first deliberate
+    // drag freezes the whole board through `placeNode`, and from then on
+    // nothing moves that the player did not move. See placeNode's docstring for
+    // the teleporting this replaced.
     const layout = resolveLayout(this.world.levelIds, this.world.layout);
 
     const points = orderedCells(this.world.levelIds, layout).map((cell) => cellCenter(cell, MAP_RECT));
@@ -195,42 +307,41 @@ export class WorldMakerScene extends Phaser.Scene {
     this.world.levelIds.forEach((id, index) => {
       const point = points[index];
       if (!point) return;
+      const selected = id === this.selectedId;
       const node = this.add
-        .circle(point.x, point.y, NODE_RADIUS, 0x3a5a9c)
-        .setStrokeStyle(2, 0xffffff, 0.9)
+        .circle(point.x, point.y, NODE_RADIUS, selected ? NODE_SELECTED_COLOR : NODE_COLOR)
+        .setStrokeStyle(selected ? 3 : 2, 0xffffff, 0.9)
         .setInteractive({ useHandCursor: true, draggable: true });
-      const label = this.add.text(point.x, point.y, `${index + 1}`, { fontSize: "12px", color: "#ffffff" }).setOrigin(0.5);
+      const label = this.add
+        .text(point.x, point.y, `${index + 1}`, { fontSize: "12px", color: selected ? "#1b1d2c" : "#ffffff" })
+        .setOrigin(0.5);
       const name = this.add
         .text(point.x, point.y + NODE_RADIUS + 4, levelNames.get(id) ?? "(deleted level)", {
           fontSize: "9px",
-          color: "#a6a6c8",
+          color: selected ? "#ffc93c" : "#a6a6c8",
         })
         .setOrigin(0.5, 0);
 
-      let dragged = false;
-      node.on("dragstart", () => {
-        dragged = false;
-      });
       node.on("drag", (_p: Phaser.Input.Pointer, dragX: number, dragY: number) => {
-        dragged = true;
         node.setPosition(dragX, dragY);
         label.setPosition(dragX, dragY);
         name.setPosition(dragX, dragY + NODE_RADIUS + 4);
       });
-      node.on("dragend", (pointer: Phaser.Input.Pointer) => {
-        const cell = cellAt(pointer.x, pointer.y, MAP_RECT);
-        // Dropped off the grid, or onto a cell someone else holds: snap back
-        // rather than silently swallowing the move or stacking two nodes.
-        if (cell && !this.cellTakenBy(cell, id)) {
-          this.world.layout = { ...this.world.layout, [id]: cell };
+      node.on("dragend", () => {
+        // The node's own centre, not the pointer's: grabbing a node near its
+        // edge otherwise dropped it in whichever cell the *cursor* was over,
+        // which could be the next one along.
+        const cell = cellAt(node.x, node.y, MAP_RECT);
+        const moved = cell && placeNode(this.world.levelIds, this.world.layout, id, cell);
+        if (moved) {
+          this.world.layout = moved;
           this.markDirty();
         }
+        // Dropped off the grid, or onto a cell someone else holds: the redraw
+        // puts it back where it was rather than stacking two nodes.
         void this.refresh();
       });
-      node.on("pointerup", () => {
-        if (dragged) return; // a drag, not a click
-        this.removeLevel(index);
-      });
+      node.on("pointerup", () => this.select(id));
 
       this.worldContainer.add([node, label, name]);
     });
@@ -247,15 +358,73 @@ export class WorldMakerScene extends Phaser.Scene {
     }
   }
 
-  private cellTakenBy(cell: Cell, exceptId: string): boolean {
-    return Object.entries(this.world.layout ?? {}).some(
-      ([id, taken]) => id !== exceptId && taken.col === cell.col && taken.row === cell.row,
+  /** Reorder and remove, acting on the selected node. Rebuilt each refresh so
+   * the buttons reflect what is actually possible — Earlier is not offered on
+   * the first level, and nothing is offered with no selection. */
+  private drawToolbar(levelNames: Map<string, string>): void {
+    this.toolbarContainer.removeAll(true);
+    const index = this.selectedId ? this.world.levelIds.indexOf(this.selectedId) : -1;
+
+    if (index < 0) {
+      this.toolbarContainer.add(
+        this.add.text(MAP_RECT.x, TOOLBAR_Y + 4, "Click a node to select it.", {
+          fontSize: "11px",
+          color: "#666688",
+        }),
+      );
+      return;
+    }
+
+    const name = levelNames.get(this.selectedId!) ?? "(deleted level)";
+    this.toolbarContainer.add(
+      this.add.text(MAP_RECT.x, TOOLBAR_Y + 4, `#${index + 1} ${name}`, { fontSize: "11px", color: "#ffc93c" }),
     );
+
+    let x = MAP_RECT.x + 210;
+    if (index > 0) {
+      this.toolbarContainer.add(this.makeSmallButton(x, TOOLBAR_Y, "◀ Earlier", () => this.move(index, index - 1)));
+      x += 84;
+    }
+    if (index < this.world.levelIds.length - 1) {
+      this.toolbarContainer.add(this.makeSmallButton(x, TOOLBAR_Y, "Later ▶", () => this.move(index, index + 1)));
+      x += 76;
+    }
+
+    // Two taps, matching My Levels, My Worlds and every other destructive
+    // action — this node used to go on a single, unreliable click.
+    const remove = new ConfirmButton({
+      scene: this,
+      x: x + 8,
+      y: TOOLBAR_Y + 11,
+      label: "Remove",
+      armedLabel: "Remove? Tap again",
+      onConfirm: () => this.removeSelected(),
+    });
+    this.toolbarContainer.add(remove.text);
   }
 
-  private removeLevel(index: number): void {
+  private select(id: string): void {
+    this.selectedId = this.selectedId === id ? null : id;
+    void this.refresh();
+  }
+
+  /** Swaps two entries of play order. The map redraws its paths and renumbers
+   * from `levelIds`, so nothing else has to know order changed — which is what
+   * WorldSchema means by `levelIds` being the single source of truth. */
+  private move(from: number, to: number): void {
+    if (to < 0 || to >= this.world.levelIds.length) return;
+    const ids = this.world.levelIds;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    this.markDirty();
+    void this.refresh();
+  }
+
+  private removeSelected(): void {
+    const index = this.selectedId ? this.world.levelIds.indexOf(this.selectedId) : -1;
+    if (index < 0) return;
     const [removed] = this.world.levelIds.splice(index, 1);
     if (removed && this.world.layout) delete this.world.layout[removed];
+    this.selectedId = null;
     this.markDirty();
     void this.refresh();
   }
@@ -263,20 +432,19 @@ export class WorldMakerScene extends Phaser.Scene {
   /** Cycles the map backdrop through the four built-ins. A one-button cycle
    * rather than a dropdown: there are only four, and a whole AssetPickerMenu
    * for a four-way choice is more UI than the choice deserves. */
-  private buildBackgroundPicker(): void {
-    const button = this.makeRow(LEFT_X, GAME_HEIGHT - 60, "", () => {
-      const ids = STATIC_BACKGROUNDS.map((bg) => bg.id);
-      const next = ids[(ids.indexOf(resolveWorldBackground(this.world)) + 1) % ids.length];
-      this.world.background = next as BuiltinStaticBackgroundId;
+  private buildBackdropButton(): void {
+    this.backdropButton = this.makeRow(LEFT_X, GAME_HEIGHT - 60, "", () => {
+      this.world.background = nextStaticBackgroundId(resolveWorldBackground(this.world));
       this.markDirty();
-      setLabel();
+      this.setBackdropLabel();
     });
-    const setLabel = (): void => {
-      const current = resolveWorldBackground(this.world);
-      const label = STATIC_BACKGROUNDS.find((bg) => bg.id === current)?.label ?? current;
-      button.setText(`Map backdrop: ${label} ▸`);
-    };
-    setLabel();
+    this.setBackdropLabel();
+  }
+
+  private setBackdropLabel(): void {
+    const current = resolveWorldBackground(this.world);
+    const label = STATIC_BACKGROUNDS.find((bg) => bg.id === current)?.label ?? current;
+    this.backdropButton.setText(`Map backdrop: ${label} ▸`);
   }
 
   private makeRow(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
@@ -292,6 +460,21 @@ export class WorldMakerScene extends Phaser.Scene {
     text.on("pointerdown", onClick);
     text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));
     text.on("pointerout", () => text.setStyle({ backgroundColor: "#16213e" }));
+    return text;
+  }
+
+  private makeSmallButton(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
+    const text = this.add
+      .text(x, y, label, {
+        fontSize: "11px",
+        color: "#ffffff",
+        backgroundColor: "#0f3460",
+        padding: { x: 8, y: 5 },
+      })
+      .setInteractive({ useHandCursor: true });
+    text.on("pointerdown", onClick);
+    text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));
+    text.on("pointerout", () => text.setStyle({ backgroundColor: "#0f3460" }));
     return text;
   }
 
