@@ -2441,9 +2441,9 @@ own schema, two scenes and two storage adapters across 520 lines — carried non
 and neither did Templates, My Levels' delete, music upload, background upload or
 the Profile gate, every one of them a path a real player walks. The Priority
 Matrix's "01 · TEST NEXT" card tracks the order that is being closed in. Done so
-far: **Worlds** (38 unit + 5 e2e), **My Levels' delete** (3 e2e), and
-**Templates** (45 unit + 4 e2e — see below). Still open, in order: the **Profile
-gate**, **background upload**, **music upload**.
+far: **Worlds** (38 unit + 5 e2e), **My Levels' delete** (3 e2e), **Templates**
+(45 unit + 4 e2e) and the **Profile gate** (11 unit + 7 e2e) — both described
+below. Still open, in order: **background upload**, then **music upload**.
 
 **Templates (2026-08-27).** The six bundled levels are the first thing a new
 player opens — MenuScene's empty state points anyone with nothing saved straight
@@ -2458,6 +2458,41 @@ width/height, known tile values, exactly one spawn and one goal, entities in
 bounds, the spawn standing in open air on something solid, current schema/tile
 size, and that `cloneLevel` really deep-copies. All six passed on the first run —
 worth recording, since the point was that nothing had ever checked.
+
+**The Profile gate (2026-08-28).** Two separate gaps, and the second is the one
+that mattered. First, the gate was *never walked*: `gotoApp` seeds
+`rhopers:profile` through `addInitScript` before the page loads, so all 22 specs
+booted straight past `ProfileGateScene` and nothing had exercised the picker,
+the connect prompt, Switch profile, or the pre-rename key migration. Second, a
+profile is a **real filter** —`GoogleDriveStorageAdapter.list` and its world
+twin both filter on `appProperties.profile`, while skins deliberately do not
+(see `skinStorage.ts`) — and none of that was checked either.
+
+`src/profile/Profile.test.ts` covers the storage rules, including the near-miss
+`clearActiveProfile`'s own comment describes: it has to remove the **legacy**
+key too, or the very next `loadActiveProfile` migrates the old profile straight
+back and Switch profile silently does nothing.
+`tests/e2e/profile.spec.ts` walks the gate for real and pins the scoping in both
+directions — one profile's levels and worlds are invisible to another, while a
+skin made by one is visible to all.
+
+Two pieces of harness were needed, and each exists because of a specific trap:
+
+- **`gotoAppWithoutProfile`**, rather than an option on `gotoApp`. The
+  difference isn't only the missing `setItem`: `addInitScript` re-runs on
+  *every* navigation, so a test that clears the profile and reloads would have
+  had it quietly put back — and the two tests that matter most here (Switch
+  profile, the legacy migration) would have passed while proving nothing.
+- **`failSilentAuth`**, because the identity stub handed a token to every
+  request, so `tryReconnectSilently` always succeeded and the "Connect Google
+  Drive" prompt — the actual first-run experience — was unreachable. The
+  distinction was already on the wire (`requestAccessToken({ prompt: interactive
+  ? "consent" : "" })`); the stub just ignored it.
+
+The skins test also has a load-bearing `page.reload()`: `loadCustomSkins` caches
+for the page load, and switching profile through the Menu link doesn't reload,
+so without it the second profile would have been reading the first one's cached
+library and the test would have passed regardless of how storage behaved.
 
 `tests/e2e/templates.spec.ts` covers what only a browser can. Two details there
 were found by mutation-testing rather than by design, and both are the sort of

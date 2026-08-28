@@ -269,6 +269,27 @@ export async function gotoApp(page: Page, profile: "Mike" | "Gabriel" | "Andress
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));
 }
 
+/**
+ * Boots the app the way a genuinely new visitor arrives: mocked Drive, but
+ * **no profile seeded**, so ProfileGateScene actually renders its picker
+ * instead of waving you through to the Menu.
+ *
+ * Deliberately a separate function rather than an option on `gotoApp`. The
+ * difference is not just the missing `setItem` — `addInitScript` re-runs on
+ * *every* navigation, so a spec that clears the profile and reloads would have
+ * `gotoApp` quietly put it back, and the tests that matter most here (Switch
+ * profile, the legacy-key migration) would pass while proving nothing.
+ *
+ * Waits for ProfileGate rather than Menu for the same reason: with no profile
+ * stored, Menu is exactly what must *not* happen.
+ */
+export async function gotoAppWithoutProfile(page: Page): Promise<void> {
+  await installMockDrive(page);
+  await page.goto("/");
+  await waitForGame(page);
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ProfileGate"));
+}
+
 /** Jumps straight into EditorScene with a pre-built LevelData — for specs
  * that need specific content (basket pairs, a checkpoint in Sub) without
  * painting a large ground layer via real clicks first, which would be

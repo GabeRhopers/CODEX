@@ -212,15 +212,28 @@ async function installMockGoogleIdentity(page: Page): Promise<void> {
     (window as unknown as { google: unknown }).google = {
       accounts: {
         oauth2: {
-          initTokenClient(config: { callback: (response: { access_token: string; expires_in: number }) => void }) {
+          initTokenClient(config: {
+            callback: (response: { access_token?: string; expires_in?: number; error?: string }) => void;
+          }) {
             return {
               callback: config.callback,
-              requestAccessToken() {
+              requestAccessToken(options?: { prompt?: string }) {
                 // Real GIS is asynchronous (a token popup, or a silent
                 // background check) — a microtask keeps this mock async
                 // too, so callers awaiting a Promise around it (see
                 // googleAuth.ts's requestToken) aren't relying on a
                 // same-tick resolution that would never happen for real.
+                //
+                // `prompt` is how googleAuth distinguishes its two calls:
+                // "" for the silent reconnect every page load tries first,
+                // "consent" for the "Connect Google Drive" button. Honouring
+                // it lets a spec reproduce a first-ever visitor — see
+                // failSilentAuth.
+                const silent = (options?.prompt ?? "") === "";
+                if (silent && (window as unknown as { __failSilentAuth?: boolean }).__failSilentAuth) {
+                  queueMicrotask(() => this.callback({ error: "mock: interaction required" }));
+                  return;
+                }
                 queueMicrotask(() => this.callback({ access_token: "mock-access-token", expires_in: 3600 }));
               },
             };
@@ -331,5 +344,27 @@ export async function hangSkinsRead(page: Page): Promise<void> {
     // literally, so this matches the lookup that precedes reading the file.
     if (route.request().url().includes("skins.json")) return; // never answered, on purpose
     await route.fallback();
+  });
+}
+
+/**
+ * Makes the **silent** Google reconnect fail while the interactive
+ * "Connect Google Drive" button still succeeds — a first-ever visitor, a
+ * revoked consent, or a browser blocking the silent flow's storage access.
+ *
+ * Without this the connect prompt is unreachable in tests: the identity stub
+ * hands a token to every request, so `tryReconnectSilently` always succeeds and
+ * `ProfileGateScene` sails past `renderConnectPrompt` every time. The
+ * distinction was already on the wire — `googleAuth.requestToken` calls
+ * `requestAccessToken({ prompt: interactive ? "consent" : "" })` — the stub
+ * simply used to ignore it.
+ *
+ * An init script rather than a route, because this is the *identity* half of
+ * the mock (`window.google`), not the Drive REST half. Call it before
+ * navigating, like installMockDrive.
+ */
+export async function failSilentAuth(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    (window as unknown as { __failSilentAuth: boolean }).__failSilentAuth = true;
   });
 }
