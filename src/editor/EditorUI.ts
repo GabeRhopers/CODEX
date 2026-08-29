@@ -15,6 +15,7 @@ import { AssetPickerItem, AssetPickerMenu } from "./AssetPickerMenu";
 import { LevelNameInput } from "./LevelNameInput";
 import { Brush, BrushCategory, CATEGORIES, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
+import { hitRectFor } from "../ui/touchTarget";
 
 export interface EditorUICallbacks {
   onSelectBrush: (brush: Brush) => void;
@@ -129,6 +130,13 @@ const DROPDOWN_ROW_GAP = 2;
 const ICON_COLS = 2;
 const ICON_COL_X = [PANEL_PADDING + 42, PANEL_PADDING + 42 + 80]; // two column centers, 80px apart
 const ICON_ROW_HEIGHT = 54; // icon + label + breathing room
+/** One brush's share of the grid: the column pitch by the row pitch. A tap
+ * target may fill this and no more — see ui/touchTarget.ts for why the cap is
+ * the load-bearing half. */
+const ICON_HIT = hitRectFor(
+  { width: TILE_SIZE, height: TILE_SIZE },
+  { width: ICON_COL_X[1] - ICON_COL_X[0], height: ICON_ROW_HEIGHT },
+);
 const ICON_GRID_START_Y = CHIP_Y + CHIP_HEIGHT + 10;
 
 // Fixed regardless of the active category's row count — sized for the
@@ -698,17 +706,32 @@ export class EditorUI {
     const positions = this.iconPositions(brushes);
     brushes.forEach((brush, i) => {
       const { x, y } = positions[i];
-      const icon = this.scene.add.image(x, y, this.textureKeyFor(brush)).setDepth(CONTENT_DEPTH).setInteractive({ useHandCursor: true });
+      // The tap target is an invisible Zone rather than the icon itself.
+      //
+      // A hit-area rectangle set on the Image would be measured in *texture*
+      // space, and fitWithinTile scales each icon by whatever its own source art
+      // needs — so the same rectangle would come out a different size per brush.
+      // A Zone is sized in game pixels directly, which is the space every layout
+      // constant here is written in.
+      //
+      // It goes in *before* the icon so the display list stays [Image, Text] for
+      // each brush, which is what the e2e helper `clickIconWithLabel` looks for.
+      const hit = this.scene.add
+        .zone(x, y, ICON_HIT.width, ICON_HIT.height)
+        .setDepth(CONTENT_DEPTH)
+        .setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", () => this.selectBrush(brush));
+
+      const icon = this.scene.add.image(x, y, this.textureKeyFor(brush)).setDepth(CONTENT_DEPTH);
       fitWithinTile(icon);
       // See UP_BASKET_TINT_COLOR's own docstring — only while the default
       // art (not a custom skin override) is what's actually showing.
       if (brush.id === "basket-up" && !this.skinTextureKeys.has(brush.id)) icon.setTint(UP_BASKET_TINT_COLOR);
-      icon.on("pointerdown", () => this.selectBrush(brush));
       const label = this.scene.add
         .text(x, y + TILE_SIZE / 2 + 2, brush.label, { fontSize: "10px", color: "#eeeeee" })
         .setOrigin(0.5, 0)
         .setDepth(CONTENT_DEPTH);
-      this.iconGrid.add([icon, label]);
+      this.iconGrid.add([hit, icon, label]);
     });
     this.updateSelectedOutlinePosition();
   }

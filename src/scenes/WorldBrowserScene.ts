@@ -1,18 +1,24 @@
 import Phaser from "phaser";
-import { GAME_WIDTH } from "../config/gameConfig";
+import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { getWorldStorage } from "../persistence/storage";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { ConfirmButton } from "../ui/confirmButton";
+import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
+import { makePagerControls } from "../ui/PagerControls";
 import { WorldSummary } from "../world/WorldSchema";
 
 const ROW_START_Y = 90;
-const ROW_HEIGHT = 44;
+/** Same reasoning as LevelBrowserScene's — see that file. */
+const ROW_HEIGHT = 52;
+const PAGER_Y = GAME_HEIGHT - 44;
+const ROWS_PER_PAGE = rowsPerPage(ROW_START_Y, PAGER_Y, ROW_HEIGHT);
 
 /** Lists saved worlds with Play/Edit/Delete — the World equivalent of
  * LevelBrowserScene, same layout on purpose so the two screens feel like
  * one family rather than two different UIs. */
 export class WorldBrowserScene extends Phaser.Scene {
   private worldStorage: WorldStorageAdapter = getWorldStorage();
+  private page = 0;
   private listContainer!: Phaser.GameObjects.Container;
   private statusText!: Phaser.GameObjects.Text;
   /** See LevelBrowserScene's own field — arming one row stands the rest down. */
@@ -28,7 +34,7 @@ export class WorldBrowserScene extends Phaser.Scene {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        padding: { x: 10, y: 12 },
       })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => this.scene.start("Menu"));
@@ -38,7 +44,7 @@ export class WorldBrowserScene extends Phaser.Scene {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        padding: { x: 10, y: 12 },
       })
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true })
@@ -73,7 +79,26 @@ export class WorldBrowserScene extends Phaser.Scene {
       return;
     }
 
-    worlds.forEach((world, i) => this.addRow(world, ROW_START_Y + i * ROW_HEIGHT));
+    // Eight rows fitted and nothing checked; a ninth world was drawn off the
+    // bottom of the canvas. See ui/pager.ts.
+    this.page = clampPage(this.page, worlds.length, ROWS_PER_PAGE);
+    pageSlice(worlds, this.page, ROWS_PER_PAGE).forEach((world, i) =>
+      this.addRow(world, ROW_START_Y + i * ROW_HEIGHT),
+    );
+    this.listContainer.add(
+      makePagerControls({
+        scene: this,
+        x: 40,
+        y: PAGER_Y,
+        page: this.page,
+        total: worlds.length,
+        perPage: ROWS_PER_PAGE,
+        onChange: (page) => {
+          this.page = page;
+          void this.refresh();
+        },
+      }),
+    );
   }
 
   private addRow(world: WorldSummary, y: number): void {
@@ -117,7 +142,8 @@ export class WorldBrowserScene extends Phaser.Scene {
         fontSize: "12px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        // See LevelBrowserScene's makeSmallButton.
+        padding: { x: 10, y: 12 },
       })
       .setOrigin(0, 0.5)
       .setInteractive({ useHandCursor: true });

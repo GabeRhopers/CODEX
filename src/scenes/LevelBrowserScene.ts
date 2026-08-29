@@ -1,18 +1,28 @@
 import Phaser from "phaser";
-import { GAME_WIDTH } from "../config/gameConfig";
+import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { LevelSummary } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { ConfirmButton } from "../ui/confirmButton";
+import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
+import { makePagerControls } from "../ui/PagerControls";
 
 const ROW_START_Y = 90;
-const ROW_HEIGHT = 44;
+/** Raised from 44 (2026-08-29) to fit a button tall enough to be worth aiming at
+ * with a thumb — see ui/touchTarget.ts. 52 rather than more: the row body
+ * (ROW_HEIGHT - 8) only has to clear the button's own 38px, and every extra
+ * pixel here costs a row off the page. */
+const ROW_HEIGHT = 52;
+/** Where the pager sits, and therefore how much room the rows get. */
+const PAGER_Y = GAME_HEIGHT - 44;
+const ROWS_PER_PAGE = rowsPerPage(ROW_START_Y, PAGER_Y, ROW_HEIGHT);
 
 /** Lists every saved level with Edit/Delete actions — the piece the MVP's
  * single-slot Save/Load never had. Persistence already supported this
  * (StorageAdapter.list/remove); this scene is purely the missing UI. */
 export class LevelBrowserScene extends Phaser.Scene {
   private storage: StorageAdapter = getLevelStorage();
+  private page = 0;
   private listContainer!: Phaser.GameObjects.Container;
   private statusText!: Phaser.GameObjects.Text;
   /** Every row's Delete, so arming one can stand the others down — two rows
@@ -29,7 +39,7 @@ export class LevelBrowserScene extends Phaser.Scene {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        padding: { x: 10, y: 12 },
       })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => this.scene.start("Menu"));
@@ -39,7 +49,7 @@ export class LevelBrowserScene extends Phaser.Scene {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        padding: { x: 10, y: 12 },
       })
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true })
@@ -70,7 +80,27 @@ export class LevelBrowserScene extends Phaser.Scene {
       return;
     }
 
-    levels.forEach((level, i) => this.addRow(level, ROW_START_Y + i * ROW_HEIGHT));
+    // Rows used to be laid out for the whole list with nothing checking the
+    // canvas was tall enough: exactly eight fitted, so a ninth saved level was
+    // drawn past the bottom edge where it could not be clicked at all.
+    this.page = clampPage(this.page, levels.length, ROWS_PER_PAGE);
+    pageSlice(levels, this.page, ROWS_PER_PAGE).forEach((level, i) =>
+      this.addRow(level, ROW_START_Y + i * ROW_HEIGHT),
+    );
+    this.listContainer.add(
+      makePagerControls({
+        scene: this,
+        x: 40,
+        y: PAGER_Y,
+        page: this.page,
+        total: levels.length,
+        perPage: ROWS_PER_PAGE,
+        onChange: (page) => {
+          this.page = page;
+          void this.refresh();
+        },
+      }),
+    );
   }
 
   private addRow(level: LevelSummary, y: number): void {
@@ -113,7 +143,10 @@ export class LevelBrowserScene extends Phaser.Scene {
         fontSize: "12px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        // y-padding raised from 6: on a phone held sideways this button met a
+        // thumb as ~19 CSS px. Padding rather than a wider hit area, so the
+        // button looks as big as it actually is.
+        padding: { x: 10, y: 12 },
       })
       .setOrigin(0, 0.5)
       .setInteractive({ useHandCursor: true });

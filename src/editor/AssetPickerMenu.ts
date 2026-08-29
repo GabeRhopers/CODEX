@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { hitRectFor } from "../ui/touchTarget";
 import { GAME_HEIGHT } from "../config/gameConfig";
 import { GameRect } from "./domOverlay";
 import { FileInputOverlay } from "./FileInputOverlay";
@@ -202,17 +203,35 @@ export class AssetPickerMenu {
       };
     };
 
+    // Tap targets, sized once for the whole grid. These tiles are the smallest
+    // interactive things in the app — 24px for the music picker — which on a
+    // phone held sideways is about 20 CSS px against a 44px guideline. Capped at
+    // the cell so one tile's target can never reach into its neighbour's; where
+    // a cell is smaller than the guideline the cell wins, which is the honest
+    // answer rather than an overlapping lie. See ui/touchTarget.ts.
+    const hitRect = hitRectFor({ width: itemSize, height: itemSize }, { width: cellWidth, height: cellHeight });
+
     this.items.forEach((item, index) => {
       const { x, y } = slotPosition(index);
-      const icon = this.scene.add
-        .image(x, y + itemSize / 2, item.textureKey)
+      // A Zone rather than a hit area on the Image: setDisplaySize scales the
+      // icon, and an Image's hit area is measured in unscaled texture space, so
+      // the same rectangle would come out a different size per texture. Added
+      // *before* the icon so each tile still reads as [Image, Text] to the e2e
+      // helper that finds tiles by their label.
+      const hit = this.scene.add
+        .zone(x, y + itemSize / 2, hitRect.width, hitRect.height)
         .setDepth(dropdownDepth + 1)
-        .setDisplaySize(itemSize, itemSize)
         .setInteractive({ useHandCursor: true });
-      icon.on("pointerdown", () => {
+      hit.on("pointerdown", () => {
         this.options.onSelect(item.id);
         this.close();
       });
+      this.dropdownContainer.add(hit);
+
+      const icon = this.scene.add
+        .image(x, y + itemSize / 2, item.textureKey)
+        .setDepth(dropdownDepth + 1)
+        .setDisplaySize(itemSize, itemSize);
       this.dropdownContainer.add(icon);
 
       if (item.id === this.activeId) {

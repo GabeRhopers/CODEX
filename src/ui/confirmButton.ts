@@ -56,7 +56,11 @@ export class ConfirmButton {
         fontSize: "12px",
         color: "#ffffff",
         backgroundColor: CONFIRM_IDLE_COLOR,
-        padding: { x: 10, y: 6 },
+        // y-padding raised from 6 (2026-08-29): at the scale a phone held
+        // sideways renders this canvas, the old height met a thumb as ~19 CSS
+        // px. Padding rather than a separate hit area, so the button looks
+        // exactly as big as it is. See ui/touchTarget.ts.
+        padding: { x: 10, y: 12 },
       })
       .setOrigin(0, 0.5)
       .setInteractive({ useHandCursor: true });

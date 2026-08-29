@@ -19,6 +19,9 @@ import {
   type MapRect,
 } from "../world/worldLayout";
 import { nextStaticBackgroundId, resolveWorldBackground, STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
+import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
+import { makePagerControls } from "../ui/PagerControls";
+import { circleHitArgs } from "../ui/touchTarget";
 
 interface WorldMakerSceneData {
   world?: WorldData;
@@ -34,7 +37,7 @@ const ROW_HEIGHT = 30;
  * and row 12 was off-canvas entirely — which meant a player with ten saved
  * levels could not see, let alone add, the tenth. */
 const PAGER_Y = 362;
-const ROWS_PER_PAGE = Math.floor((PAGER_Y - LIST_START_Y) / ROW_HEIGHT);
+const ROWS_PER_PAGE = rowsPerPage(LIST_START_Y, PAGER_Y, ROW_HEIGHT);
 
 /** The map grid, in the space the "this world, in order" list used to occupy.
  * Its own rect — the map *screen* uses the full canvas — which is exactly why
@@ -56,6 +59,16 @@ const DRAG_SLOP_PX = 6;
 // Same debounce as EditorScene's autosave — see that file's comment on why
 // this length and why tab-close/navigate-away are handled separately.
 const AUTOSAVE_DEBOUNCE_MS = 2000;
+
+/** A node's tap target: bigger than the 30px circle, capped by the map cell so
+ * two nodes can never share a tappable pixel. See circleHitArgs for why this is
+ * not simply a centred rectangle. */
+function nodeHitArgs(): [number, number, number, number] {
+  return circleHitArgs(NODE_RADIUS, {
+    width: MAP_RECT.width / MAP_COLS,
+    height: MAP_RECT.height / MAP_ROWS,
+  });
+}
 
 /**
  * Course maker: pick saved levels on the left, arrange them on a map on the
@@ -112,7 +125,7 @@ export class WorldMakerScene extends Phaser.Scene {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        padding: { x: 10, y: 12 },
       })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => void this.leaveToBrowser());
@@ -122,7 +135,7 @@ export class WorldMakerScene extends Phaser.Scene {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
-        padding: { x: 10, y: 6 },
+        padding: { x: 10, y: 12 },
       })
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true })
@@ -194,10 +207,9 @@ export class WorldMakerScene extends Phaser.Scene {
 
     // A page can empty out from under you — adding the last level on page 3
     // leaves page 3 blank rather than showing the end of the list.
-    const pageCount = Math.max(1, Math.ceil(available.length / ROWS_PER_PAGE));
-    this.page = Math.min(this.page, pageCount - 1);
+    this.page = clampPage(this.page, available.length, ROWS_PER_PAGE);
 
-    this.drawAvailable(available, pageCount);
+    this.drawAvailable(available, available.length);
     this.drawMap(levelNames);
     this.drawToolbar(levelNames);
 
@@ -209,7 +221,7 @@ export class WorldMakerScene extends Phaser.Scene {
     );
   }
 
-  private drawAvailable(available: { id: string; name: string }[], pageCount: number): void {
+  private drawAvailable(available: { id: string; name: string }[], total: number): void {
     this.availableContainer.removeAll(true);
 
     if (available.length === 0) {
@@ -219,35 +231,30 @@ export class WorldMakerScene extends Phaser.Scene {
       return;
     }
 
-    const start = this.page * ROWS_PER_PAGE;
-    available.slice(start, start + ROWS_PER_PAGE).forEach((level, i) => {
+    pageSlice(available, this.page, ROWS_PER_PAGE).forEach((level, i) => {
       const row = this.makeRow(LEFT_X, LIST_START_Y + i * ROW_HEIGHT, level.name || "Untitled Level", () =>
         this.addLevel(level.id),
       );
       this.availableContainer.add(row);
     });
 
-    if (pageCount > 1) {
-      // Paging rather than a longer list: nine rows is what fits, and the row
-      // that used to be tenth landed on top of the backdrop button.
-      const prev = this.makeSmallButton(LEFT_X, PAGER_Y, "‹ Prev", () => {
-        if (this.page === 0) return;
-        this.page--;
-        void this.refresh();
-      });
-      const label = this.add
-        .text(LEFT_X + 90, PAGER_Y + 2, `Page ${this.page + 1} of ${pageCount}`, {
-          fontSize: "11px",
-          color: "#a6a6c8",
-        })
-        .setName("pager-label");
-      const next = this.makeSmallButton(LEFT_X + 190, PAGER_Y, "Next ›", () => {
-        if (this.page >= pageCount - 1) return;
-        this.page++;
-        void this.refresh();
-      });
-      this.availableContainer.add([prev, label, next]);
-    }
+    // Paging rather than a longer list: nine rows is what fits, and the row
+    // that used to be tenth landed on top of the backdrop button. Shared with
+    // the three browser screens, which had the same bug — see ui/pager.ts.
+    this.availableContainer.add(
+      makePagerControls({
+        scene: this,
+        x: LEFT_X,
+        y: PAGER_Y,
+        page: this.page,
+        total,
+        perPage: ROWS_PER_PAGE,
+        onChange: (page) => {
+          this.page = page;
+          void this.refresh();
+        },
+      }),
+    );
   }
 
   /** Appends to play order. Kept off `drawAvailable` so the cap check lives in
@@ -311,7 +318,11 @@ export class WorldMakerScene extends Phaser.Scene {
       const node = this.add
         .circle(point.x, point.y, NODE_RADIUS, selected ? NODE_SELECTED_COLOR : NODE_COLOR)
         .setStrokeStyle(selected ? 3 : 2, 0xffffff, 0.9)
-        .setInteractive({ useHandCursor: true, draggable: true });
+        // The 3-arg form's last parameter is `dropZone`, not a config object, so
+        // the cursor and draggability are set separately below.
+        .setInteractive(new Phaser.Geom.Rectangle(...nodeHitArgs()), Phaser.Geom.Rectangle.Contains);
+      node.input!.cursor = "pointer";
+      this.input.setDraggable(node);
       const label = this.add
         .text(point.x, point.y, `${index + 1}`, { fontSize: "12px", color: selected ? "#1b1d2c" : "#ffffff" })
         .setOrigin(0.5);
@@ -453,7 +464,7 @@ export class WorldMakerScene extends Phaser.Scene {
         fontSize: "13px",
         color: "#ffffff",
         backgroundColor: "#16213e",
-        padding: { x: 10, y: 6 },
+        padding: { x: 10, y: 12 },
       })
       .setFixedSize(COLUMN_WIDTH, 22)
       .setInteractive({ useHandCursor: true });

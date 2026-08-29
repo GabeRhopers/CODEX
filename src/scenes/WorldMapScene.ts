@@ -5,7 +5,8 @@ import { resolveWorldBackground, staticBackgroundDef } from "../level/staticBack
 import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
-import { cellCenter, orderedCells, resolveLayout, type MapRect } from "../world/worldLayout";
+import { cellCenter, MAP_COLS, MAP_ROWS, orderedCells, resolveLayout, type MapRect } from "../world/worldLayout";
+import { circleHitArgs } from "../ui/touchTarget";
 import { completedCount, currentIndex, isUnlocked, isWorldComplete } from "../world/worldProgress";
 import { WorldData } from "../world/WorldSchema";
 
@@ -67,7 +68,7 @@ export class WorldMapScene extends Phaser.Scene {
 
   create(): void {
     this.add
-      .text(24, 18, "← Worlds", { fontSize: "13px", color: "#ffffff", backgroundColor: "#0f3460", padding: { x: 10, y: 6 } })
+      .text(24, 18, "← Worlds", { fontSize: "13px", color: "#ffffff", backgroundColor: "#0f3460", padding: { x: 10, y: 12 } })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => this.scene.start("WorldBrowser"));
 
@@ -164,7 +165,16 @@ export class WorldMapScene extends Phaser.Scene {
         .setDepth(2);
 
       if (!unlocked) return;
-      node.setInteractive({ useHandCursor: true });
+      // Bigger than the circle, capped by the map cell so two nodes can never
+      // share a tappable pixel — see ui/touchTarget.ts. Locked nodes stay
+      // non-interactive, so an enlarged target can never reach one.
+      node.setInteractive(
+        new Phaser.Geom.Rectangle(
+          ...circleHitArgs(NODE_RADIUS, { width: MAP_RECT.width / MAP_COLS, height: MAP_RECT.height / MAP_ROWS }),
+        ),
+        Phaser.Geom.Rectangle.Contains,
+      );
+      node.input!.cursor = "pointer";
       node.on("pointerdown", () => void this.playLevel(world, index));
     });
 

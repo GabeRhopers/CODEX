@@ -414,8 +414,13 @@ noted:
   touch-specific UI code was needed there. `input.activePointers: 3` in
   the game config raises the simultaneous-touch budget above the default
   of 1, for Play mode's move+jump-at-once case below.
-- **Play mode**: `src/gameplay/TouchControls.ts` draws three
-  semi-transparent ◀ ▶ ▲ buttons pinned to the corners; their pressed
+- **Play mode**: `src/gameplay/TouchControls.ts` draws a D-pad left of the
+  playfield and four face buttons right of it, recessed into the console
+  shell `src/gameplay/HandheldShell.ts` draws around them (they used to be
+  three translucent ◀ ▶ ▲ circles floating over the level; they moved out
+  into the bands either side, which were already empty, so the framing
+  costs no playfield — `tests/e2e/handheld-controls.spec.ts` keeps that
+  true). Their pressed
   state is OR'd into keyboard input in `PlayerController.updatePlayerMovement`
   rather than replacing it, so the same function drives movement
   regardless of input source and the buttons are just as clickable (if
@@ -2434,7 +2439,7 @@ as a new `e2e` job the Pages `deploy` job now depends on alongside
 `build` — a genuine regression blocks the deploy the same way a failing
 build already does.
 
-*Since then it has grown to* **111 tests across 25 specs**, alongside 350
+*Since then it has grown to* **120 tests across 26 specs**, alongside 383
 Vitest unit tests. The bias worth naming was that coverage followed *recency*,
 not *risk*: the Skin Creator carried 18 e2e and 64 unit tests while Worlds — its
 own schema, two scenes and two storage adapters across 520 lines — carried none,
@@ -2489,6 +2494,61 @@ One thing left alone deliberately: on a Drive failure the editor reports
 `uploadBackground` chains the read and the store into a single rejection
 handler. The test asserts on `"Couldn't"` rather than the whole string so the
 wording is free to improve without breaking it.
+
+**Layout and reach (2026-08-29).** Prompted by asking whether mobile support was
+worth building "at this phase". Researching it corrected the premise: mobile was
+never unsupported. Scale.FIT + CENTER_BOTH, `activePointers: 3`, `100dvh`,
+`viewport-fit=cover`, tuned `touch-action`, the `visualViewport` hook, the
+double-centering fix and the handheld shell were all already here, and playing on
+a phone was genuinely done. The gap was **control density in the editing
+screens**, on the device this is actually used on: a phone held sideways.
+
+That case needs no layout change at all. 844x390 is 2.16:1 against the canvas's
+2.24:1, so Scale.FIT wastes about 4% and renders at 0.804 — the *width* ratio,
+not the height one, which is worth writing down because assuming the other axis
+makes every target come out 4% smaller than the arithmetic promised. What was
+wrong is that controls were drawn at desktop density and landed far under the
+44/48 CSS px guidance: a palette icon met a thumb as **25.7 CSS px**, an asset
+picker tile as 19.3, a map node as 24.1, a row button as 19.3.
+
+The insight is that a hit area need not match the art. `src/ui/touchTarget.ts`
+sizes one from its grid cell, so a 32px palette icon accepts taps across its
+whole 80x54 cell — **25.7 to 43.4 CSS px, with the layout untouched**. The cell
+cap is the load-bearing half: grid neighbours sit exactly one cell apart, so a
+target allowed to overflow would swallow taps aimed at the next brush, which is
+a worse bug than the small target. Where a cell cannot afford the guideline the
+cell wins and `reachesGuideline` says so — the palette misses by a single pixel
+(rows are 54, the guideline costs 55) and a taller row would run the grid into
+the skin picker, so the shortfall is asserted rather than rounded away.
+
+Riding along was a correctness bug on **every** device: `LevelBrowserScene` and
+`WorldBrowserScene` fitted exactly eight rows and had no paging, so a ninth saved
+level was drawn past the bottom edge where it could not be clicked. Same family
+as the World Maker's ceiling fixed the day before, so `src/ui/pager.ts` now holds
+that logic once and all four screens share it — Templates included, which had six
+templates and would have found the same bug at seven.
+
+Two Phaser mechanics cost real time and are recorded so they don't again. An
+Image's hit area is measured in **unscaled texture space**, and `fitWithinTile`
+scales every icon by whatever its own art needs, so one rectangle would come out
+a different size per brush — hence invisible `Zone`s, which are sized in game
+pixels directly. And a hit area is in the object's **local** space with (0,0) at
+its top-left: an Arc of radius 15 has its centre at (15, 15), so a
+centre-relative rectangle sits a whole radius up and left. That one shipped
+briefly and showed up as a drag that silently never started.
+
+`tests/e2e/phone-landscape.spec.ts` (9 tests) runs at 844x390 and measures
+*rendered CSS pixels* off the live canvas rather than restating the layout
+constants — the whole question is what those constants become once scaled, which
+no unit test can see. One test taps a node 20px *below* its centre, outside the
+art and inside the target: a point above the centre falls inside the mis-shifted
+rectangle too and would have proved nothing, which the mutation run is what
+caught. `touchTarget.test.ts` and `pager.test.ts` add 33 unit tests.
+
+Deliberately **not** done: portrait phone. A 2.24:1 canvas against a 0.46:1
+screen wastes ~80% of the height, and only a real portrait layout fixes that —
+there is no layout system here, every scene is absolute pixel math. The app
+already suggests rotating.
 
 **The World Maker, repaired (2026-08-28).** Reported as "not working properly
 and UI is terrible". Both halves were true, and specific.
