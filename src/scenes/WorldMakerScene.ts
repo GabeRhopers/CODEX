@@ -18,7 +18,13 @@ import {
   resolveLayout,
   type MapRect,
 } from "../world/worldLayout";
-import { nextStaticBackgroundId, resolveWorldBackground, STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
+import {
+  nextStaticBackgroundId,
+  resolveWorldBackground,
+  staticBackgroundDef,
+  STATIC_BACKGROUNDS,
+} from "../level/staticBackgrounds";
+import { ellipsize } from "../ui/labels";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { makePagerControls } from "../ui/PagerControls";
 import { circleHitArgs } from "../ui/touchTarget";
@@ -27,24 +33,38 @@ interface WorldMakerSceneData {
   world?: WorldData;
 }
 
-const LEFT_X = 40;
-const COLUMN_WIDTH = 380;
+// The list is the picker; the map is the work. It used to take 380px against the
+// map's 566 and stand half empty, so it gives 80 of them back (2026-08-29).
+const LEFT_X = 24;
+const COLUMN_WIDTH = 300;
 const LIST_START_Y = 90;
-const ROW_HEIGHT = 30;
+const ROW_HEIGHT = 40;
 /** What actually fits between the list's heading and the pager beneath it.
  * Derived rather than guessed: the list used to run to `MAX_NODES` rows at 34px
  * from y=90, so on a 468px canvas row 10 landed on top of the backdrop button
  * and row 12 was off-canvas entirely — which meant a player with ten saved
  * levels could not see, let alone add, the tenth. */
-const PAGER_Y = 362;
+const PAGER_Y = 356;
 const ROWS_PER_PAGE = rowsPerPage(LIST_START_Y, PAGER_Y, ROW_HEIGHT);
+const BACKDROP_BUTTON_Y = GAME_HEIGHT - 72;
 
 /** The map grid, in the space the "this world, in order" list used to occupy.
  * Its own rect — the map *screen* uses the full canvas — which is exactly why
- * worldLayout speaks in cells and converts with a caller-supplied rect. */
-const MAP_RECT: MapRect = { x: 460, y: 88, width: GAME_WIDTH - 460 - 24, height: 268 };
+ * worldLayout speaks in cells and converts with a caller-supplied rect.
+ *
+ * Widened with the column it took the space from. The cell goes from 70.8x53.6
+ * to 85.8x56, which buys node labels a fifth more room — they used to collide
+ * along a row — and, because the row finally clears MIN_TAP_PX, lets a node's
+ * tap target reach the full guideline rather than the pixel-short cap
+ * ui/touchTarget.ts had to record. */
+const MAP_RECT: MapRect = { x: 340, y: 84, width: GAME_WIDTH - 340 - 24, height: 280 };
 const NODE_RADIUS = 15;
-const TOOLBAR_Y = 384;
+const NODE_LABEL_SIZE = "10px";
+const TOOLBAR_Y = 372;
+/** Enough of a level's name to tell it from the others, cut to what a cell can
+ * hold. Truncated rather than wrapped: a wrapped name on the bottom row runs
+ * straight into the toolbar, and the collisions are the actual complaint. */
+const NODE_LABEL_CHARS = Math.floor((MAP_RECT.width / MAP_COLS - 10) / 5.4);
 
 const NODE_COLOR = 0x3a5a9c;
 const NODE_SELECTED_COLOR = 0xffc93c;
@@ -92,6 +112,7 @@ export class WorldMakerScene extends Phaser.Scene {
   private levelStorage: StorageAdapter = getLevelStorage();
   private worldStorage: WorldStorageAdapter = getWorldStorage();
   private world!: WorldData;
+  private backdropContainer!: Phaser.GameObjects.Container;
   private availableContainer!: Phaser.GameObjects.Container;
   private worldContainer!: Phaser.GameObjects.Container;
   private toolbarContainer!: Phaser.GameObjects.Container;
@@ -143,8 +164,10 @@ export class WorldMakerScene extends Phaser.Scene {
 
     // Persistent, unlike statusText below — see EditorUI's saveStatusText
     // for the same pattern and why it's a separate label.
+    // y=66, not 50: "Save World" above is 41px tall at its current padding and
+    // runs to y=61, so the old position put this behind it.
     this.saveStatusText = this.add
-      .text(GAME_WIDTH - 24, 50, SAVE_STATE_DISPLAY.saved.text, {
+      .text(GAME_WIDTH - 24, 66, SAVE_STATE_DISPLAY.saved.text, {
         fontSize: "12px",
         color: SAVE_STATE_DISPLAY.saved.color,
       })
@@ -180,10 +203,13 @@ export class WorldMakerScene extends Phaser.Scene {
 
     this.input.dragDistanceThreshold = DRAG_SLOP_PX; // see DRAG_SLOP_PX
 
+    // Behind everything else on the map, so the grid, paths and nodes sit on it.
+    this.backdropContainer = this.add.container(0, 0).setDepth(-3);
     this.availableContainer = this.add.container(0, 0);
     this.worldContainer = this.add.container(0, 0);
     this.toolbarContainer = this.add.container(0, 0);
     this.buildBackdropButton();
+    this.drawBackdrop();
 
     void this.refresh();
 
@@ -305,7 +331,7 @@ export class WorldMakerScene extends Phaser.Scene {
 
     const points = orderedCells(this.world.levelIds, layout).map((cell) => cellCenter(cell, MAP_RECT));
     const paths = this.add.graphics();
-    paths.lineStyle(4, 0x4a5480, 1);
+    paths.lineStyle(5, 0x8f9ad0, 1);
     for (let i = 1; i < points.length; i++) {
       paths.lineBetween(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
     }
@@ -327,9 +353,14 @@ export class WorldMakerScene extends Phaser.Scene {
         .text(point.x, point.y, `${index + 1}`, { fontSize: "12px", color: selected ? "#1b1d2c" : "#ffffff" })
         .setOrigin(0.5);
       const name = this.add
-        .text(point.x, point.y + NODE_RADIUS + 4, levelNames.get(id) ?? "(deleted level)", {
-          fontSize: "9px",
-          color: selected ? "#ffc93c" : "#a6a6c8",
+        .text(point.x, point.y + NODE_RADIUS + 4, ellipsize(levelNames.get(id) ?? "(deleted level)", NODE_LABEL_CHARS), {
+          fontSize: NODE_LABEL_SIZE,
+          color: selected ? "#ffc93c" : "#d8dcf0",
+          // Its own small ground. Dimming the backdrop is not enough on its own:
+          // a name sitting straight on painted mountains is unreadable wherever
+          // the art happens to be light.
+          backgroundColor: "rgba(16,18,31,0.72)",
+          padding: { x: 3, y: 1 },
         })
         .setOrigin(0.5, 0);
 
@@ -440,14 +471,55 @@ export class WorldMakerScene extends Phaser.Scene {
     void this.refresh();
   }
 
+  /**
+   * The chosen backdrop, drawn behind the map grid.
+   *
+   * Until this existed the picker changed a word on a button and nothing else:
+   * the map stayed an empty grid whichever backdrop was selected, so the setting
+   * was invisible until the world was played. Reported, fairly, as "there's no
+   * background, nothing changes when I select the world options".
+   *
+   * Masked to MAP_RECT and dimmed hard, for the same reason WorldMapScene dims
+   * its own: at full strength the painted art wins the screen and the route
+   * reads as an overlay on someone else's picture. `StaticBackground` is not
+   * reused because its mask is hardcoded to the *level grid* rect, which four
+   * other call sites depend on.
+   */
+  private drawBackdrop(): void {
+    this.backdropContainer.removeAll(true);
+
+    const key = staticBackgroundDef(resolveWorldBackground(this.world)).textureKey;
+    const maskShape = this.make.graphics({ x: 0, y: 0 }, false);
+    maskShape.fillRect(MAP_RECT.x, MAP_RECT.y, MAP_RECT.width, MAP_RECT.height);
+
+    const image = this.add
+      .image(MAP_RECT.x + MAP_RECT.width / 2, MAP_RECT.y + MAP_RECT.height / 2, key)
+      .setDepth(-2)
+      .setMask(maskShape.createGeometryMask());
+    // Cover-fit: scale by whichever axis needs it more, so the image never falls
+    // short of the rect on either.
+    image.setScale(Math.max(MAP_RECT.width / image.width, MAP_RECT.height / image.height));
+
+    const dim = this.add
+      .rectangle(MAP_RECT.x, MAP_RECT.y, MAP_RECT.width, MAP_RECT.height, 0x10121f, 0.82)
+      .setOrigin(0, 0)
+      .setDepth(-1);
+
+    // The Graphics is never added to the display list (make, not add), so the
+    // container cannot destroy it for us.
+    this.backdropContainer.add([image, dim]);
+    this.events.once("shutdown", () => maskShape.destroy());
+  }
+
   /** Cycles the map backdrop through the four built-ins. A one-button cycle
    * rather than a dropdown: there are only four, and a whole AssetPickerMenu
    * for a four-way choice is more UI than the choice deserves. */
   private buildBackdropButton(): void {
-    this.backdropButton = this.makeRow(LEFT_X, GAME_HEIGHT - 60, "", () => {
+    this.backdropButton = this.makeRow(LEFT_X, BACKDROP_BUTTON_Y, "", () => {
       this.world.background = nextStaticBackgroundId(resolveWorldBackground(this.world));
       this.markDirty();
       this.setBackdropLabel();
+      this.drawBackdrop();
     });
     this.setBackdropLabel();
   }
@@ -464,9 +536,14 @@ export class WorldMakerScene extends Phaser.Scene {
         fontSize: "13px",
         color: "#ffffff",
         backgroundColor: "#16213e",
-        padding: { x: 10, y: 12 },
+        padding: { x: 10, y: 10 },
       })
-      .setFixedSize(COLUMN_WIDTH, 22)
+      // Fixed *width* so every row reads as the same button; height 0, which
+      // Phaser treats as "auto" (Text.js:1289). A fixed height here has to be
+      // kept in sync with the font and padding by hand, and when it wasn't —
+      // a padding bump on 2026-08-29 against a 22px box that needed 40 — every
+      // row in this column silently lost the bottom half of its letters.
+      .setFixedSize(COLUMN_WIDTH, 0)
       .setInteractive({ useHandCursor: true });
     text.on("pointerdown", onClick);
     text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));

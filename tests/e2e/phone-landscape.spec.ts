@@ -168,10 +168,11 @@ test("a world map node is big enough to tap", async ({ page }) => {
 
   const arcs = (await tapTargets(page, "WorldMaker")).filter((t) => t.label === "Arc");
   expect(arcs).toHaveLength(1);
-  // The circle itself is 30px across — 24 CSS px here. Its cell is 71x54, so
-  // the row caps the height the same 0.6px short as the palette's.
+  // The circle itself is 30px across — 24 CSS px here. Since the map was
+  // widened its cell is 86x56, which clears MIN_TAP_PX on both axes, so unlike
+  // the palette this one reaches the guideline outright.
   expect(arcs[0].width, JSON.stringify(arcs[0])).toBeGreaterThanOrEqual(GUIDELINE_CSS_PX);
-  expect(arcs[0].height, JSON.stringify(arcs[0])).toBeGreaterThanOrEqual(GUIDELINE_CSS_PX - 1);
+  expect(arcs[0].height, JSON.stringify(arcs[0])).toBeGreaterThanOrEqual(GUIDELINE_CSS_PX);
 });
 
 test("a node can be tapped off the circle, in the space the target gained", async ({ page }) => {

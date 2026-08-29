@@ -2439,7 +2439,7 @@ as a new `e2e` job the Pages `deploy` job now depends on alongside
 `build` — a genuine regression blocks the deploy the same way a failing
 build already does.
 
-*Since then it has grown to* **120 tests across 26 specs**, alongside 383
+*Since then it has grown to* **127 tests across 27 specs**, alongside 388
 Vitest unit tests. The bias worth naming was that coverage followed *recency*,
 not *risk*: the Skin Creator carried 18 e2e and 64 unit tests while Worlds — its
 own schema, two scenes and two storage adapters across 520 lines — carried none,
@@ -2494,6 +2494,65 @@ One thing left alone deliberately: on a Drive failure the editor reports
 `uploadBackground` chains the read and the store into a single rejection
 handler. The test asserts on `"Couldn't"` rather than the whole string so the
 wording is free to improve without breaking it.
+
+**World Maker, made legible — and two regressions of my own (2026-08-29).**
+A screenshot from a phone in landscape: the maker's level rows had the bottom
+half of every letter cut off, "Save World" sat on top of the save-state readout,
+and picking a map backdrop changed nothing you could see.
+
+The first two were **caused by the layout-and-reach pass below**. Raising button
+y-padding from 6 to 12 with a blunt `sed` hit two places it should not have.
+`makeRow` combined the new padding with `.setFixedSize(COLUMN_WIDTH, 22)` — a
+13px font needs ~16px plus 24px of padding, so 40px of content was clamped into
+a 22px box. And "Save World" grew to 41px tall, running to y=61, while
+`saveStatusText` sat at y=50.
+
+Both shipped, and **no test failed**, which is the part worth keeping. `clickByText`
+finds a Text by its `text` property and the phone-landscape spec measures
+`input.hitArea`: a clipped or overlapping control still reports the right string
+and the right hit box. Nothing in the project could see a visual defect at all.
+
+The fix for the clipping is `setFixedSize(COLUMN_WIDTH, 0)` — Phaser reads a zero
+fixed height as "auto" (`Text.js:1289`), so rows keep the uniform width that makes
+them read as buttons and take whatever height their content needs. That removes
+the whole class of bug rather than re-tuning one magic number against a padding
+value.
+
+**The backdrop now actually draws.** `buildBackdropButton` only ever set
+`world.background` and relabelled the button; the image was rendered by
+`WorldMapScene` alone, so in the maker "Pirate Cove" was a word and the map
+stayed an empty grid — reported, fairly, as "there's no background, nothing
+changes when I select the world options". It is drawn masked to `MAP_RECT` and
+dimmed to 0.82, with the path brightened and node labels given their own
+translucent ground, because a route over painted mountains is unreadable
+otherwise. `StaticBackground` is deliberately not reused: its mask is hardcoded
+to the *level grid* rect, which four call sites depend on.
+
+**The screen was also badly proportioned** — a 380px list column standing half
+empty beside the 566px map that is the actual work. The column gives 80px back
+(`x24 w300`), the map takes them (`x340 w686 h280`), and the cell grows from
+70.8x53.6 to **85.8x56**. That buys node labels a fifth more room, and the taller
+row finally clears `MIN_TAP_PX`, so a node's tap target reaches the full
+guideline instead of the pixel-short cap recorded below. Labels are truncated
+with an ellipsis by a small pure `src/ui/labels.ts` — wrapping a bottom-row name
+runs it into the toolbar, and cutting them is what actually stops the collisions.
+
+**`tests/e2e/layout-invariants.spec.ts` is the guard that was missing.** It walks
+every scene's display list and asserts three geometric facts: no Text is squeezed
+into a fixed height smaller than its own content; no interactive object is drawn
+outside the 1050x468 canvas; and no interactive Text overlaps another Text. All
+three were verified by re-introducing the defects — the overlap check names the
+offenders and their coordinates, e.g. `Text "Save World" @(933,20)-(1026,60) over
+Text "● Unsaved changes" @(919,50)-(1026,64)`. Invariants rather than screenshot
+baselines: deterministic, they say which object is wrong and by how much, and
+they never need re-approving when a layout changes on purpose. The off-canvas
+rule is also the generic form of the row-overflow bug fixed twice in two days.
+
+Method note, since the complaint was visual and the tests were not: the screen
+was rendered at 844x390 and the screenshot **read back and looked at** before
+this was called fixed. Two problems only that pass could see — the backdrop
+drowning the route, and labels with no contrast against it — were fixed on the
+strength of it.
 
 **Layout and reach (2026-08-29).** Prompted by asking whether mobile support was
 worth building "at this phase". Researching it corrected the premise: mobile was

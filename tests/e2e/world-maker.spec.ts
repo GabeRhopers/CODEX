@@ -134,7 +134,7 @@ async function selectNode(page: Page, node: { x: number; y: number }, expectLabe
 
 /** WorldMakerScene's own MAP_RECT, mirrored so a test can say where a cell is.
  * Kept next to `atRest` below, which is the only thing that needs it. */
-const MAP = { x: 460, y: 88, width: GAME_WIDTH - 460 - 24, height: 268, cols: 8, rows: 5 };
+const MAP = { x: 340, y: 84, width: GAME_WIDTH - 340 - 24, height: 280, cols: 8, rows: 5 };
 const CELL_WIDTH = MAP.width / MAP.cols;
 
 /**
@@ -426,14 +426,17 @@ test("a tenth saved level is still reachable, through the pager", async ({ page 
   // Which levels land on which page depends on the order storage lists them in,
   // so this asserts the split rather than specific names: nine on the first
   // page, the remaining three on the second, and no overlap.
+  // Counted rather than pinned: how many rows fit is a layout constant that has
+  // already changed once, and what actually matters is that the pages between
+  // them account for every level exactly once.
   const firstPage = await listedLevels(page);
-  expect(firstPage).toHaveLength(9);
+  expect(firstPage.length).toBeGreaterThan(0);
+  expect(firstPage.length).toBeLessThan(names.length);
 
   await clickByText(page, "WorldMaker", "Next ›");
   await expect.poll(() => sceneTexts(page)).toContain("Page 2 of 2");
   const secondPage = await listedLevels(page);
-  expect(secondPage).toHaveLength(3);
-  expect(secondPage.filter((name) => firstPage.includes(name))).toEqual([]);
+  expect([...firstPage, ...secondPage].sort()).toEqual([...names].sort());
 
   // The point of the pager: a level that only exists on the second page can be
   // added at all. Every one of these used to be off the bottom of the canvas.
