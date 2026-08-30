@@ -17,6 +17,7 @@ import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from
 import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { resolveLevelMusicKey } from "../gameplay/musicLoader";
+import { BUILTIN_DECOR_TYPES, BUILTIN_ENEMY_DEFS, BUILTIN_ITEM_TYPES } from "../entities/builtins";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import {
   canDoubleJump,
@@ -133,38 +134,14 @@ const CAST_FLASH_MS = 150;
 // updateAccessoryVisuals) plus the Speed/Shield tints.
 const POWERUP_FLASH_MS = 260;
 
-/** Every item brush's textureKey equals its EntityType (see Palette.ts), so
- * spawning just needs the type list — no separate texture lookup like
- * ENEMY_DEFS needs. Items are collected via a static overlap zone, same
- * pattern as the goal below. */
-const ITEM_TYPES: EntityType[] = ["item-coin", "item-heart", "item-speed", "item-feather", "item-thunder-hat", "item-shield", "item-key"];
-
-/** Purely cosmetic — spawned as plain static images with no collision or
- * overlap logic (unlike every other entity list here), so a level looks
- * the same in Play as it does in the editor with zero gameplay effect. */
-const DECOR_TYPES: EntityType[] = [
-  "decor-bush",
-  "decor-tree",
-  "decor-cactus",
-  "decor-lamp",
-  "decor-cloud",
-  "decor-snowman",
-  "decor-sprout",
-  "decor-mushroom",
-  "decor-rocks",
-  "decor-bat",
-];
-
-/** One entry per placeable enemy type — see the enemyDefs loop in create().
- * All four share the exact same patrol/bob movement (EnemyBehaviors.ts);
- * only the texture and whether a from-above hit stomps it (vs. costing the
- * player no matter how it's touched) differ. */
-const ENEMY_DEFS: { type: EntityType; textureKey: string; stompable: boolean }[] = [
-  { type: "enemy-ghost", textureKey: "enemy-ghost-pillow", stompable: true },
-  { type: "enemy-bat", textureKey: "enemy-bat", stompable: true },
-  { type: "enemy-spike", textureKey: "enemy-spike-crawler", stompable: false },
-  { type: "enemy-golem", textureKey: "enemy-golem", stompable: true },
-];
+// The three placeable-entity tables moved to entities/builtins.ts (2026-08-29):
+// they are plain data, and keeping them inside this file meant anything wanting
+// to reason about them — validation, an editor palette, the custom-entity
+// registry — had to import Phaser to reach them. Aliased to the names the loops
+// below already use, so this is a move rather than a rewrite.
+const ITEM_TYPES = BUILTIN_ITEM_TYPES;
+const DECOR_TYPES = BUILTIN_DECOR_TYPES;
+const ENEMY_DEFS = BUILTIN_ENEMY_DEFS;
 
 interface ActiveEnemy {
   sprite: Phaser.Physics.Arcade.Sprite;

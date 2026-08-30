@@ -2439,7 +2439,7 @@ as a new `e2e` job the Pages `deploy` job now depends on alongside
 `build` — a genuine regression blocks the deploy the same way a failing
 build already does.
 
-*Since then it has grown to* **127 tests across 27 specs**, alongside 388
+*Since then it has grown to* **127 tests across 27 specs**, alongside 404
 Vitest unit tests. The bias worth naming was that coverage followed *recency*,
 not *risk*: the Skin Creator carried 18 e2e and 64 unit tests while Worlds — its
 own schema, two scenes and two storage adapters across 520 lines — carried none,
@@ -2494,6 +2494,45 @@ One thing left alone deliberately: on a Drive failure the editor reports
 `uploadBackground` chains the read and the store into a single rejection
 handler. The test asserts on `"Couldn't"` rather than the whole string so the
 wording is free to improve without breaking it.
+
+**Custom entities, part 1: the rules (2026-08-29).** First step of the road to a
+game that can actually be finished in this tool. The editor can reskin any brush
+but cannot *add* one, so a game made here is bounded by 28 built-in entity types
+(`LevelSchema.ts`'s `EntityType`). This is the groundwork for lifting that —
+without becoming a scripting language, which is the failure mode it is scoped
+against.
+
+`src/entities/builtins.ts` holds the three placeable-entity tables — items,
+decor, enemy defs — **moved** out of `PlayScene` rather than copied. They are
+plain data, and living inside a Phaser scene meant anything wanting to reason
+about them (validation, a palette, a registry) had to import a renderer to reach
+them.
+
+`src/entities/customEntity.ts` is the rule set, pure and Phaser-free. Two
+decisions carry the design:
+
+**Behaviour is borrowed, never described.** A custom entity names the built-in it
+copies and inherits everything that comes with it. An item resolves to
+`{ kind: "item", collectAs: "item-coin" }` — the built-in *type*, not an effect
+name — which the caller hands straight back to the existing collect path, so the
+one place that knows what a coin does stays one place. An enemy reads `stompable`
+off the built-in's own def, so a custom enemy based on the spike keeps "hurts
+however you touch it" rather than restating it and drifting.
+
+**An invalid definition resolves to `null`, never throws.** That is what will let
+a level survive referencing a custom type deleted afterwards — the caller renders
+it inert, exactly as `backgroundLoader`/`musicLoader` already fall back for a
+missing asset. A level must never fail to open because a custom type went away.
+
+Validation refuses cross-family clones (an "enemy" based on a coin), markers as a
+base (spawn/goal/checkpoint/basket/chest are singleton and carry level structure
+— cloning one means a level with two endings), and out-of-range speeds. 16 unit
+tests, including that no marker appears in any category's clonable set and that
+every built-in enemy's own stompability survives the copy.
+
+Nothing is wired yet: no storage, no palette entry, no way to make one. The
+`PlayScene` table move is the only behavioural surface touched, and its proof is
+that the existing e2e suite passes unchanged.
 
 **World Maker, made legible — and two regressions of my own (2026-08-29).**
 A screenshot from a phone in landscape: the maker's level rows had the bottom
