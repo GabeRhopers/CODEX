@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { clickByText, gotoApp, startEditorWithLevel } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
-import { makeWorld, seedLevels, seedWorld } from "./support/worlds";
+import { makeWorld, seedLevels, seedWorlds } from "./support/worlds";
 
 /**
  * What a thumb actually meets, on a phone held sideways.
@@ -276,8 +276,11 @@ test("a ninth saved level is still reachable, through the pager", async ({ page 
   await clickByText(page, "Menu", "My Levels");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("LevelBrowser"));
 
+  // Waits for a full page rather than reading once: the list is populated from
+  // an async storage read, and "fewer than nine" is also true of the empty list
+  // that shows until it lands.
+  await expect.poll(() => listedNames(page, "LevelBrowser").then((n) => n.length)).toBeGreaterThan(0);
   const first = await listedNames(page, "LevelBrowser");
-  expect(first.length).toBeGreaterThan(0);
   expect(first.length).toBeLessThan(names.length); // it pages at all
 
   await clickByText(page, "LevelBrowser", "Next ›");
@@ -292,16 +295,21 @@ test("a ninth world is still reachable too", async ({ page }) => {
   test.slow();
   await gotoApp(page);
   const levels = await seedLevels(page, ["Green Hill"]);
-  for (let i = 1; i <= 9; i++) {
-    await seedWorld(page, makeWorld(`w${i}`, `World ${String(i).padStart(2, "0")}`, levels));
-  }
+  await seedWorlds(
+    page,
+    Array.from({ length: 9 }, (_, i) => makeWorld(`w${i + 1}`, `World ${String(i + 1).padStart(2, "0")}`, levels)),
+  );
 
   await clickByText(page, "Menu", "Worlds");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldBrowser"));
 
+  // Same reason as the levels case above — an empty list is also "fewer than
+  // nine", so reading once can catch the moment before the rows arrive.
+  await expect.poll(() => listedNames(page, "WorldBrowser").then((n) => n.length)).toBeGreaterThan(0);
   const first = await listedNames(page, "WorldBrowser");
   expect(first.length).toBeLessThan(9);
   await clickByText(page, "WorldBrowser", "Next ›");
+  await expect.poll(() => listedNames(page, "WorldBrowser").then((n) => n.length)).toBeGreaterThan(0);
   const second = await listedNames(page, "WorldBrowser");
   expect([...first, ...second]).toHaveLength(9);
 });
@@ -310,13 +318,16 @@ test("deleting the last world on a page falls back rather than showing nothing",
   test.slow();
   await gotoApp(page);
   const levels = await seedLevels(page, ["Green Hill"]);
-  for (let i = 1; i <= 7; i++) {
-    await seedWorld(page, makeWorld(`w${i}`, `World ${String(i).padStart(2, "0")}`, levels));
-  }
+  await seedWorlds(
+    page,
+    Array.from({ length: 7 }, (_, i) => makeWorld(`w${i + 1}`, `World ${String(i + 1).padStart(2, "0")}`, levels)),
+  );
 
   await clickByText(page, "Menu", "Worlds");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldBrowser"));
   await clickByText(page, "WorldBrowser", "Next ›");
+  // Polled, not read once: page 2 renders from the same async list read.
+  await expect.poll(() => listedNames(page, "WorldBrowser").then((n) => n.length)).toBe(1);
   const second = await listedNames(page, "WorldBrowser");
   expect(second).toHaveLength(1);
 

@@ -175,8 +175,13 @@ test("the second tap deletes that level and leaves the others", async ({ page })
   await clickByText(page, "LevelBrowser", "Delete");
   await clickByText(page, "LevelBrowser", "Delete? Tap again");
 
-  await expect.poll(() => listedNames(page)).not.toContain(first);
-  expect(await listedNames(page)).toHaveLength(1);
+  // Polled on the *positive* end state. `not.toContain` was satisfied by the
+  // empty list the browser shows for a moment while it re-reads after the
+  // delete, so the poll returned on that transient and the length assertion
+  // below read the same empty list — an intermittent failure that looked like
+  // the delete having removed both rows.
+  await expect.poll(() => listedNames(page)).toHaveLength(1);
+  expect(await listedNames(page)).not.toContain(first);
 });
 
 test("a delete that fails says so and keeps the row", async ({ page }) => {

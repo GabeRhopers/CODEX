@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { clickByText, gotoApp, selectPaletteCategory, startEditorWithLevel } from "./support/coords";
 import { customDef, seedCustomEntities } from "./support/customEntities";
 import { makeArea, makeLevel } from "./support/levels";
-import { makeWorld, seedLevels, seedWorld } from "./support/worlds";
+import { makeWorld, seedLevels, seedWorld, seedWorlds } from "./support/worlds";
 import { GAME_HEIGHT, GAME_WIDTH } from "../../src/config/gameConfig";
 
 /**
@@ -175,9 +175,10 @@ test("My Worlds is laid out soundly", async ({ page }) => {
   test.slow();
   await gotoApp(page);
   const levels = await seedLevels(page, ["Green Hill"]);
-  for (let i = 1; i <= 9; i++) {
-    await seedWorld(page, makeWorld(`w${i}`, `World ${String(i).padStart(2, "0")}`, levels));
-  }
+  await seedWorlds(
+    page,
+    Array.from({ length: 9 }, (_, i) => makeWorld(`w${i + 1}`, `World ${String(i + 1).padStart(2, "0")}`, levels)),
+  );
   await clickByText(page, "Menu", "Worlds");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldBrowser"));
   await assertLayoutSound(page, "WorldBrowser");

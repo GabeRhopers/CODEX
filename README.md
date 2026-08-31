@@ -2534,6 +2534,32 @@ Nothing is wired yet: no storage, no palette entry, no way to make one. The
 `PlayScene` table move is the only behavioural surface touched, and its proof is
 that the existing e2e suite passes unchanged.
 
+**The intermittent e2e failures, diagnosed (2026-08-31).** Three specs had each
+been failing about once per full run and passing in isolation, and the note here
+for two days was "real debt, not fixed". A run that failed three at once finally
+gave enough signal to name them — there were **two** causes, not one flake.
+
+**Seeded levels came back in an unstable order.** Both list adapters sort by
+`updatedAt`, newest first, and `makeLevel` stamps `new Date()` per call — so nine
+levels built in one `map()` usually share a millisecond, and a stable sort keeps
+seed order. Occasionally the loop straddles a millisecond, the order reverses, and
+with six rows to a page `Level 01` moves from the top of page 1 to the bottom of
+page 2. Confirmed rather than guessed: giving the seeds distinct increasing stamps
+reproduces the failure byte-for-byte (`clickByText: no Text "Level 01" found in
+scene "WorldMaker"`). `seedLevels`/`seedWorlds` now stamp explicitly descending, so
+display order always equals the order the names were given in.
+
+**Two polls were satisfied by an empty list.** `expect.poll(...).not.toContain(x)`
+and `expect(names.length).toBeLessThan(9)` are both true of `[]` — which is exactly
+what a browser shows for a moment while it re-reads storage after a delete or a
+page change. The poll returned on that transient and the next line asserted against
+the same empty list, so the failure read as "the delete removed both rows". Those
+now poll on the positive end state, which an empty list does not satisfy.
+
+Neither was a product defect; both were the harness lying. The mutation check is
+the same one the fix came from — flipping the seed stamps back to ascending fails
+the World Maker layout test deterministically.
+
 **Custom entities, part 2: placeable and playable (2026-08-31).** Part 1 defined
 what a custom entity *is* and wired none of it. This makes one real: stored in
 the shared library, offered in the palette, placed in a level, and playing its
