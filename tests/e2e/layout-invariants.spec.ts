@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, gotoApp, startEditorWithLevel } from "./support/coords";
+import { clickByText, gotoApp, selectPaletteCategory, startEditorWithLevel } from "./support/coords";
+import { customDef, seedCustomEntities } from "./support/customEntities";
 import { makeArea, makeLevel } from "./support/levels";
 import { makeWorld, seedLevels, seedWorld } from "./support/worlds";
 import { GAME_HEIGHT, GAME_WIDTH } from "../../src/config/gameConfig";
@@ -196,6 +197,24 @@ test("the Editor is laid out soundly", async ({ page }) => {
   test.slow();
   await gotoApp(page);
   await startEditorWithLevel(page, LEVEL());
+  await assertLayoutSound(page, "Editor");
+});
+
+test("the Editor is laid out soundly with a palette category that has to page", async ({ page }) => {
+  test.slow();
+  // Decor ships with exactly ten brushes and the grid holds exactly ten, so one
+  // invented decor type is all it takes to need a pager — and the only place
+  // the pager can go is a row the grid gives back. Drawn anywhere else it lands
+  // on the skin picker, which is what invariant 3 is here to catch.
+  await gotoApp(page);
+  await seedCustomEntities(page, [
+    customDef({ id: "custom:layout-totem", name: "Totem", category: "decor", basedOn: "decor-tree" }),
+  ]);
+  await startEditorWithLevel(page, LEVEL());
+  await selectPaletteCategory(page, "Editor", "Decor");
+  await expect
+    .poll(() => boxes(page, "Editor").then((all) => all.some((b) => b.label === "1/2")))
+    .toBe(true);
   await assertLayoutSound(page, "Editor");
 });
 

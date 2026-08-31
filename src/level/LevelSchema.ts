@@ -1,5 +1,6 @@
 import { GRID_COLS, GRID_ROWS, MAX_GRID_COLS, MAX_GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
 import { StaticBackgroundId } from "./staticBackgrounds";
+import type { PlaceableType } from "../entities/customEntity";
 
 export const EMPTY_TILE = -1;
 
@@ -81,7 +82,11 @@ export type EnemySize = "small" | "medium" | "large";
 export const DEFAULT_ENEMY_SIZE: EnemySize = "medium";
 
 export interface LevelEntity {
-  type: EntityType;
+  /** A built-in type, or a custom one the player invented (see
+   * entities/customEntity.ts). `EntityType` stays a closed union so every
+   * `switch` over it keeps its exhaustiveness; a custom id is distinguishable by
+   * its `custom:` prefix and each dispatch site handles it explicitly. */
+  type: PlaceableType;
   x: number;
   y: number;
   size?: EnemySize;

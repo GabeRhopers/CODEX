@@ -17,7 +17,9 @@ import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from
 import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { resolveLevelMusicKey } from "../gameplay/musicLoader";
-import { BUILTIN_DECOR_TYPES, BUILTIN_ENEMY_DEFS, BUILTIN_ITEM_TYPES } from "../entities/builtins";
+import { collectAsFor, decorTypes, enemyDefs, itemTypes, textureKeyFor } from "../entities/entityRegistry";
+import { CustomEntityDef, isCustomEntityId, type PlaceableType } from "../entities/customEntity";
+import { loadCustomEntities } from "../entities/customEntityStorage";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import {
   canDoubleJump,
@@ -134,14 +136,11 @@ const CAST_FLASH_MS = 150;
 // updateAccessoryVisuals) plus the Speed/Shield tints.
 const POWERUP_FLASH_MS = 260;
 
-// The three placeable-entity tables moved to entities/builtins.ts (2026-08-29):
-// they are plain data, and keeping them inside this file meant anything wanting
-// to reason about them — validation, an editor palette, the custom-entity
-// registry — had to import Phaser to reach them. Aliased to the names the loops
-// below already use, so this is a move rather than a rewrite.
-const ITEM_TYPES = BUILTIN_ITEM_TYPES;
-const DECOR_TYPES = BUILTIN_DECOR_TYPES;
-const ENEMY_DEFS = BUILTIN_ENEMY_DEFS;
+// The three placeable-entity tables live in entities/builtins.ts and are read
+// through entities/entityRegistry.ts, which merges in whatever types the player
+// has invented (see entities/customEntity.ts). Built-ins always come first and
+// keep their order, so nothing about an existing level's spawn or draw order
+// shifts when a custom type exists.
 
 interface ActiveEnemy {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -370,6 +369,15 @@ export class PlayScene extends Phaser.Scene {
   // resolved. Populated by trackSprite as each is created.
   private spritesByBrushId = new Map<string, (Phaser.GameObjects.Image | Phaser.Physics.Arcade.Sprite)[]>();
 
+  // The invented entity types this run knows about (see
+  // entities/customEntity.ts). Resolved once in create(), before the first
+  // area is built, and then read by every enterArea — a basket teleport must
+  // not re-download the library, and must not build an area from a *different*
+  // set of definitions than the one before it. Empty until it resolves, and
+  // empty forever if Drive is unreachable, which is exactly the deleted-def
+  // case: built-ins play normally and invented entities simply do not appear.
+  private customEntities: CustomEntityDef[] = [];
+
   private trackSprite(brushId: string, sprite: Phaser.GameObjects.Image | Phaser.Physics.Arcade.Sprite): void {
     const list = this.spritesByBrushId.get(brushId) ?? [];
     list.push(sprite);
@@ -417,6 +425,7 @@ export class PlayScene extends Phaser.Scene {
     // level with a skinned enemy — the skin-resolve pass below iterated
     // the first run's now-destroyed sprite right alongside the new one.
     this.spritesByBrushId = new Map();
+    this.customEntities = [];
     this.areaZones = [];
     this.areaColliders = [];
     this.areaBuilt = false;
@@ -604,12 +613,19 @@ export class PlayScene extends Phaser.Scene {
     // would mean destroying a live layer and its player collider. Blocks stay
     // built-in and the wait is a single already-cached storage read when the
     // level has no block skins at all.
+    // Custom entity definitions are awaited alongside the tilesets for the same
+    // reason: enterArea spawns from them, so arriving late would mean an area
+    // built without its invented entities and no cheap way to add them after.
+    // Both are already-cached reads on every run after the first.
     const token = this.runToken;
-    void composeGroundTilesets(this, this.level.skins).then((keys) => {
-      if (this.runToken !== token) return; // restarted (or a new level started) meanwhile
-      this.groundTilesetKeys = keys;
-      this.enterArea(this.checkpoint?.area ?? this.startingAreaKey());
-    });
+    void Promise.all([composeGroundTilesets(this, this.level.skins), loadCustomEntities().catch(() => [])]).then(
+      ([keys, defs]) => {
+        if (this.runToken !== token) return; // restarted (or a new level started) meanwhile
+        this.groundTilesetKeys = keys;
+        this.customEntities = defs;
+        this.enterArea(this.checkpoint?.area ?? this.startingAreaKey());
+      },
+    );
   }
 
   /** Tears down (if anything's currently built — a no-op the very first
@@ -871,11 +887,14 @@ export class PlayScene extends Phaser.Scene {
     // EntityPlacer keeps singleton-per-area and so are looked up with
     // `.find` (except Checkpoint/basket, which are exceptions to that too
     // — see Palette.ts).
-    for (const def of ENEMY_DEFS) {
+    for (const def of enemyDefs(this.customEntities)) {
       for (const entity of area.entities.filter((e) => e.type === def.type)) {
         const size = entity.size ?? DEFAULT_ENEMY_SIZE;
         const sprite = createPatrolEnemy(this, entity.x, entity.y, def.textureKey);
-        applyEnemySize(sprite, def.type, size);
+        // `sizeAs`, not `type`: hitbox proportions are keyed by built-in type,
+        // and an invented enemy copies the one it is based on rather than
+        // falling through to a generic box.
+        applyEnemySize(sprite, def.sizeAs, size);
         // Stashed on the sprite itself (Phaser's own GameObject data store)
         // rather than a parallel map — the skin-resolve pass below needs
         // to know each individual sprite's own size again after a skin
@@ -883,23 +902,33 @@ export class PlayScene extends Phaser.Scene {
         // which instance had which size once two same-type enemies could
         // differ (this feature's whole point).
         sprite.setData("enemySize", size);
+        // Same reason as the applyEnemySize call above — the skin-swap pass
+        // re-applies the size after a texture change and only has the brush id
+        // to go on, which for an invented enemy is not a built-in type.
+        sprite.setData("enemySizeAs", def.sizeAs);
         this.trackSprite(def.type, sprite);
         // Clamped to the area's own left/right edges (not just its spawn
         // point) — see createGhostState's docstring — so an enemy placed
         // near an edge patrols back in, the same edge the player's own
         // setCollideWorldBounds above is held to.
-        const state = createGhostState(sprite, areaLeftX, areaRightX);
+        const state = createGhostState(sprite, areaLeftX, areaRightX, def.speedScale);
         this.enemies.push({ sprite, state, stompable: def.stompable });
         this.areaColliders.push(this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable)));
       }
     }
 
-    for (const type of ITEM_TYPES) {
+    for (const type of itemTypes(this.customEntities)) {
+      // textureKey === entityType for every built-in item brush (see
+      // Palette.ts); an invented one wears the art of the item it copies until
+      // a skin is drawn for it. The skip is unreachable while the registry
+      // holds — it only lists types it could resolve — but this is the one
+      // place that would otherwise spawn an image with no texture, so it stays.
+      const itemTexture = textureKeyFor(this.customEntities, type);
+      if (!itemTexture) continue;
       for (const entity of area.entities.filter((e) => e.type === type)) {
         const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
         const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
-        // textureKey === entityType for every item brush (see Palette.ts).
-        const icon = this.add.image(x, y, type).setDepth(5);
+        const icon = this.add.image(x, y, itemTexture).setDepth(5);
         this.trackSprite(type, icon);
         this.tweens.add({ targets: icon, y: y - 6, yoyo: true, repeat: -1, duration: 700, ease: "Sine.easeInOut" });
         const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
@@ -921,14 +950,16 @@ export class PlayScene extends Phaser.Scene {
       this.areaColliders.push(this.physics.add.overlap(this.player, chestZone, () => this.tryOpenChest(chestSprite, chestZone)));
     }
 
-    // Decoration entities (see DECOR_TYPES) — plain static images, no
-    // physics body, no overlap: purely visual, same as they look in the
-    // editor. Like Enemies/Items above, every placed instance spawns.
-    for (const type of DECOR_TYPES) {
+    // Decoration entities — plain static images, no physics body, no overlap:
+    // purely visual, same as they look in the editor. Like Enemies/Items
+    // above, every placed instance spawns.
+    for (const type of decorTypes(this.customEntities)) {
+      const decorTexture = textureKeyFor(this.customEntities, type); // see the item loop above
+      if (!decorTexture) continue;
       for (const entity of area.entities.filter((e) => e.type === type)) {
         const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
         const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
-        this.trackSprite(type, this.add.image(x, y, type).setDepth(3));
+        this.trackSprite(type, this.add.image(x, y, decorTexture).setDepth(3));
       }
     }
 
@@ -972,7 +1003,8 @@ export class PlayScene extends Phaser.Scene {
           // into it.
           if (brushId === "basket-up") sprite.clearTint();
           const enemySize = sprite.getData("enemySize") as EnemySize | undefined;
-          if (enemySize) applyEnemySize(sprite as Phaser.Physics.Arcade.Sprite, brushId as EntityType, enemySize);
+          const sizeAs = (sprite.getData("enemySizeAs") as EntityType | undefined) ?? (brushId as EntityType);
+          if (enemySize) applyEnemySize(sprite as Phaser.Physics.Arcade.Sprite, sizeAs, enemySize);
           else applyDefaultSkinSize(sprite);
         }
       }
@@ -1294,10 +1326,17 @@ export class PlayScene extends Phaser.Scene {
    * (see Palette.ts), each collected independently. Guarded by
    * `icon.active` since a physics overlap can fire more than once in the
    * same frame pair. */
-  private collectItem(type: EntityType, icon: Phaser.GameObjects.Image, zone: Phaser.GameObjects.Zone): void {
+  private collectItem(type: PlaceableType, icon: Phaser.GameObjects.Image, zone: Phaser.GameObjects.Zone): void {
     if (!icon.active) return;
+    // An invented item *is* the item it copies, as far as this method is
+    // concerned: it resolves to a built-in type and falls straight into the
+    // switch below, so there is still exactly one place that knows what a coin
+    // does. Anything that fails to resolve is left alone rather than guessed
+    // at — it just cannot be picked up.
+    const effective = isCustomEntityId(type) ? collectAsFor(this.customEntities, type) : type;
+    if (!effective) return;
     const now = this.time.now;
-    switch (type) {
+    switch (effective) {
       case "item-coin":
         collectCoin(this.stats);
         break;
@@ -1324,7 +1363,7 @@ export class PlayScene extends Phaser.Scene {
     }
     // Coins and Keys are collectibles, not power-ups — they change the HUD,
     // not what the character can do, so they don't get the celebratory pose.
-    if (type !== "item-coin" && type !== "item-key") {
+    if (effective !== "item-coin" && effective !== "item-key") {
       this.castFlashUntil = Math.max(this.castFlashUntil, now + POWERUP_FLASH_MS);
     }
     icon.destroy();
@@ -1332,7 +1371,7 @@ export class PlayScene extends Phaser.Scene {
     this.updateHud();
   }
 
-  /** Chest is a separate one-off entity, not part of ITEM_TYPES/collectItem
+  /** Chest is a separate one-off entity, not part of the item list/collectItem
    * — unlike a plain item it doesn't always consume itself on touch, only
    * when a Key is actually held (see openChest's docstring), so it needs
    * its own guard against the sprite being destroyed already. */

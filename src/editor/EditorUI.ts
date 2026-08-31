@@ -14,6 +14,10 @@ import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { AssetPickerItem, AssetPickerMenu } from "./AssetPickerMenu";
 import { LevelNameInput } from "./LevelNameInput";
 import { Brush, BrushCategory, CATEGORIES, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "./Palette";
+import { BrushSlot, layOutBrushes, pageOfBrush } from "./paletteLayout";
+import { CustomEntityDef } from "../entities/customEntity";
+import { customBrushes } from "../entities/entityRegistry";
+import { clampPage, rowsPerPage } from "../ui/pager";
 import { fitWithinTile } from "./spriteFit";
 import { hitRectFor } from "../ui/touchTarget";
 
@@ -144,6 +148,13 @@ const ICON_GRID_START_Y = CHIP_Y + CHIP_HEIGHT + 10;
 // this trigger. See gameConfig.ts's vertical-budget comment for the math.
 const SKIN_TRIGGER_HEIGHT = 26;
 const SKIN_SECTION_Y = PANEL_TOP + 328;
+/** How many icon rows fit between the category chip and the skin picker. Five,
+ * which every built-in category was sized to fill exactly — see
+ * paletteLayout.ts for what happens when an invented type pushes past that. */
+const ICON_ROWS = rowsPerPage(ICON_GRID_START_Y, SKIN_SECTION_Y, ICON_ROW_HEIGHT);
+/** The pager sits in the row the grid gives up when a category needs more than
+ * one page, so it costs nothing while every category still fits. */
+const ICON_PAGER_Y = ICON_GRID_START_Y + (ICON_ROWS - 1) * ICON_ROW_HEIGHT - 8;
 const SKIN_PICKER_COLUMNS = 3;
 const SKIN_PICKER_ITEM_SIZE = 26;
 
@@ -272,6 +283,17 @@ export class EditorUI {
   // finishes and calls applySkins, same "pop in a moment later" tolerance
   // as a custom background/music.
   private skinTextureKeys = new Map<string, string>();
+
+  /** The palette this editor is actually offering: the built-in brushes plus
+   * whatever entity types the player has invented (see
+   * entities/customEntity.ts). Held rather than read from PALETTE at each site
+   * so that setCustomBrushes has one thing to replace. Built-ins always come
+   * first, so no existing brush moves when an invented one exists. */
+  private brushes: Brush[] = [...PALETTE];
+
+  /** Which page of the active category's grid is showing. Reset whenever the
+   * category changes — a page index only means anything relative to one list. */
+  private iconPage = 0;
   private footerCursorText: Phaser.GameObjects.Text;
   private footerEntitiesText: Phaser.GameObjects.Text;
 
@@ -656,6 +678,7 @@ export class EditorUI {
     this.iconGrid.setVisible(true);
     if (category !== this.activeCategory) {
       this.activeCategory = category;
+      this.iconPage = 0;
       this.refreshCategoryStyles();
       this.renderIconGrid();
     } else {
@@ -664,32 +687,25 @@ export class EditorUI {
     this.chipButton.label.setText(this.chipLabel());
   }
 
-  /** Icon center (x, y) for each brush in the active category, laid out
-   * into a 2-column grid. A `groupEnd` brush (see Palette.ts) still ends
-   * its cluster like it did in the old single-row layout, but here that
-   * means "force the next brush to start a new row" rather than "add a
-   * horizontal gap" — so the Blocks category's ground-skin/block-kind/
-   * hazard clusters still read as visually separate groups, just stacked
-   * instead of spread sideways. renderIconGrid and
-   * updateSelectedOutlinePosition both need this same layout, so it's
-   * computed once here rather than twice. */
-  private iconPositions(brushes: Brush[]): { x: number; y: number }[] {
-    const positions: { x: number; y: number }[] = [];
-    let col = 0;
-    let row = 0;
-    for (const brush of brushes) {
-      positions.push({ x: ICON_COL_X[col], y: ICON_GRID_START_Y + row * ICON_ROW_HEIGHT });
-      if (brush.groupEnd) {
-        col = 0;
-        row += 1;
-      } else if (col === ICON_COLS - 1) {
-        col = 0;
-        row += 1;
-      } else {
-        col += 1;
-      }
-    }
-    return positions;
+  /** One laid-out slot's icon center, in panel pixels. The column/row walk
+   * itself lives in paletteLayout.ts (pure, and it has to page); this is only
+   * the arithmetic that turns a slot into a position. */
+  private iconPosition(slot: BrushSlot): { x: number; y: number } {
+    return { x: ICON_COL_X[slot.col], y: ICON_GRID_START_Y + slot.row * ICON_ROW_HEIGHT };
+  }
+
+  /** The active category's brushes, split into pages.
+   *
+   * A `groupEnd` brush (see Palette.ts) forces the next one onto a new row —
+   * so the Blocks category's ground-skin/block-kind/hazard clusters read as
+   * separate groups, stacked rather than spread sideways. renderIconGrid and
+   * updateSelectedOutlinePosition both need this same layout, so it is computed
+   * here rather than twice. Recomputed rather than cached: it depends on the
+   * brush list, which setCustomBrushes can replace at any time, and the walk is
+   * over at most a couple of dozen entries. */
+  private iconPages(): BrushSlot[][] {
+    const brushes = this.brushes.filter((brush) => brush.category === this.activeCategory);
+    return layOutBrushes(brushes, ICON_ROWS, ICON_COLS);
   }
 
   /** The texture a brush's icon (and, via EntityPlacer/PlayScene using
@@ -702,10 +718,11 @@ export class EditorUI {
 
   private renderIconGrid(): void {
     this.iconGrid.removeAll(true);
-    const brushes = PALETTE.filter((brush) => brush.category === this.activeCategory);
-    const positions = this.iconPositions(brushes);
-    brushes.forEach((brush, i) => {
-      const { x, y } = positions[i];
+    const pages = this.iconPages();
+    this.iconPage = clampPage(this.iconPage, pages.length, 1);
+    pages[this.iconPage].forEach((slot) => {
+      const brush = slot.brush;
+      const { x, y } = this.iconPosition(slot);
       // The tap target is an invisible Zone rather than the icon itself.
       //
       // A hit-area rectangle set on the Image would be measured in *texture*
@@ -733,7 +750,63 @@ export class EditorUI {
         .setDepth(CONTENT_DEPTH);
       this.iconGrid.add([hit, icon, label]);
     });
+    // Appended *after* every [Zone, Image, Text] triple so the display list a
+    // brush occupies stays [Image, Text]-adjacent, which is what the e2e helper
+    // clickIconWithLabel matches on.
+    this.iconGrid.add(this.makeIconPager(pages.length));
     this.updateSelectedOutlinePosition();
+  }
+
+  /** The compact "‹ 2/3 ›" row under the grid. Nothing at all while the
+   * category fits on one page, which is every built-in category — the shared
+   * PagerControls row is far too wide for a 190px panel, so this is its own
+   * two-arrow version rather than a reuse. */
+  private makeIconPager(pages: number): Phaser.GameObjects.GameObject[] {
+    if (pages <= 1) return [];
+    const arrow = (x: number, label: string, to: number, enabled: boolean): Phaser.GameObjects.Text => {
+      const text = this.scene.add
+        .text(x, ICON_PAGER_Y, label, {
+          fontSize: "13px",
+          // Greyed rather than removed, so the other arrow never jumps sideways
+          // under a finger already reaching for it.
+          color: enabled ? "#ffffff" : "#6a6f90",
+          backgroundColor: "#0f3460",
+          padding: { x: 10, y: 8 },
+        })
+        .setDepth(CONTENT_DEPTH);
+      if (enabled) {
+        text.setInteractive({ useHandCursor: true });
+        text.on("pointerdown", () => {
+          this.iconPage = to;
+          this.renderIconGrid();
+        });
+      }
+      return text;
+    };
+    const current = clampPage(this.iconPage, pages, 1);
+    const prev = arrow(ICON_COL_X[0] - 42, "‹", current - 1, current > 0);
+    const label = this.scene.add
+      .text(ICON_COL_X[0] + 40, ICON_PAGER_Y + 8, `${current + 1}/${pages}`, {
+        fontSize: "11px",
+        color: "#a6a6c8",
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(CONTENT_DEPTH);
+    const next = arrow(ICON_COL_X[1] + 12, "\u203a", current + 1, current < pages - 1);
+    return [prev, label, next];
+  }
+
+  /**
+   * Replaces the invented half of the palette and redraws.
+   *
+   * Called by EditorScene once the custom-entity library resolves, mirroring
+   * setSkinTextureKeys: the editor opens usable with built-ins only and the
+   * invented types pop in a moment later, rather than the whole screen waiting
+   * on a Drive read.
+   */
+  setCustomBrushes(defs: CustomEntityDef[]): void {
+    this.brushes = [...PALETTE, ...customBrushes(defs)];
+    this.renderIconGrid();
   }
 
   /** Hidden when the selected brush belongs to a category that isn't
@@ -745,13 +818,16 @@ export class EditorUI {
       this.selectedOutline.setVisible(false);
       return;
     }
-    const brushes = PALETTE.filter((brush) => brush.category === this.activeCategory);
-    const index = brushes.findIndex((brush) => brush.id === this.selectedBrushId);
-    if (index === -1) {
+    const pages = this.iconPages();
+    // Not on the page being shown — either another category, or another page of
+    // this one. Either way there is nothing in the visible grid to outline; the
+    // selection itself is untouched and reappears on the way back.
+    if (pageOfBrush(pages, this.selectedBrushId) !== this.iconPage) {
       this.selectedOutline.setVisible(false);
       return;
     }
-    const { x, y } = this.iconPositions(brushes)[index];
+    const slot = pages[this.iconPage].find((s) => s.brush.id === this.selectedBrushId)!;
+    const { x, y } = this.iconPosition(slot);
     this.selectedOutline.setPosition(x, y).setVisible(true);
   }
 
@@ -970,7 +1046,7 @@ export class EditorUI {
   }
 
   private selectedBrush(): Brush | undefined {
-    return PALETTE.find((brush) => brush.id === this.selectedBrushId);
+    return this.brushes.find((brush) => brush.id === this.selectedBrushId);
   }
 
   /** Reports *where the look came from*, not merely whether it is custom: with

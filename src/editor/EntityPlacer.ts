@@ -1,9 +1,10 @@
 import Phaser from "phaser";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y } from "../config/gameConfig";
-import { ENEMY_EDITOR_SIZE_SCALE, isEnemyType } from "../gameplay/EnemyBehaviors";
+import { ENEMY_EDITOR_SIZE_SCALE } from "../gameplay/EnemyBehaviors";
 import { EnemySize, EntityType, LevelArea, LevelEntity } from "../level/LevelSchema";
 import { Brush, UP_BASKET_TINT_COLOR } from "./Palette";
 import { fitWithinTile } from "./spriteFit";
+import type { PlaceableType } from "../entities/customEntity";
 
 export interface TileCoord {
   x: number;
@@ -71,7 +72,7 @@ export class EntityPlacer {
   /** Unconditionally adds a new entity at (tileX, tileY) — callers are
    * responsible for having already cleared that tile first (via removeAt)
    * if the invariant above requires it. `size` is meaningful only for
-   * enemy brushes (see EnemyBehaviors.ts's ENEMY_TYPES/isEnemyType) —
+   * enemy brushes (the "enemies" palette category) —
    * passed for every other brush it's simply ignored and never stored, so
    * their JSON stays exactly as it was before this feature existed. */
   add(brush: Brush, tileX: number, tileY: number, size?: EnemySize): void {
@@ -79,7 +80,7 @@ export class EntityPlacer {
     if (!type) return;
     const worldX = GRID_ORIGIN_X + tileX * this.tileSize + this.tileSize / 2;
     const worldY = GRID_ORIGIN_Y + tileY * this.tileSize + this.tileSize / 2;
-    const storedSize = isEnemyType(type) ? size : undefined;
+    const storedSize = brush.category === "enemies" ? size : undefined;
 
     this.level.entities.push({ type, x: tileX, y: tileY, ...(storedSize ? { size: storedSize } : {}) });
     const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
@@ -187,7 +188,7 @@ export class EntityPlacer {
   }
 
   /** Rebuilds marker sprites from an already-populated LevelData (e.g. after Load). */
-  syncFromLevel(brushesByType: Map<EntityType, Brush>): void {
+  syncFromLevel(brushesByType: Map<PlaceableType, Brush>): void {
     for (const marker of this.markers.values()) marker.destroy();
     this.markers.clear();
     for (const entity of this.level.entities) {
@@ -197,7 +198,10 @@ export class EntityPlacer {
       const worldY = GRID_ORIGIN_Y + entity.y * this.tileSize + this.tileSize / 2;
       const marker = this.scene.add.image(worldX, worldY, this.textureKeyFor(brush));
       marker.setDepth(10);
-      this.applyMarkerDisplaySize(marker, isEnemyType(entity.type) ? entity.size : undefined);
+      // The brush's category rather than isEnemyType(entity.type): identical for
+      // every built-in, and it keeps working for an invented enemy, whose type
+      // is not one of the literals isEnemyType knows about.
+      this.applyMarkerDisplaySize(marker, brush.category === "enemies" ? entity.size : undefined);
       this.applyUpBasketTint(marker, brush);
       this.markers.set(tileKey(entity.x, entity.y), marker);
     }

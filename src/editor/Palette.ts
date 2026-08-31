@@ -3,7 +3,6 @@ import {
   BOUNCE_TILE,
   BRICK_CASTLE_TILE,
   BRICK_TILE,
-  EntityType,
   GROUND_CASTLE_TILE,
   GROUND_DESERT_TILE,
   GROUND_GRASS_TILE,
@@ -11,6 +10,7 @@ import {
   LAVA_TILE,
   WATER_TILE,
 } from "../level/LevelSchema";
+import type { PlaceableType } from "../entities/customEntity";
 import { blockIconKey, groundIconKey } from "../level/groundSkins";
 import { isSkinnableBlockId } from "../skins/groundStrip";
 
@@ -24,7 +24,10 @@ export interface Brush {
   label: string;
   textureKey: string;
   tileIndex?: number;
-  entityType?: EntityType;
+  /** Widened to include invented types (see entities/customEntity.ts) — a
+   * custom brush is an ordinary palette entry whose id happens not to be one of
+   * the built-in literals. */
+  entityType?: PlaceableType;
   /** Draws a little extra breathing room after this brush's icon in
    * EditorUI's palette row — used sparingly, only to separate the
    * Blocks category's ground-skin/block-kind/hazard/erase groups so an

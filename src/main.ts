@@ -12,6 +12,11 @@ import { WorldBrowserScene } from "./scenes/WorldBrowserScene";
 import { WorldMakerScene } from "./scenes/WorldMakerScene";
 import { WorldMapScene } from "./scenes/WorldMapScene";
 import { installTextDefaults } from "./ui/textDefaults";
+import {
+  invalidateCustomEntitiesCache,
+  removeCustomEntity,
+  saveCustomEntity,
+} from "./entities/customEntityStorage";
 
 // Must run before any scene's create() can call scene.add.text(...) — see
 // textDefaults.ts's docstring for what this fixes and why.
@@ -75,6 +80,24 @@ const game = new Phaser.Game(config);
 // rely on this being present.
 if (import.meta.env.DEV) {
   (window as unknown as { __debugGame?: Phaser.Game }).__debugGame = game;
+  // Invented entity types have no authoring screen yet (that is step 0d), so
+  // the only way to put one in the library is through the storage module
+  // itself. Exposed under the same dev-only guard as __debugGame, and for the
+  // same reason: it lets the e2e suite exercise the real Drive-backed path
+  // rather than a test-only substitute for it.
+  (
+    window as unknown as {
+      __debugCustomEntities?: {
+        save: typeof saveCustomEntity;
+        remove: typeof removeCustomEntity;
+        invalidate: typeof invalidateCustomEntitiesCache;
+      };
+    }
+  ).__debugCustomEntities = {
+    save: saveCustomEntity,
+    remove: removeCustomEntity,
+    invalidate: invalidateCustomEntitiesCache,
+  };
 }
 
 // Phaser's own ScaleManager only ever listens for `window`'s 'resize' and

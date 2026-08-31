@@ -13,10 +13,12 @@ import { BUILTIN_SKIN_ID, EditorUI, NO_MUSIC_ID, USE_DEFAULT_SKIN_ID } from "../
 import { EntityPlacer, TileCoord } from "../editor/EntityPlacer";
 import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
 import { Brush, isSkinnable, PALETTE } from "../editor/Palette";
+import { CustomEntityDef, isCustomEntityId, type PlaceableType } from "../entities/customEntity";
+import { customBrushes } from "../entities/entityRegistry";
+import { loadCustomEntities } from "../entities/customEntityStorage";
 import { TilePainter } from "../editor/TilePainter";
 import { BackgroundThumbnail, resolveBackgroundThumbnails } from "../backgrounds/backgroundLibraryLoader";
 import { addBackgroundAsset, loadBackgroundLibrary, removeBackgroundAsset } from "../backgrounds/backgroundLibraryStorage";
-import { isEnemyType } from "../gameplay/EnemyBehaviors";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import { groundFrameAt } from "../level/groundAutotile";
@@ -111,7 +113,7 @@ export class EditorScene extends Phaser.Scene {
   // which area is being edited.
   private currentSize: EnemySize = DEFAULT_ENEMY_SIZE;
   private storage: StorageAdapter = getLevelStorage();
-  private brushesByType = new Map<EntityType, Brush>();
+  private brushesByType = new Map<PlaceableType, Brush>();
   // One stack per area rather than one shared stack — undoing while
   // editing Sub shouldn't reach back and undo something done in Main
   // earlier, which sharing one HistoryStack across differently-scoped
@@ -255,6 +257,23 @@ export class EditorScene extends Phaser.Scene {
     // to pass it too. Palette icons and already-placed entities show built-in
     // art until it lands, then swap in place.
     void this.reresolveSkins();
+
+    // Invented entity types (see entities/customEntity.ts) arrive the same way
+    // skins do: the editor opens usable with built-ins only, and the custom
+    // brushes pop into the palette a moment later. Unreachable Drive means no
+    // custom brushes rather than no editor — and a level that already placed
+    // one keeps it in its data either way, it just isn't drawn (see
+    // EntityPlacer.syncFromLevel, which skips an entity it has no brush for).
+    void loadCustomEntities()
+      .catch(() => [] as CustomEntityDef[])
+      .then((defs) => {
+        if (!this.scene.isActive()) return;
+        for (const brush of customBrushes(defs)) {
+          if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
+        }
+        this.ui.setCustomBrushes(defs);
+        this.entityPlacer.syncFromLevel(this.brushesByType);
+      });
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (!this.isOverGrid(pointer)) return; // Palette/Level Settings panel, header, footer, or the dead space below the grid
@@ -524,11 +543,13 @@ export class EditorScene extends Phaser.Scene {
     if (!type) return;
     const area = this.area();
     if (tileX < 0 || tileY < 0 || tileX >= area.width || tileY >= area.height) return;
-    const size = isEnemyType(type) ? this.currentSize : undefined;
+    const size = this.currentBrush.category === "enemies" ? this.currentSize : undefined;
 
     const commands: Command[] = [];
 
-    if (MARKER_TYPES.has(type)) {
+    // An invented type is never a marker — markers are singleton and carry level
+    // structure, so entities/customEntity.ts refuses them as a base outright.
+    if (!isCustomEntityId(type) && MARKER_TYPES.has(type)) {
       const existingOfType = area.entities.find((e) => e.type === type);
       if (existingOfType && existingOfType.x === tileX && existingOfType.y === tileY) return; // no-op, same spot
       if (existingOfType) commands.push(new EraseEntityCommand(this.entityPlacer, this.brushesByType, existingOfType));

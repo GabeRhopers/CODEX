@@ -2534,6 +2534,65 @@ Nothing is wired yet: no storage, no palette entry, no way to make one. The
 `PlayScene` table move is the only behavioural surface touched, and its proof is
 that the existing e2e suite passes unchanged.
 
+**Custom entities, part 2: placeable and playable (2026-08-31).** Part 1 defined
+what a custom entity *is* and wired none of it. This makes one real: stored in
+the shared library, offered in the palette, placed in a level, and playing its
+borrowed behaviour. There is still no authoring screen — that is the next step —
+so definitions go in through a dev-only hook, which is enough to prove the
+runtime before a screen is built on top of it.
+
+**Art needed no new plumbing, and one field went away.** Part 1 gave a definition
+a `skinId`. Dropped. The skins library is already keyed by *brush id* — an
+arbitrary string — and `resolveSkinTextureKeys` returns a `brushId -> textureKey`
+map by iterating whatever keys it holds. So a custom entity's sprite is simply
+"the active skin for its own id": reskinnable exactly like a built-in, per-level
+overrides included, and one fewer reference that could dangle. Until someone
+draws one it wears the art of the thing it copies, so a custom entity is always
+renderable — "acts like a coin, looks like a coin until you give it a face."
+
+`src/entities/entityRegistry.ts` is the merge every consumer now reads instead of
+the built-in constants: built-ins first, in their original order, so nothing about
+an existing level's spawn or draw order shifts when a custom type exists. Invalid
+definitions are dropped **here**, once, so no caller has to remember to check one
+that was hand-edited or written by an older build. `src/entities/customEntityStorage.ts`
+is one `custom-entities.json` in the Drive app folder, cached with the same
+in-flight dedupe `loadCustomSkins` uses — `PlayScene` resolves this on every area
+build, so an uncached read would re-download the library on every basket teleport.
+
+**A deleted definition means "not drawn", not "drawn as something else".** The
+plan said a missing definition would render inert as a plain image; that turned
+out to be dishonest, because a deleted definition leaves no record of what it
+looked like, so any image would be an invention. What actually happens is what
+`EntityPlacer.syncFromLevel` already did for a brush it does not know: the entity
+stays in the level's data and simply is not drawn. Deleting a type never silently
+edits levels that used it, and the level still opens.
+
+**The palette was full, which the plan had not noticed.** The icon grid holds
+exactly five rows, and Blocks and Decor already fill all five — so the very first
+invented decor type would have been drawn past the panel, unreachable. Adding
+brushes without paging the grid would have shipped a defect on day one.
+`src/editor/paletteLayout.ts` pages it, honouring `groupEnd` (which forces a row
+break, so a page that counted brushes rather than rows would strand a group's
+tail). The grid keeps all five rows while a category fits and gives the last one
+back to the pager only when it does not — so every category that shipped before
+this still draws on one page with nothing moved, which is the first thing its
+unit tests assert.
+
+`tests/e2e/custom-entities.spec.ts` is four tests, and the one that matters asserts
+the **score actually rises** when the player walks into an invented item — the
+built-in's own collect path ran, which is the whole claim. The others cover a
+definition deleted out from under a level, an invented enemy patrolling at the
+speed its definition asks for (velocity measured against a built-in ghost in the
+same run), and the eleventh Decor brush being reachable rather than merely
+existing. `layout-invariants`
+gained a paged-palette case, because a pager drawn in the wrong place lands on the
+skin picker and no functional assertion would notice.
+
+**Not done here:** custom entities are not yet offered as Skin Creator targets —
+that grid is itself close to overflowing at 38 targets and needs its own paging,
+which belongs with the authoring screen where drawing the sprite is the point.
+Until then a custom entity wears its base's art, which is what the fallback is for.
+
 **World Maker, made legible — and two regressions of my own (2026-08-29).**
 A screenshot from a phone in landscape: the maker's level rows had the bottom
 half of every letter cut off, "Save World" sat on top of the save-state readout,
@@ -4187,6 +4246,7 @@ src/
 │   ├── domOverlay.ts         positionOverlay() — converts game coordinates to real CSS pixels over the canvas, shared by FileInputOverlay and LevelNameInput
 │   ├── customBackgroundUpload.ts downscales/re-encodes a picked image file into a background-ready JPEG data URL
 │   ├── musicUpload.ts        reads a picked audio file as-is (no re-encoding possible), rejecting anything over 4MB — see "Music" under Art
+│   ├── paletteLayout.ts      pages the palette's icon grid, honouring groupEnd row breaks — see "Custom entities, part 2" under Art (+ unit tests)
 │   ├── spriteFit.ts          scales any texture down to fit one tile
 │   └── commands/
 │       ├── Command.ts         execute()/undo() interface
@@ -4235,6 +4295,11 @@ src/
 │   ├── skinUpload.ts           downscales a picked image to a small alpha-preserving PNG (see "Custom skins" under Art)
 │   ├── skinStorage.ts          load/save/remove against the shared, non-profile-scoped skins.json
 │   └── skinLoader.ts           resolveSkinTextureKeys — registers each skin as its own Phaser texture, same caching pattern as backgroundLoader.ts
+├── entities/
+│   ├── builtins.ts             the three placeable-entity tables (items/decor/enemy defs) as plain data, moved out of PlayScene — see "Custom entities, part 1" under Art
+│   ├── customEntity.ts         the rules for an invented entity type: validation and resolveBehaviour (pure, no Phaser) (+ unit tests)
+│   ├── entityRegistry.ts       built-ins ∪ valid custom defs, as one list — what PlayScene and the palette read instead of the constants (+ unit tests)
+│   └── customEntityStorage.ts  load/save/remove against the shared, non-profile-scoped custom-entities.json, same caching pattern as skinStorage.ts
 ├── world/
 │   └── WorldSchema.ts        WorldData: an ordered list of level ids + a name
 ├── config/

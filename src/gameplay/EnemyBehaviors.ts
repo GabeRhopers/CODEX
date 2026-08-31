@@ -8,19 +8,6 @@ const BOB_AMPLITUDE = 18;
 const BOB_SPEED = 300; // ms per radian-ish unit, tuned by feel
 const STOMP_VELOCITY_Y = -260;
 
-/** Every placeable enemy type — shared by EditorScene (deciding whether
- * the size selector applies to the current brush) and EntityPlacer (the
- * editor-preview scale). Kept as an explicit Set, matching this
- * codebase's existing MARKER_TYPES/ITEM_TYPES/DECOR_TYPES convention,
- * rather than an "enemy-" prefix check on EntityType — explicit reads
- * the same either way but doesn't depend on every future enemy type
- * happening to share that prefix. */
-export const ENEMY_TYPES = new Set<EntityType>(["enemy-ghost", "enemy-spike", "enemy-bat", "enemy-golem"]);
-
-export function isEnemyType(type: EntityType): boolean {
-  return ENEMY_TYPES.has(type);
-}
-
 /** Small/Medium/Large as a relative multiplier on top of the *editor's*
  * own tile-fit baseline (EntityPlacer already scales every marker down
  * to fit one tile via fitWithinTile — see spriteFit.ts) — deliberately
@@ -79,6 +66,9 @@ export interface GhostState {
   minX: number;
   maxX: number;
   direction: 1 | -1;
+  /** Optional so a state built before this existed still reads as normal speed
+   * — see updateGhostPatrol's `?? 1`. */
+  speedScale?: number;
 }
 
 /** Shared constructor for every floating-patrol enemy (ghost, bat, spike
@@ -153,11 +143,16 @@ export function createGhostState(
   ghost: Phaser.Physics.Arcade.Sprite,
   levelMinX = -Infinity,
   levelMaxX = Infinity,
+  /** A multiple of PATROL_SPEED. Defaults to 1, so every built-in enemy moves
+   * exactly as it always has; only an invented one can turn this knob (see
+   * entities/customEntity.ts). */
+  speedScale = 1,
 ): GhostState {
   return {
     minX: Math.max(ghost.x - PATROL_RANGE_TILES * TILE_SIZE, levelMinX),
     maxX: Math.min(ghost.x + PATROL_RANGE_TILES * TILE_SIZE, levelMaxX),
     direction: 1,
+    speedScale,
   };
 }
 
@@ -168,7 +163,7 @@ export function updateGhostPatrol(ghost: Phaser.Physics.Arcade.Sprite, state: Gh
   if (ghost.x <= state.minX) state.direction = 1;
   else if (ghost.x >= state.maxX) state.direction = -1;
 
-  body.setVelocityX(state.direction * PATROL_SPEED);
+  body.setVelocityX(state.direction * PATROL_SPEED * (state.speedScale ?? 1));
   body.setVelocityY(Math.sin(timeMs / BOB_SPEED) * BOB_AMPLITUDE);
   ghost.setFlipX(state.direction < 0);
 }

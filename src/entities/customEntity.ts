@@ -37,6 +37,11 @@ export function makeCustomEntityId(uuid: string): CustomEntityId {
   return `custom:${uuid}`;
 }
 
+/** Anything that can be placed in a level: a built-in type or an invented one.
+ * Written once here so the union does not have to be spelled out at every site
+ * that holds or looks up an entity's type. */
+export type PlaceableType = EntityType | CustomEntityId;
+
 /** Which of the three clonable families this belongs to. Markers
  * (spawn/goal/checkpoint/basket/chest) are deliberately absent: they are
  * singleton per area and carry level-structure meaning, so copying one would
@@ -55,16 +60,24 @@ export interface CustomEntityParams {
   speedScale?: number;
 }
 
+/**
+ * Art is deliberately *not* a field here.
+ *
+ * The skins library is keyed by brush id — an arbitrary string — and
+ * `resolveSkinTextureKeys` returns a `brushId -> textureKey` map by iterating
+ * whatever keys it holds. So a custom entity's sprite is simply "the active skin
+ * for its own id", which needs no new art plumbing, makes it reskinnable exactly
+ * like a built-in (per-level overrides included), and removes a second reference
+ * that could dangle. Until someone draws one it falls back to the art of the
+ * thing it copies — see builtinTextureKey — so a custom entity is always
+ * renderable.
+ */
 export interface CustomEntityDef {
   id: CustomEntityId;
   name: string;
   category: CustomEntityCategory;
   /** The built-in whose behaviour this copies. Must belong to `category`. */
   basedOn: EntityType;
-  /** A skin from the existing skin library (see skins/skinStorage.ts) — art
-   * needs no new machinery, since skinLoader already registers a stored PNG as
-   * a Phaser texture at runtime. */
-  skinId: string;
   params?: CustomEntityParams;
   createdAt: string;
   updatedAt: string;
@@ -99,7 +112,6 @@ export function clonableTypes(category: CustomEntityCategory): readonly EntityTy
 export function validationError(def: CustomEntityDef): string | null {
   if (!isCustomEntityId(def.id)) return "That id is not a custom entity id.";
   if (!def.name.trim()) return "Give it a name.";
-  if (!def.skinId) return "Pick a sprite for it.";
   if (!clonableTypes(def.category).includes(def.basedOn)) {
     return `A custom ${def.category.replace(/s$/, "")} cannot be based on "${def.basedOn}".`;
   }

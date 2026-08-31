@@ -38,7 +38,10 @@ describe("createGhostState", () => {
   it("defaults to the spawn-relative patrol range when no level bounds are given", () => {
     const ghost = { x: 500 } as never;
     const state = createGhostState(ghost);
-    expect(state).toEqual({ minX: 500 - 64, maxX: 500 + 64, direction: 1 });
+    // toMatchObject, not toEqual: what this test is about is the patrol range,
+    // and pinning the whole shape made it fail the moment a speed multiplier was
+    // added for invented enemies — a field it has no opinion about.
+    expect(state).toMatchObject({ minX: 500 - 64, maxX: 500 + 64, direction: 1 });
   });
 
   it("clamps the patrol range so it never extends past a nearby level edge", () => {

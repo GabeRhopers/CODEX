@@ -1,7 +1,8 @@
-import { EntityType, LevelEntity } from "../../level/LevelSchema";
+import { LevelEntity } from "../../level/LevelSchema";
 import { EntityPlacer } from "../EntityPlacer";
 import { Brush } from "../Palette";
 import { Command } from "./Command";
+import type { PlaceableType } from "../../entities/customEntity";
 
 /** Removes one already-placed entity, keyed by its position (EntityPlacer
  * only ever has one entity per tile, so position alone identifies it).
@@ -12,7 +13,7 @@ import { Command } from "./Command";
 export class EraseEntityCommand implements Command {
   constructor(
     private readonly placer: EntityPlacer,
-    private readonly brushesByType: Map<EntityType, Brush>,
+    private readonly brushesByType: Map<PlaceableType, Brush>,
     private readonly entity: LevelEntity,
   ) {}
 

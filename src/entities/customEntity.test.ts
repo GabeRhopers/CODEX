@@ -28,7 +28,6 @@ const def = (over: Partial<CustomEntityDef> = {}): CustomEntityDef => ({
   name: "Star Fruit",
   category: "items",
   basedOn: "item-coin",
-  skinId: "skin-1",
   createdAt: "2026-08-29T00:00:00.000Z",
   updatedAt: "2026-08-29T00:00:00.000Z",
   ...over,
@@ -88,9 +87,8 @@ describe("validationError", () => {
     expect(validationError(def({ category: "enemies", basedOn: "player-spawn" }))).toContain("cannot be based on");
   });
 
-  it("insists on a name and a sprite", () => {
+  it("insists on a name", () => {
     expect(validationError(def({ name: "   " }))).toBe("Give it a name.");
-    expect(validationError(def({ skinId: "" }))).toBe("Pick a sprite for it.");
   });
 
   it("rejects an id that is not a custom id", () => {
@@ -146,7 +144,6 @@ describe("resolveBehaviour", () => {
     // inert, exactly as backgroundLoader and musicLoader already fall back.
     for (const bad of [
       def({ name: "" }),
-      def({ skinId: "" }),
       def({ basedOn: "goal" }),
       def({ category: "enemies", basedOn: "item-coin" }),
       def({ category: "enemies", basedOn: "enemy-bat", params: { speedScale: 99 } }),

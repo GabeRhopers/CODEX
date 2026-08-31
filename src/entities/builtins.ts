@@ -69,3 +69,18 @@ export const BUILTIN_ENEMY_TYPES: readonly EntityType[] = BUILTIN_ENEMY_DEFS.map
 export function builtinEnemyDef(type: EntityType): EnemyDef | undefined {
   return BUILTIN_ENEMY_DEFS.find((d) => d.type === type);
 }
+
+/**
+ * The texture key a built-in entity draws with.
+ *
+ * Items and decor follow the convention that their key *is* their type; enemies
+ * do not (the ghost renders as "enemy-ghost-pillow"), which is the whole reason
+ * this exists rather than callers assuming. Returns null for markers, which are
+ * drawn by their own bespoke code.
+ */
+export function builtinTextureKey(type: EntityType): string | null {
+  const enemy = builtinEnemyDef(type);
+  if (enemy) return enemy.textureKey;
+  if (BUILTIN_ITEM_TYPES.includes(type) || BUILTIN_DECOR_TYPES.includes(type)) return type;
+  return null;
+}
