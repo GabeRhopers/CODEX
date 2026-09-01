@@ -7,6 +7,7 @@ import { MenuScene } from "./scenes/MenuScene";
 import { PlayScene } from "./scenes/PlayScene";
 import { ProfileGateScene } from "./scenes/ProfileGateScene";
 import { SkinEditorScene } from "./scenes/SkinEditorScene";
+import { ThingMakerScene } from "./scenes/ThingMakerScene";
 import { TemplateBrowserScene } from "./scenes/TemplateBrowserScene";
 import { WorldBrowserScene } from "./scenes/WorldBrowserScene";
 import { WorldMakerScene } from "./scenes/WorldMakerScene";
@@ -65,6 +66,7 @@ const config: Phaser.Types.Core.GameConfig = {
     WorldMapScene,
     TemplateBrowserScene,
     SkinEditorScene,
+    ThingMakerScene,
   ],
 };
 

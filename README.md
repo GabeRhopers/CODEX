@@ -2534,6 +2534,68 @@ Nothing is wired yet: no storage, no palette entry, no way to make one. The
 `PlayScene` table move is the only behavioural surface touched, and its proof is
 that the existing e2e suite passes unchanged.
 
+**The Thing Maker (2026-09-01).** Custom entities have worked end to end since
+the step before this — stored, placed, played — but the only way to *make* one
+was `window.__debugCustomEntities`, a dev-only hook that does not exist in a
+production build. The feature had no front door. This is it: a screen where you
+name a new item, enemy or decoration, say what it acts like, and then go and
+draw it.
+
+It is reached from a second chip in the Menu footer, beside Skin Creator,
+because the two are a pair — one invents what a thing *does*, the other what it
+*looks like* — and the first hands straight off to the second. There is no room
+for a fifth card (a third card row costs 102px and would push the resume bar
+past the footer), and `buildFooter` already had a free column.
+
+**The screen owns almost no rules.** What a thing may copy is `clonableTypes`,
+whether a definition is usable is `validationError`, what it then does is
+`resolveBehaviour` — all pure, all in `entities/customEntity.ts`, all tested
+without Phaser. The scene picks values and shows reasons. Two small rules did
+get added there rather than in the scene: `newCustomEntityDef`, the blank a
+fresh form opens on, and `withCategory`, which is the one thing a form does that
+can produce nonsense — pick Items, pick Coin, switch to Enemy, and carrying that
+coin across is exactly the cross-family definition validation refuses. It resets
+`basedOn`, and drops a `speedScale` that no longer means anything.
+
+**"Save & draw sprite →" opens the Skin Creator already on the canvas** for the
+thing just made, rather than dropping you into the target grid to hunt for it.
+That needed `init(data)` on `SkinEditorScene`, and a shared `openCanvasFor` so
+arriving from the grid and arriving from the handoff land in identical state.
+
+**The target grid had to page first.** At `ROW_START_Y=90` and `cellH=64`, a
+sixth row's labels end at y=470 on a 468-tall canvas — so the grid holds exactly
+**40 targets, and 38 already existed**. Two free slots is not headroom, so the
+very first invented thing would have been drawn off the bottom. It now pages with
+the shared `ui/pager.ts` + `ui/PagerControls.ts` (this screen is full width, so
+unlike the editor's 190px palette panel the standard pager row fits as-is).
+
+**Two layout bugs the screenshots caught and no assertion would have.** The
+"Acts like" grid at ten per row ran to x=882 with the preview panel starting at
+830 — a collision only Decor (ten built-ins) could trigger, and I had only
+rendered Items and Enemies. It wraps at seven now. And everything below that grid
+sat at a fixed y, which left an obviously unintended empty band for the two
+families that need one row; the rows are counted now. Both were found by
+rendering the screen and reading the picture back, which is the rule adopted after
+shipping two visible regressions in August.
+
+`tests/e2e/thing-maker.spec.ts` is six tests, and the end-to-end one asserts the
+same thing `custom-entities.spec.ts` does — **the score rises** — because a thing
+invented here is not really an item until the coin's own collect path runs for it.
+`layout-invariants.spec.ts` gains the Thing Maker in both modes and the paged
+target grid. Mutation-checked three ways: dropping the `basedOn` reset, dropping
+customs from `skinTargets`, and ignoring `targetBrushId` each fail the test meant
+to catch them.
+
+**Known and deliberate:** a custom entity is single-frame. `LOOP_BRUSH_IDS` in
+`spriteFrames.ts` is a hardcoded set of the four built-in enemy ids, so a custom
+enemy based on the ghost gets one 32x32 frame rather than the ghost's animation
+loop — it still patrols, which is physics rather than frames. Resolving a custom
+id to its base's frame plan would mean handing entity definitions to
+`spriteFrames.ts`, which is pure today. And deleting a thing leaves its skin in
+the library, orphaned under the custom id: the same trade `removeCustomEntity`
+already documents, where deleting never reaches into data someone else may be
+using.
+
 **The intermittent e2e failures, diagnosed (2026-08-31).** Three specs had each
 been failing about once per full run and passing in isolation, and the note here
 for two days was "real debt, not fixed". A run that failed three at once finally
@@ -4261,7 +4323,8 @@ src/
 │   ├── EditorScene.ts        palette + grid painting + save/test-play
 │   ├── PlayScene.ts          runs a level with Arcade Physics (optionally chained via a World or returning to Templates)
 │   ├── WorldBrowserScene.ts  lists saved Worlds with Play/Edit/Delete
-│   └── WorldMakerScene.ts    build/edit a World's level order
+│   ├── WorldMakerScene.ts    build/edit a World's level order
+│   └── ThingMakerScene.ts    invent an item/enemy/decoration: name it, say what it acts like, hand off to the Skin Creator to draw it — see "The Thing Maker" under Art
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions
 │   ├── TilePainter.ts        raw mutator for the ground tile layer

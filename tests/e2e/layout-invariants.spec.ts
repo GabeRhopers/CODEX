@@ -219,6 +219,43 @@ test("the Editor is laid out soundly with a palette category that has to page", 
   await assertLayoutSound(page, "Editor");
 });
 
+test("the Thing Maker is laid out soundly, listing things and editing one", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  await seedCustomEntities(page, [
+    customDef({ id: "custom:star", name: "Star Fruit" }),
+    customDef({ id: "custom:zoom", name: "Zoom Ghost", category: "enemies", basedOn: "enemy-ghost" }),
+  ]);
+  await clickByText(page, "Menu", "Thing Maker");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
+  await expect.poll(() => boxes(page, "ThingMaker").then((all) => all.some((b) => b.label === "Star Fruit"))).toBe(true);
+  await assertLayoutSound(page, "ThingMaker");
+
+  // The form, on the widest family: Decor offers ten built-ins, which is what
+  // made the "Acts like" grid wrap in the first place — at one row it ran under
+  // the preview panel.
+  await clickByText(page, "ThingMaker", "Edit");
+  await clickByText(page, "ThingMaker", "Decoration");
+  await assertLayoutSound(page, "ThingMaker");
+});
+
+test("the Skin Creator's target grid is laid out soundly once it has to page", async ({ page }) => {
+  test.slow();
+  // 38 built-in targets in a grid that holds 40, so three invented things push
+  // it to two pages. Without paging the extras are simply drawn off the canvas.
+  await gotoApp(page);
+  await seedCustomEntities(page, [
+    customDef({ id: "custom:a", name: "Star Fruit" }),
+    customDef({ id: "custom:b", name: "Moon Fruit" }),
+    customDef({ id: "custom:c", name: "Totem", category: "decor", basedOn: "decor-tree" }),
+  ]);
+  await clickByText(page, "Menu", "Skin Creator");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await clickByText(page, "SkinEditor", "+ New Skin");
+  await expect.poll(() => boxes(page, "SkinEditor").then((all) => all.some((b) => b.label === "Page 1 of 2"))).toBe(true);
+  await assertLayoutSound(page, "SkinEditor");
+});
+
 test("the World Maker is laid out soundly, with a level added and selected", async ({ page }) => {
   test.slow();
   // The screen both regressions landed on, in the state the screenshot showed:

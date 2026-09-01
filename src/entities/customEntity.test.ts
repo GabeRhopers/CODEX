@@ -9,8 +9,10 @@ import {
   makeCustomEntityId,
   MAX_SPEED_SCALE,
   MIN_SPEED_SCALE,
+  newCustomEntityDef,
   resolveBehaviour,
   validationError,
+  withCategory,
 } from "./customEntity";
 
 /**
@@ -157,5 +159,56 @@ describe("resolveBehaviour", () => {
     const copy = JSON.parse(JSON.stringify(original)) as CustomEntityDef;
     resolveBehaviour(original);
     expect(original).toEqual(copy);
+  });
+});
+
+describe("newCustomEntityDef", () => {
+  it("opens valid in every category, apart from needing a name", () => {
+    // A form must never open in a state its own validator refuses, so the only
+    // complaint about a blank one should be the blank name.
+    for (const category of ["items", "enemies", "decor"] as CustomEntityCategory[]) {
+      const blank = newCustomEntityDef(makeCustomEntityId("x"), category);
+      expect(validationError(blank), category).toBe("Give it a name.");
+      expect(validationError({ ...blank, name: "Thing" }), category).toBeNull();
+    }
+  });
+
+  it("bases it on something of its own family", () => {
+    for (const category of ["items", "enemies", "decor"] as CustomEntityCategory[]) {
+      const blank = newCustomEntityDef(makeCustomEntityId("x"), category);
+      expect(clonableTypes(category), category).toContain(blank.basedOn);
+    }
+  });
+});
+
+describe("withCategory", () => {
+  it("never leaves a cross-family basedOn behind", () => {
+    // The actual mistake a form makes: pick Items, pick Coin, switch to
+    // Enemies. Carrying "item-coin" across is precisely what validation refuses.
+    const coin = { ...newCustomEntityDef(makeCustomEntityId("x"), "items", "Star Fruit"), basedOn: "item-coin" as const };
+    const asEnemy = withCategory(coin, "enemies");
+    expect(asEnemy.category).toBe("enemies");
+    expect(validationError(asEnemy)).toBeNull();
+    expect(BUILTIN_ENEMY_TYPES).toContain(asEnemy.basedOn);
+  });
+
+  it("keeps the name and the id, because you named the thing, not the category", () => {
+    const original = newCustomEntityDef(makeCustomEntityId("keep-me"), "items", "Star Fruit");
+    const moved = withCategory(original, "decor");
+    expect(moved.id).toBe(original.id);
+    expect(moved.name).toBe("Star Fruit");
+    expect(moved.createdAt).toBe(original.createdAt);
+  });
+
+  it("drops a speed that no longer means anything", () => {
+    // speedScale is enemies-only; carrying it onto a decoration would write a
+    // field back to storage that nothing reads and validation ignores.
+    const fast = { ...newCustomEntityDef(makeCustomEntityId("x"), "enemies", "Zoom"), params: { speedScale: 2 } };
+    expect(withCategory(fast, "decor").params).toBeUndefined();
+  });
+
+  it("is a no-op for the category it is already in", () => {
+    const enemy = { ...newCustomEntityDef(makeCustomEntityId("x"), "enemies", "Zoom"), params: { speedScale: 2 } };
+    expect(withCategory(enemy, "enemies")).toBe(enemy);
   });
 });

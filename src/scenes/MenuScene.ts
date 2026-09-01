@@ -426,6 +426,37 @@ export class MenuScene extends Phaser.Scene {
       activate: () => this.scene.start("SkinEditor"),
     });
 
+    // The Thing Maker sits beside the Skin Creator because the two are a pair:
+    // one invents what a thing *does*, the other what it *looks like*, and the
+    // former hands straight off to the latter. Same chip language, the next
+    // free column on the footer row.
+    const thingChipX = SIDE_MARGIN + chipWidth + 14;
+    const thingChipBg = this.add
+      .rectangle(thingChipX, chipTop, chipWidth, chipHeight, CARD_FILL)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, CARD_STROKE)
+      .setInteractive({ useHandCursor: true });
+    this.add.rectangle(thingChipX, chipTop, ACCENT_WIDTH, chipHeight, 0x5ec4a0).setOrigin(0, 0);
+    const thingIcon = this.add.image(thingChipX + ACCENT_WIDTH + 20, FOOTER_ROW_Y, "item-coin").setOrigin(0.5);
+    thingIcon.setScale(Math.min(1, 22 / thingIcon.width, 22 / thingIcon.height));
+    const thingLabel = this.add
+      .text(thingChipX + ACCENT_WIDTH + 38, FOOTER_ROW_Y, "Thing Maker", { fontSize: "13px", color: MUTED_TEXT })
+      .setOrigin(0, 0.5);
+    const thingChevron = this.add
+      .text(thingChipX + chipWidth - 16, FOOTER_ROW_Y, "\u203a", { fontSize: "18px", color: CHEVRON_IDLE })
+      .setOrigin(0.5);
+    this.register(thingChipBg, {
+      row: ROW_FOOTER,
+      col: 1,
+      setHighlighted: (on) => {
+        thingChipBg.setFillStyle(on ? CARD_FILL_ACTIVE : CARD_FILL);
+        thingChipBg.setStrokeStyle(on ? 2 : 1, on ? CARD_STROKE_ACTIVE : CARD_STROKE);
+        thingLabel.setColor(on ? "#ffffff" : MUTED_TEXT);
+        thingChevron.setColor(on ? "#ffffff" : CHEVRON_IDLE);
+      },
+      activate: () => this.scene.start("ThingMaker"),
+    });
+
     // Grampa, front and centre at the bottom — the mascot the whole game is
     // about, and the piece of art that fills what used to be ~90px of empty
     // page between the last control and the footer line.

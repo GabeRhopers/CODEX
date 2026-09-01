@@ -3,6 +3,11 @@ import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { AssetPickerItem, AssetPickerMenu } from "../editor/AssetPickerMenu";
 import { Brush, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
+import { CustomEntityDef } from "../entities/customEntity";
+import { customBrushes } from "../entities/entityRegistry";
+import { loadCustomEntities } from "../entities/customEntityStorage";
+import { makePagerControls } from "../ui/PagerControls";
+import { clampPage, pageSlice } from "../ui/pager";
 import { LevelNameInput } from "../editor/LevelNameInput";
 import { CanvasView, PixelCanvasOverlay, PixelTool } from "../editor/PixelCanvasOverlay";
 import { FIT_INDEX, formatZoom, VIEWPORT_SIZE } from "../editor/canvasZoom";
@@ -119,9 +124,15 @@ const CHARACTER_BRUSH: Brush = {
 /** Every target the Skin Creator can paint: the character first, since it's
  * the one most people are looking for, then every skinnable brush — which as
  * of the block-skin pass includes the Blocks category, so the ground a level is
- * mostly made of can finally be painted here too. */
-function skinTargets(): Brush[] {
-  return [CHARACTER_BRUSH, ...PALETTE.filter(isSkinnable)];
+ * mostly made of can finally be painted here too — and finally the things the
+ * player invented in the Thing Maker.
+ *
+ * Customs go **last** so no existing target shifts position when one exists.
+ * They belong here at all because the skins library is keyed by brush id, an
+ * arbitrary string, so a custom entity's sprite is simply "the active skin for
+ * its own id" — see customEntity.ts on why art is not a field on a definition. */
+function skinTargets(customDefs: readonly CustomEntityDef[] = []): Brush[] {
+  return [CHARACTER_BRUSH, ...PALETTE.filter(isSkinnable), ...customBrushes(customDefs)];
 }
 
 /**
@@ -189,15 +200,54 @@ export class SkinEditorScene extends Phaser.Scene {
   // once within a single rendered frame under frame stalls — see
   // EditorScene's onceThisFrame for the same guard and why.
   private readonly lastActionFrame = new Map<string, number>();
+  /** Things invented in the Thing Maker, so they can be painted here too.
+   * Loaded asynchronously and empty until it lands — the same "opens usable,
+   * pops in a moment later" tolerance every other library read here has. */
+  private customDefs: CustomEntityDef[] = [];
+  /** Which page of the pick-brush grid is showing. */
+  private pickPage = 0;
+  /** Set by the Thing Maker so "Save & draw sprite" lands on the canvas for the
+   * thing just made, instead of in a 40-tile grid to hunt for it. */
+  private openTargetBrushId?: string;
+  /** Where "← Back" goes from the browse list. The Menu unless another screen
+   * sent us here and wants us back. */
+  private returnTo = "Menu";
 
   constructor() {
     super("SkinEditor");
   }
 
+  init(data?: { targetBrushId?: string; returnTo?: string }): void {
+    // Read here rather than in create() because Phaser calls init() with the
+    // scene-start payload and create() with nothing.
+    this.openTargetBrushId = data?.targetBrushId;
+    this.returnTo = data?.returnTo ?? "Menu";
+  }
+
   create(): void {
     this.mode = "browse";
     this.target = undefined;
+    this.pickPage = 0;
     this.rebuild();
+
+    // Custom targets arrive asynchronously. If we were asked to open one
+    // directly, that can only happen once they land — hence the resolve doing
+    // the opening rather than create().
+    void loadCustomEntities()
+      .catch(() => [] as CustomEntityDef[])
+      .then((defs) => {
+        if (!this.scene.isActive()) return;
+        this.customDefs = defs;
+        const requested = this.openTargetBrushId;
+        this.openTargetBrushId = undefined;
+        if (requested) {
+          const brush = skinTargets(defs).find((b) => b.id === requested);
+          // A definition deleted between screens leaves nothing to paint; the
+          // browse list is the honest place to land rather than a blank canvas.
+          if (brush) return void this.openCanvasFor(brush);
+        }
+        if (this.mode === "browse" || this.mode === "pick-brush") this.rebuild();
+      });
 
     // Registered once here, not inside buildCanvas() — rebuild() reruns
     // buildCanvas() on every palette switch and browse<->canvas round
@@ -354,7 +404,7 @@ export class SkinEditorScene extends Phaser.Scene {
   // --- mode: browse ------------------------------------------------------
 
   private buildBrowse(): void {
-    this.addBackButton(() => this.scene.start("Menu"));
+    this.addBackButton(() => this.scene.start(this.returnTo));
     this.add.text(GAME_WIDTH / 2, 24, "Skin Creator", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
     this.add
       .text(GAME_WIDTH / 2, 50, "Pixel-art skins for Markers/Enemies/Items/Decor.", {
@@ -396,7 +446,7 @@ export class SkinEditorScene extends Phaser.Scene {
       // skinTargets(), not PALETTE, so a character skin's row resolves to a
       // real target and its Edit button works — the character deliberately
       // isn't a Palette brush (see CHARACTER_BRUSH).
-      const brushesById = new Map(skinTargets().map((b) => [b.id, b]));
+      const brushesById = new Map(skinTargets(this.customDefs).map((b) => [b.id, b]));
       // Thumbnails resolved once per distinct brush (each just replays
       // loadCustomSkins' own in-memory result, not a fresh Drive read)
       // rather than once per skin, mirroring resolveSkinThumbnails' own
@@ -569,7 +619,7 @@ export class SkinEditorScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, 24, "Choose something to paint a skin for", { fontSize: "18px", color: "#ffffff" })
       .setOrigin(0.5, 0);
 
-    const skinnable = skinTargets();
+    const skinnable = skinTargets(this.customDefs);
     // 8 columns of 125 rather than 6 of 150. Adding the ten block brushes took
     // the grid from 28 targets to 38, which at 6 columns is 7 rows — and row 6
     // starts at y=474 on a 468-tall canvas, i.e. the last six targets would
@@ -578,11 +628,21 @@ export class SkinEditorScene extends Phaser.Scene {
     const columns = 8;
     const cellW = 125;
     const cellH = 64;
+    // Five rows is all that fits: a sixth row's labels end at y=470 on a
+    // 468-tall canvas. That capped the grid at 40 targets while 38 already
+    // existed, so the very first invented thing would have been drawn off the
+    // bottom — hence paging, once there is more than a page to show. Unlike the
+    // editor's 190px palette panel, this screen is full width, so the shared
+    // pager row fits as-is.
+    const rows = 5;
+    const perPage = columns * rows;
+    this.pickPage = clampPage(this.pickPage, skinnable.length, perPage);
+    const shown = pageSlice(skinnable, this.pickPage, perPage);
     const gridWidth = columns * cellW;
     const x0 = (GAME_WIDTH - gridWidth) / 2;
     const y0 = ROW_START_Y;
 
-    skinnable.forEach((brush, i) => {
+    shown.forEach((brush, i) => {
       const col = i % columns;
       const row = Math.floor(i / columns);
       const cx = x0 + col * cellW + cellW / 2;
@@ -597,27 +657,54 @@ export class SkinEditorScene extends Phaser.Scene {
       if (brush.id === "basket-up") icon.setTint(UP_BASKET_TINT_COLOR);
       const label = this.add.text(cx, cy + 46, brush.label, { fontSize: "11px", color: "#c8c8e0" }).setOrigin(0.5, 0);
 
-      const onClick = () => {
-        const plan = framePlanFor(brush.id);
-        // Async only to read the brush's existing names, so the default is
-        // "Ghost 2" rather than a second "Ghost 1". The canvas opens either
-        // way — existingNamesFor swallows a failed read.
-        void this.nextDefaultName(brush).then((name) => {
-          if (this.mode !== "pick-brush") return; // navigated away meanwhile
-          this.target = {
-            brush,
-            existingId: undefined,
-            name,
-            paletteId: DEFAULT_PIXEL_PALETTE_ID,
-            frameCells: {},
-            activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
-          };
-          this.goTo("canvas");
-        });
-      };
+      const onClick = () => void this.openCanvasFor(brush);
       icon.on("pointerdown", onClick);
       label.setInteractive({ useHandCursor: true }).on("pointerdown", onClick);
     });
+
+    // Built through scene.add.*, so these are already on the display list;
+    // nothing to reparent here, unlike the browsers that keep their rows in a
+    // container. Returns nothing at all while everything fits on one page.
+    makePagerControls({
+      scene: this,
+      x: x0,
+      // Below the last row's labels, which end at y0 + rows*cellH - 18. At -6
+      // the pager's top edge touched them; the canvas floor is 468 and this row
+      // is ~32 tall, so 422 clears both.
+      y: y0 + rows * cellH + 12,
+      page: this.pickPage,
+      total: skinnable.length,
+      perPage,
+      onChange: (page) => {
+        this.pickPage = page;
+        this.rebuild();
+      },
+    });
+  }
+
+  /**
+   * Starts a *new* skin for `brush` and opens the canvas on it.
+   *
+   * Shared by the pick grid and by the Thing Maker's "Save & draw sprite"
+   * handoff, so arriving from either lands in exactly the same state — there is
+   * no second way to open a fresh canvas that could drift from this one.
+   */
+  private async openCanvasFor(brush: Brush): Promise<void> {
+    const plan = framePlanFor(brush.id);
+    // Async only to read the brush's existing names, so the default is
+    // "Ghost 2" rather than a second "Ghost 1". The canvas opens either
+    // way — existingNamesFor swallows a failed read.
+    const name = await this.nextDefaultName(brush);
+    if (!this.scene.isActive()) return;
+    this.target = {
+      brush,
+      existingId: undefined,
+      name,
+      paletteId: DEFAULT_PIXEL_PALETTE_ID,
+      frameCells: {},
+      activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
+    };
+    this.goTo("canvas");
   }
 
   // --- mode: canvas --------------------------------------------------------
@@ -1154,7 +1241,7 @@ export class SkinEditorScene extends Phaser.Scene {
         // The skin's own name, not "Ghost skin" for every one of them — a
         // trace list of three identical labels is no more use than a browse
         // list of three identical rows was.
-        const brushLabel = skinTargets().find((brush) => brush.id === brushId)?.label ?? brushId;
+        const brushLabel = skinTargets(this.customDefs).find((brush) => brush.id === brushId)?.label ?? brushId;
         sources.push({
           id: skinReferenceId(brushId, asset.id),
           label: displaySkinName(asset, brushLabel),

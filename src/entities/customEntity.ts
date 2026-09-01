@@ -101,6 +101,47 @@ export function clonableTypes(category: CustomEntityCategory): readonly EntityTy
 }
 
 /**
+ * The blank definition a fresh Thing Maker form starts from.
+ *
+ * Exists here rather than in the scene so the one rule the form adds — that a
+ * category implies which built-ins it may copy — is stated next to
+ * `clonableTypes`, which is what enforces it. The scene calls this again on
+ * every category switch, because carrying the old `basedOn` across would leave
+ * exactly the cross-family definition `validationError` refuses (an "enemy"
+ * based on a coin).
+ *
+ * `id` is passed in rather than generated so the caller owns identity — the
+ * form makes one id when a thing is first created and keeps it through every
+ * later edit, so re-saving never orphans the skin drawn against it.
+ */
+export function newCustomEntityDef(id: CustomEntityId, category: CustomEntityCategory, name = ""): CustomEntityDef {
+  const now = new Date().toISOString();
+  return {
+    id,
+    name,
+    category,
+    // The first of its family, which is always a valid choice and never a
+    // cross-family one. Which built-in that is doesn't matter: the point is
+    // that a form can never open, or switch, into an invalid state.
+    basedOn: clonableTypes(category)[0],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * The same definition moved to another category, keeping what still applies.
+ *
+ * The name survives (you named the thing, not the category); `basedOn` cannot,
+ * and `params` is dropped because `speedScale` means nothing outside enemies
+ * and a stale one would be written straight back to storage.
+ */
+export function withCategory(def: CustomEntityDef, category: CustomEntityCategory): CustomEntityDef {
+  if (def.category === category) return def;
+  return { ...newCustomEntityDef(def.id, category, def.name), createdAt: def.createdAt };
+}
+
+/**
  * Why a definition is unusable, or `null` when it is fine.
  *
  * A reason string rather than a thrown error: these are shown to whoever is
