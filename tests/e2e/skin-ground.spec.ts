@@ -208,6 +208,12 @@ async function chooseBlockSkin(page: Page, brushLabel: string, skinName: string)
 }
 
 test("the Skin Creator offers every block, and its grid still fits on screen", async ({ page }) => {
+  // The only test in this file that lacked it, and the one that timed out at 30s
+  // in a full run while taking 5s alone. Not a defect being papered over: this
+  // sandbox renders on software WebGL, the suite has grown from 88 tests to 159,
+  // and its five siblings here already make the same allowance for the same
+  // work — boot, open the Skin Creator, read the grid.
+  test.slow();
   await gotoApp(page);
   await clickByText(page, "Menu", "Skin Creator");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
