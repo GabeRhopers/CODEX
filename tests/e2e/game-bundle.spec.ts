@@ -86,11 +86,21 @@ async function seedLevel(page: Page, id: string, assets: SeededAssets, customTyp
   );
 }
 
-/** Clicks Download and reads back the file the browser actually saved. */
+/**
+ * Goes to the publishing screen and reads back the file the browser saved.
+ *
+ * Two clicks rather than one since publishing got a screen of its own: the Game
+ * Maker saves and hands the game over, and the export happens there. Routed
+ * through the real buttons rather than by starting the scene directly, because
+ * the hand-over — a saved game arriving as scene data — is part of what this
+ * checks.
+ */
 async function downloadBundle(page: Page): Promise<{ bundle: GameBundle; fileName: string }> {
+  await clickByText(page, "GameMaker", "Publish\u2026");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Publish"));
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    clickByText(page, "GameMaker", "Download game file"),
+    clickByText(page, "Publish", "Download"),
   ]);
   const path = await download.path();
   return { bundle: JSON.parse(readFileSync(path, "utf8")) as GameBundle, fileName: download.suggestedFilename() };
@@ -98,7 +108,7 @@ async function downloadBundle(page: Page): Promise<{ bundle: GameBundle; fileNam
 
 function statusLine(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("GameMaker") as unknown as { status: string };
+    const scene = window.__debugGame!.scene.getScene("Publish") as unknown as { status: string };
     return scene.status;
   });
 }
@@ -123,7 +133,7 @@ test("the file holds everything the game reaches, and nothing it does not", asyn
   await buildGame(page, "Grampa's Quest");
   const { bundle, fileName } = await downloadBundle(page);
 
-  expect(fileName).toBe("grampa-s-quest.rhopers-game.json");
+  expect(fileName).toBe("grampa-s-quest.json");
   expect(bundle.format).toBe(1);
   expect(bundle.game.title).toBe("Grampa's Quest");
   expect(bundle.worlds.map((w) => w.id)).toEqual(["w1"]);

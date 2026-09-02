@@ -2647,6 +2647,60 @@ same three rules the editor's are, rather than getting a free pass for being new
 **Still to come:** publishing itself — writing a bundle into the built site and
 deploying it. Nothing here deploys anything.
 
+## Publishing a game
+
+Three steps, none of them a command line. The **Publish…** button in the Game
+Maker walks through them and prints the exact file name and link for your game:
+
+1. **Download the game file.** It is named `<slug>.json` — `grampa-s-quest.json`
+   for a game called *Grampa's Quest*.
+2. **Upload it to `public/games/`** in this repository, on github.com, with
+   *Add file → Upload files*. Keep the name exactly as it downloaded.
+3. **Send the link:** `https://<the site>/?game=<slug>`. The site rebuilds
+   itself after the upload; a few minutes later that link is live.
+
+Whoever opens it plays the game — no sign-in, no editor, nothing to install.
+
+**Why a query parameter rather than a deployment per game.** The site is built
+by CI onto one GitHub Pages deployment, and a deployment is something only CI
+can make; a file in a folder is something a person can upload from a phone. So
+one deployed site hosts any number of games, each with its own link. Vite copies
+`public/` into `dist/` verbatim, which is why this needs no build script and no
+second CI job — the file simply ships with the next deploy.
+
+**Publishing (2026-09-02).** The third of the three shipping parts, and the one
+that makes a link real. `?game=<slug>` names a file under `games/`;
+`publishedBundle.ts` owns both halves of that convention — the link the Publish
+screen prints and the parse the boot performs — so they cannot drift apart. The
+same module still answers a bare `game.json` beside index.html, which is a whole
+site that is one game.
+
+**The slug is the file name is the link.** `bundleFileName` dropped its
+decorative `.rhopers-game` infix for plain `<slug>.json`: the name reads slightly
+worse in a Downloads folder and is load-bearing everywhere else, because the file
+you download is the file you upload and nothing is renamed by hand between the
+two. `gameSlug` emits exactly the alphabet `requestedGameSlug` accepts, and a
+unit test walks awkward titles through both to keep that true.
+
+**`?game=` is matched, not trimmed.** The slug is interpolated into a fetched
+path and `new URL("games/../../x", base)` resolves happily, so the pattern
+`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` is a guard: no dots and no slashes means no
+path left to traverse. An e2e test watches every request the page makes and
+asserts a crafted link never reaches for the path it names.
+
+**Three boot outcomes, not two.** `fetchPublishedBundle` reports `editor`,
+`game`, or `missing`. The third is the point: someone following a stale link gets
+told the game is not there, rather than being dropped into the editor's sign-in —
+which explains nothing and asks for something they have no reason to give. A
+plain `bundle | null` return made the wrong behaviour the natural one.
+
+Publishing got a screen of its own (`PublishScene`) rather than a fourth button
+on the Game Maker: two of its three steps are things to *read*, and that screen's
+single status line has room for neither the folder nor the URL. The export moved
+there with it. The first spacing tried put step 2's path chip through step 3's
+heading — caught by reading the screenshot back, which no assertion would have
+done.
+
 **Exporting a game to one file (2026-09-02).** The editor could build a whole
 game, but nobody else could play it — and the reason is not deployment. Every
 level, world, skin, invented thing, uploaded background and track lives in *the
@@ -4499,7 +4553,8 @@ src/
 │   ├── WorldMakerScene.ts    build/edit a World's level order
 │   ├── GameMakerScene.ts     title + worlds in order + an ending, and Play Game — see "A game" under Art
 │   ├── EndingScene.ts        the screen after the last world: the author's own words over the trophy
-│   └── ThingMakerScene.ts    invent an item/enemy/decoration: name it, say what it acts like, hand off to the Skin Creator to draw it — see "The Thing Maker" under Art
+│   ├── ThingMakerScene.ts    invent an item/enemy/decoration: name it, say what it acts like, hand off to the Skin Creator to draw it — see "The Thing Maker" under Art
+│   └── PublishScene.ts       download the file, put it in public/games/, send the link — see "Publishing a game"
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
@@ -4567,13 +4622,10 @@ src/
 ├── game/
 │   ├── GameSchema.ts           GameData (title, ordered worldIds, ending) + its rules: createEmptyGame/validationError/moveWorld/isGameComplete (pure, + unit tests)
 │   ├── gameStorage.ts          the one game per profile, mirroring the world adapter's file-per-record appProperties pattern
-│   ├── gameBundle.ts           a whole game in one file: the reference walk, bundleProblems, the size summary (pure, + unit tests) — see "Exporting a game to one file" under Art
+│   ├── gameBundle.ts           a whole game in one file: the reference walk, bundleProblems, the size summary, and the slug the file and link share (pure, + unit tests)
 │   ├── collectBundle.ts        the Drive reads that fill a bundle, kept apart from the rules above
 │   ├── contentSource.ts        whether this page reads from Drive or from a bundle — the one switch a published game flips
-│   └── publishedBundle.ts      fetches game.json beside the page, and checks it really is a bundle before believing it
-├── game/
-│   ├── GameSchema.ts           GameData: a title, worlds in order, an ending — plus validation, reordering and isGameComplete (pure, no Phaser) (+ unit tests)
-│   └── gameStorage.ts          load/save the one game per profile, same appProperties pattern as the world adapter
+│   └── publishedBundle.ts      both halves of the ?game= convention: the link the Publish screen prints, and the boot's editor/game/missing verdict (+ unit tests)
 ├── world/
 │   └── WorldSchema.ts        WorldData: an ordered list of level ids + a name
 ├── config/

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { generateTextures } from "../assets/generateTextures";
 import { applyAudioPrefs } from "../audio/audioPrefs";
+import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { WIZARD_FRAME_KEYS } from "../gameplay/wizardAnimation";
 import { groundIconKey, groundTilesetKey } from "../level/groundSkins";
 import { STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
@@ -107,23 +108,55 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * Editor, or published game?
+   * Editor, published game, or a link to a game that is not there?
    *
-   * The whole difference is whether a readable `game.json` sits beside this
-   * page. If it does, this is somebody's game: the bundle becomes the content
-   * source and the title screen opens, with no profile picker and no sign-in,
-   * because a visitor has neither and needs neither. If it does not — which is
-   * every dev server, every test that does not stub it, and the editor's own
-   * deployment — the ordinary ProfileGate chain runs exactly as before.
+   * A page carrying a readable bundle — named by `?game=`, or sitting beside
+   * index.html as `game.json` — is somebody's game: the bundle becomes the
+   * content source and the title screen opens, with no profile picker and no
+   * sign-in, because a visitor has neither and needs neither. A page carrying
+   * none — every dev server, every test that does not stub one, and the editor's
+   * own deployment — runs the ordinary ProfileGate chain exactly as before.
+   *
+   * The third case is why `fetchPublishedBundle` reports three outcomes rather
+   * than two. Someone who followed a link to a game gets *told* the game is not
+   * there. Falling through to the editor would answer a stranger's broken link
+   * with a sign-in screen, which explains nothing and asks for something they
+   * have no reason to give.
    */
   private async chooseBoot(): Promise<void> {
-    const bundle = await fetchPublishedBundle();
+    const content = await fetchPublishedBundle();
     if (!this.scene.isActive()) return;
-    if (bundle) {
-      playFromBundle(bundle);
+    if (content.kind === "game") {
+      playFromBundle(content.bundle);
       this.scene.start("GameTitle");
       return;
     }
+    if (content.kind === "missing") {
+      this.showMissingGame(content.slug);
+      return;
+    }
     this.scene.start("ProfileGate");
+  }
+
+  /**
+   * Drawn here rather than in a scene of its own: this is a dead end with no
+   * controls — there is nowhere for a visitor to go, since the editor behind it
+   * is not theirs — so a scene would exist only to hold two lines of text.
+   */
+  private showMissingGame(slug: string): void {
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20, "That game could not be found.", {
+        fontSize: "22px",
+        color: "#ffd8d8",
+      })
+      .setOrigin(0.5);
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 16, `Nothing is published here as "${slug}".\nCheck the link you were sent.`, {
+        fontSize: "13px",
+        color: "#9aa4b2",
+        align: "center",
+        lineSpacing: 4,
+      })
+      .setOrigin(0.5);
   }
 }

@@ -7,10 +7,13 @@ import {
   bundleSizeBytes,
   bundleSummary,
   GameBundle,
+  gameSlug,
+  publishedGamePath,
   referencedBackgroundIds,
   referencedCustomEntityIds,
   referencedMusicIds,
 } from "./gameBundle";
+import { requestedGameSlug } from "./publishedBundle";
 
 /**
  * What a game has to carry with it to be playable by someone who is not you.
@@ -173,14 +176,58 @@ describe("size and summary", () => {
 
 describe("bundleFileName", () => {
   it("turns a title into something safe to save", () => {
-    expect(bundleFileName("Grampa's Quest")).toBe("grampa-s-quest.rhopers-game.json");
-    expect(bundleFileName("  Ice   Cave!  ")).toBe("ice-cave.rhopers-game.json");
+    expect(bundleFileName("Grampa's Quest")).toBe("grampa-s-quest.json");
+    expect(bundleFileName("  Ice   Cave!  ")).toBe("ice-cave.json");
   });
 
   it("still gives a name when the title is unusable", () => {
     // Validation refuses an untitled game, but a title of only punctuation
-    // passes it and would otherwise leave a file called ".rhopers-game.json".
-    expect(bundleFileName("!!!")).toBe("game.rhopers-game.json");
-    expect(bundleFileName("")).toBe("game.rhopers-game.json");
+    // passes it and would otherwise leave a file called ".json".
+    expect(bundleFileName("!!!")).toBe("game.json");
+    expect(bundleFileName("")).toBe("game.json");
+  });
+});
+
+describe("gameSlug", () => {
+  /**
+   * The load-bearing property of the whole publishing step: a title must never
+   * produce a slug the player would refuse. `requestedGameSlug` matches this
+   * exact pattern, and if the two alphabets ever part company an author would
+   * get a file, a folder path, and a link that quietly does not work.
+   */
+  it("only ever emits something the player will accept back", () => {
+    const accepted = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+    for (const title of [
+      "Grampa's Quest",
+      "  Ice   Cave!  ",
+      "!!!",
+      "",
+      "---",
+      "-leading and trailing-",
+      "ÜBER 9000",
+      "a",
+      "The End...",
+    ]) {
+      const slug = gameSlug(title);
+      expect(accepted.test(slug), `${JSON.stringify(title)} produced ${JSON.stringify(slug)}`).toBe(true);
+      expect(requestedGameSlug(`?game=${slug}`)).toBe(slug);
+    }
+  });
+});
+
+describe("publishedGamePath", () => {
+  it("is the folder the player fetches from", () => {
+    expect(publishedGamePath("grampa-s-quest")).toBe("games/grampa-s-quest.json");
+  });
+
+  /**
+   * The three strings a publish is made of — what you download, where you put
+   * it, what you link to — are one string, checked here rather than trusted:
+   * a rename on either side that broke the match would leave every step of the
+   * printed instructions individually plausible and the result dead.
+   */
+  it("names the very file bundleFileName writes", () => {
+    const title = "Grampa's Quest";
+    expect(publishedGamePath(gameSlug(title)).endsWith(`/${bundleFileName(title)}`)).toBe(true);
   });
 });

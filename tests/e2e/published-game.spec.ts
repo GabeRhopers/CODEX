@@ -65,9 +65,11 @@ async function exportRealBundle(page: Page): Promise<GameBundle> {
   await page.getByPlaceholder("Thanks for playing!").fill("Love, Grampa.");
   await page.getByPlaceholder("Thanks for playing!").press("Enter");
 
+  await clickByText(page, "GameMaker", "Publish\u2026");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Publish"));
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    clickByText(page, "GameMaker", "Download game file"),
+    clickByText(page, "Publish", "Download"),
   ]);
   return JSON.parse(readFileSync(await download.path(), "utf8")) as GameBundle;
 }
@@ -87,6 +89,27 @@ async function openPublished(browser: Browser, bundle: GameBundle): Promise<Page
   await page.goto("/");
   await waitForGame(page);
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameTitle"), undefined, { timeout: 20_000 });
+  return page;
+}
+
+/**
+ * Opens a game the way publishing actually delivers one: `?game=<slug>`, served
+ * from the `games/` folder the deployment carries, in a context of its own.
+ *
+ * The root-`game.json` case above is a whole site that is one game; this is the
+ * shared site hosting many, and it is the path a real link takes. Both are
+ * served here so neither can quietly stop working.
+ */
+async function openPublishedBySlug(browser: Browser, slug: string, bundle: GameBundle | null): Promise<Page> {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.route(`**/games/${slug}.json`, (route) =>
+    bundle
+      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(bundle) })
+      : route.fulfill({ status: 404, contentType: "text/plain", body: "not found" }),
+  );
+  await page.goto(`/?game=${slug}`);
+  await waitForGame(page);
   return page;
 }
 
@@ -237,4 +260,88 @@ test("without a game.json the same page is still the editor", async ({ page }) =
   await expect
     .poll(() => page.evaluate(() => window.__debugGame!.scene.isActive("GameTitle")))
     .toBe(false);
+});
+
+test("a link with ?game= plays the game that slug names", async ({ browser }) => {
+  test.slow();
+  // The published link's own path, end to end: the slug names a file under
+  // games/, the boot fetches exactly that, and a visitor with no Drive and no
+  // profile reaches the title.
+  const page = await openPublishedBySlug(browser, "grampa-s-quest", await realBundle(browser));
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameTitle"), undefined, { timeout: 20_000 });
+  expect(await labels(page, "GameTitle")).toContain("Grampa's Quest");
+
+  await clickByText(page, "GameTitle", "Play \u25b6");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMap"));
+  await expect.poll(() => labels(page, "WorldMap")).toContain("World One");
+});
+
+test("a link to a game that is not there says so, rather than showing the editor", async ({ browser }) => {
+  test.slow();
+  // The failure a stranger actually hits — a stale or mistyped link. Answering
+  // it with the editor's sign-in explains nothing and asks for something they
+  // have no reason to give, so the boot has to distinguish "no game was asked
+  // for" from "the game asked for is missing".
+  const page = await openPublishedBySlug(browser, "no-such-game", null);
+  await expect.poll(() => labels(page, "Boot")).toContain("That game could not be found.");
+  expect((await labels(page, "Boot")).join(" ")).toContain("no-such-game");
+  // The load-bearing negative: not the editor, and not a game either.
+  for (const key of ["ProfileGate", "Menu", "GameTitle"]) {
+    expect(await page.evaluate((k) => window.__debugGame!.scene.isActive(k), key)).toBe(false);
+  }
+});
+
+test("a ?game= value that could point elsewhere is refused outright", async ({ browser }) => {
+  test.slow();
+  // `new URL("games/../../x", base)` resolves happily, so the slug pattern is
+  // the only thing stopping a crafted link from making the page fetch somewhere
+  // else. Refused before any request: the route below must never be hit.
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  // Every request the page makes, watched rather than intercepted: the boot's
+  // own game.json fetch is legitimate and must still happen, so what is checked
+  // is that nothing reaching for the crafted path is ever asked for.
+  const requested: string[] = [];
+  page.on("request", (request) => requested.push(request.url()));
+  await page.goto("/?game=..%2F..%2Fsecret");
+  await waitForGame(page);
+  // A refused slug means no game was asked for, so this is an ordinary editor
+  // visit — and nothing climbed out of the games folder to get there.
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ProfileGate"), undefined, { timeout: 20_000 });
+  expect(requested.filter((url) => url.includes("secret"))).toEqual([]);
+  await context.close();
+});
+
+test("the Publish screen is laid out soundly", async ({ browser }) => {
+  test.slow();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await gotoApp(page);
+  const levels = await seedLevels(page, ["Green Hill"]);
+  await seedWorlds(page, [makeWorld("w1", "World One", [levels[0]])]);
+  await clickByText(page, "Menu", "Game Maker");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameMaker"));
+  await page.getByPlaceholder("Grampa's Quest").fill("Grampa's Quest");
+  await page.getByPlaceholder("Grampa's Quest").press("Enter");
+  await clickByText(page, "GameMaker", "Add");
+  await clickByText(page, "GameMaker", "Publish\u2026");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Publish"));
+
+  const shown = await labels(page, "Publish");
+  // The three steps are one string each — the file, where it goes, and the
+  // link — and they have to agree, or every step reads plausibly and the
+  // result is dead.
+  expect(shown.join("\n")).toContain("public/games/grampa-s-quest.json");
+  expect(shown.some((t) => t.endsWith("/?game=grampa-s-quest"))).toBe(true);
+  await assertLayoutSound(page, "Publish");
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    clickByText(page, "Publish", "Download"),
+  ]);
+  expect(download.suggestedFilename()).toBe("grampa-s-quest.json");
+  // The report of what was written must not run into the step below it.
+  await expect.poll(() => labels(page, "Publish").then((l) => l.join(" "))).toContain("Saved 1 world");
+  await assertLayoutSound(page, "Publish");
+  await context.close();
 });

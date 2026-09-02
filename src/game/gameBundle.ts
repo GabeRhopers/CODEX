@@ -157,12 +157,43 @@ export function bundleSummary(bundle: GameBundle): string {
   return `${plural(worlds, "world")}, ${plural(levels, "level")}, ${formatBytes(bundleSizeBytes(bundle))}`;
 }
 
-/** A filename that says what it is and which game it came from. */
-export function bundleFileName(title: string): string {
+/**
+ * The short name a game is published under.
+ *
+ * It is the file's name, and it is the `?game=` value in the finished link, and
+ * those being *the same string* is the whole point: the file you download is the
+ * file you upload, and nothing has to be renamed by hand between the two.
+ *
+ * Lowercase, digits and dashes only — which is also what `requestedGameSlug`
+ * will accept back, so a title can never produce a slug the player refuses.
+ */
+export function gameSlug(title: string): string {
   const slug = title
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  return `${slug || "game"}.rhopers-game.json`;
+  return slug || "game";
 }
+
+/**
+ * What the downloaded file is called.
+ *
+ * Plainly `<slug>.json`, with no decorative middle: it used to be
+ * `<slug>.rhopers-game.json`, which read nicely in a Downloads folder and was
+ * wrong the moment publishing existed — the name has to *be* the slug, because
+ * the link is derived from it (see `publishedGamePath`).
+ */
+export function bundleFileName(title: string): string {
+  return `${gameSlug(title)}.json`;
+}
+
+/** Where a published game's file lives, relative to the site — the path this
+ * bundle must be uploaded to, and the path the player fetches. */
+export function publishedGamePath(slug: string): string {
+  return `${PUBLISHED_GAMES_DIR}/${slug}.json`;
+}
+
+/** The one folder published games live in, named once so the instructions the
+ * Game Maker prints and the path the player fetches cannot drift apart. */
+export const PUBLISHED_GAMES_DIR = "games";

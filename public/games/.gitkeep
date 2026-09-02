@@ -1,0 +1,7 @@
+Published games live here, one JSON file each.
+
+Upload a game file the Publish screen produced — keep its name exactly as it
+downloaded — and the site's next build carries it. A file called
+sheep-quest.json is then playable at ?game=sheep-quest.
+
+This placeholder only keeps the empty folder in git; nothing reads it.

@@ -11,9 +11,6 @@ import {
   validationError,
 } from "../game/GameSchema";
 import { loadGame, saveGame } from "../game/gameStorage";
-import { collectGameBundle } from "../game/collectBundle";
-import { bundleFileName, bundleProblems, bundleSummary } from "../game/gameBundle";
-import { downloadTextFile } from "../ui/downloadFile";
 import { getWorldStorage } from "../persistence/storage";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { WorldSummary } from "../world/WorldSchema";
@@ -70,22 +67,6 @@ const ENDING_WIDTH = GAME_WIDTH - ENDING_X - 24;
  * helper the World Maker uses. */
 const AVAILABLE_NAME_CHARS = 30;
 const ORDER_NAME_CHARS = 22;
-
-/**
- * The problems tacked onto an export's status line.
- *
- * Trimmed to the first two, because the line has room for two rendered lines
- * before it reaches the buttons, and a report that overflows the canvas tells
- * you less than one that does not. The count is still honest about how many
- * there are, and the file itself is downloaded either way — which is the point
- * of not blocking on problems at all.
- */
-function describeProblems(problems: string[]): string {
-  if (problems.length === 0) return "";
-  const shown = problems.slice(0, 2).join(" ");
-  const rest = problems.length - 2;
-  return rest > 0 ? ` — ${shown} (+${rest} more)` : ` — ${shown}`;
-}
 
 export class GameMakerScene extends Phaser.Scene {
   private get worldStorage(): WorldStorageAdapter {
@@ -395,7 +376,7 @@ export class GameMakerScene extends Phaser.Scene {
     }
     this.makeButton(24, ACTIONS_Y, "Save", () => void this.save());
     this.makeButton(90, ACTIONS_Y, "Play Game ▶", () => void this.play());
-    this.makeButton(206, ACTIONS_Y, "Download game file", () => void this.exportBundle());
+    this.makeButton(206, ACTIONS_Y, "Publish…", () => void this.publish());
   }
 
   /** The reason is `validationError`'s, verbatim — this screen never composes
@@ -424,33 +405,20 @@ export class GameMakerScene extends Phaser.Scene {
   }
 
   /**
-   * Writes the whole game — worlds, levels, art, music, invented things — into
-   * one file you keep.
+   * Hands the finished arrangement to the publishing screen.
    *
-   * Saves first, for the same reason Play does: exporting the arrangement you
-   * are looking at is the only version worth having. Problems are *reported*
-   * rather than blocking, because a missing background falls back and a missing
-   * track plays silence — while refusing to write the file would leave you
-   * unable to inspect the very thing you need to see in order to fix it.
+   * Saves first, for the same reason Play does: what you publish should be the
+   * arrangement you are looking at. `validationError` gates it — a game with no
+   * title or no worlds has nothing worth a link — and the refusal appears in the
+   * status line here rather than on a screen you would have to come back from.
+   *
+   * The export itself lives in PublishScene, not here: writing the file is one
+   * of three steps, and the other two — where to put it, and what the link ends
+   * up being — need room this screen's single status line does not have.
    */
-  private async exportBundle(): Promise<void> {
+  private async publish(): Promise<void> {
     if (!(await this.save())) return;
-    let bundle;
-    try {
-      bundle = await collectGameBundle(this.gameDoc);
-    } catch {
-      this.status = "Could not read everything this game needs — check your connection.";
-      this.statusTone = "bad";
-      this.rebuild();
-      return;
-    }
-    downloadTextFile(bundleFileName(this.gameDoc.title), JSON.stringify(bundle));
-    const problems = bundleProblems(bundle);
-    this.status = `Saved ${bundleSummary(bundle)}${describeProblems(problems)}`;
-    // Amber, not green: the file was written, but a game missing a level is not
-    // something to report as simply fine.
-    this.statusTone = problems.length ? "warn" : "good";
-    this.rebuild();
+    this.scene.start("Publish", { game: this.gameDoc });
   }
 
   /**
