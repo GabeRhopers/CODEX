@@ -11,6 +11,9 @@ import {
   validationError,
 } from "../game/GameSchema";
 import { loadGame, saveGame } from "../game/gameStorage";
+import { collectGameBundle } from "../game/collectBundle";
+import { bundleFileName, bundleProblems, bundleSummary } from "../game/gameBundle";
+import { downloadTextFile } from "../ui/downloadFile";
 import { getWorldStorage } from "../persistence/storage";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { WorldSummary } from "../world/WorldSchema";
@@ -38,6 +41,7 @@ import { ellipsize } from "../ui/labels";
  * Phaser. This screen picks values and shows reasons.
  */
 
+const STATUS_COLORS = { good: "#8fd694", warn: "#ffc93c", bad: "#ff9d9d" } as const;
 const BUTTON_HEX = "#0f3460";
 const BUTTON_HOVER_HEX = "#3a5a9c";
 const MUTED = "#a6a6c8";
@@ -51,7 +55,7 @@ const ROW_HEIGHT = 40;
 // than the one-pixel clearance that reads as broken but passes an overlap test.
 const LIST_BOTTOM = GAME_HEIGHT - 116;
 const PAGER_Y = GAME_HEIGHT - 108;
-const STATUS_Y = GAME_HEIGHT - 56;
+const STATUS_TOP_Y = GAME_HEIGHT - 78;
 const ACTIONS_Y = GAME_HEIGHT - 24;
 
 const AVAILABLE_X = 24;
@@ -67,6 +71,22 @@ const ENDING_WIDTH = GAME_WIDTH - ENDING_X - 24;
 const AVAILABLE_NAME_CHARS = 30;
 const ORDER_NAME_CHARS = 22;
 
+/**
+ * The problems tacked onto an export's status line.
+ *
+ * Trimmed to the first two, because the line has room for two rendered lines
+ * before it reaches the buttons, and a report that overflows the canvas tells
+ * you less than one that does not. The count is still honest about how many
+ * there are, and the file itself is downloaded either way — which is the point
+ * of not blocking on problems at all.
+ */
+function describeProblems(problems: string[]): string {
+  if (problems.length === 0) return "";
+  const shown = problems.slice(0, 2).join(" ");
+  const rest = problems.length - 2;
+  return rest > 0 ? ` — ${shown} (+${rest} more)` : ` — ${shown}`;
+}
+
 export class GameMakerScene extends Phaser.Scene {
   private worldStorage: WorldStorageAdapter = getWorldStorage();
   private gameDoc: GameData = createEmptyGame("");
@@ -74,6 +94,10 @@ export class GameMakerScene extends Phaser.Scene {
   private worldNames = new Map<string, string>();
   private page = 0;
   private status = "";
+  /** How the status line should read, rather than inferring it from the words.
+   * An export that succeeded but is missing levels is not good news, and
+   * colouring it by whether the text starts with "Saved" said it was. */
+  private statusTone: "good" | "warn" | "bad" = "good";
   private loaded = false;
   private inputs: LevelNameInput[] = [];
   private removeButtons: ConfirmButton[] = [];
@@ -354,12 +378,22 @@ export class GameMakerScene extends Phaser.Scene {
 
   private drawActions(): void {
     if (this.status) {
+      // Wrapped, and anchored from its top rather than its middle: a report of
+      // what is missing runs to two lines easily, and an unwrapped one simply
+      // leaves the canvas. Two lines is what fits between the panels and the
+      // buttons, which is why exportBundle trims the list rather than trusting
+      // this to cope.
       this.add
-        .text(24, STATUS_Y, this.status, { fontSize: "12px", color: this.status.startsWith("Saved") ? "#8fd694" : "#ff9d9d" })
-        .setOrigin(0, 0.5);
+        .text(24, STATUS_TOP_Y, this.status, {
+          fontSize: "12px",
+          color: STATUS_COLORS[this.statusTone],
+          wordWrap: { width: GAME_WIDTH - 48 },
+        })
+        .setOrigin(0, 0);
     }
     this.makeButton(24, ACTIONS_Y, "Save", () => void this.save());
     this.makeButton(90, ACTIONS_Y, "Play Game ▶", () => void this.play());
+    this.makeButton(206, ACTIONS_Y, "Download game file", () => void this.exportBundle());
   }
 
   /** The reason is `validationError`'s, verbatim — this screen never composes
@@ -368,6 +402,7 @@ export class GameMakerScene extends Phaser.Scene {
     const reason = validationError(this.gameDoc);
     if (reason) {
       this.status = reason;
+      this.statusTone = "bad";
       this.rebuild();
       return false;
     }
@@ -376,12 +411,44 @@ export class GameMakerScene extends Phaser.Scene {
       await saveGame(this.gameDoc);
     } catch {
       this.status = "Could not save — check your connection.";
+      this.statusTone = "bad";
       this.rebuild();
       return false;
     }
     this.status = "Saved.";
+    this.statusTone = "good";
     this.rebuild();
     return true;
+  }
+
+  /**
+   * Writes the whole game — worlds, levels, art, music, invented things — into
+   * one file you keep.
+   *
+   * Saves first, for the same reason Play does: exporting the arrangement you
+   * are looking at is the only version worth having. Problems are *reported*
+   * rather than blocking, because a missing background falls back and a missing
+   * track plays silence — while refusing to write the file would leave you
+   * unable to inspect the very thing you need to see in order to fix it.
+   */
+  private async exportBundle(): Promise<void> {
+    if (!(await this.save())) return;
+    let bundle;
+    try {
+      bundle = await collectGameBundle(this.gameDoc);
+    } catch {
+      this.status = "Could not read everything this game needs — check your connection.";
+      this.statusTone = "bad";
+      this.rebuild();
+      return;
+    }
+    downloadTextFile(bundleFileName(this.gameDoc.title), JSON.stringify(bundle));
+    const problems = bundleProblems(bundle);
+    this.status = `Saved ${bundleSummary(bundle)}${describeProblems(problems)}`;
+    // Amber, not green: the file was written, but a game missing a level is not
+    // something to report as simply fine.
+    this.statusTone = problems.length ? "warn" : "good";
+    this.rebuild();
   }
 
   /**

@@ -282,6 +282,37 @@ test("the Game Maker is laid out soundly, with a paged list and a refusal showin
   await assertLayoutSound(page, "GameMaker");
 });
 
+test("the Game Maker survives an export report long enough to wrap", async ({ page }) => {
+  test.slow();
+  // The status line is the one piece of this screen whose length is not under
+  // the layout's control — it reports whatever is missing. Two worlds naming
+  // deleted levels is what pushes it onto a second line, right above the
+  // buttons.
+  await gotoApp(page);
+  const levels = await seedLevels(page, ["Green Hill"]);
+  await seedWorlds(page, [
+    makeWorld("w1", "The Meadow of Beginnings", [...levels, "deleted-one", "deleted-two"]),
+    makeWorld("w2", "The Caverns of Long Names", [...levels, "deleted-three"]),
+  ]);
+  await clickByText(page, "Menu", "Game Maker");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameMaker"));
+  await expect.poll(() => boxes(page, "GameMaker").then((all) => all.some((b) => b.label === "Add"))).toBe(true);
+  await page.getByPlaceholder("Grampa's Quest").fill("Grampa's Quest");
+  await page.getByPlaceholder("Grampa's Quest").press("Enter");
+  await clickByText(page, "GameMaker", "Add");
+  await clickByText(page, "GameMaker", "Add");
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    clickByText(page, "GameMaker", "Download game file"),
+  ]);
+  await download.path();
+  await expect
+    .poll(() => boxes(page, "GameMaker").then((all) => all.some((b) => b.label.includes("+1 more"))))
+    .toBe(true);
+  await assertLayoutSound(page, "GameMaker");
+});
+
 test("the Ending is laid out soundly", async ({ page }) => {
   test.slow();
   await gotoApp(page);

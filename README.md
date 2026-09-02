@@ -2600,6 +2600,65 @@ new textarea overlay — worth doing when cut scenes arrive, not for a headline 
 a sign-off. There is no "you are on world 3" resume, and no export: this makes
 the object a later step can ship, it does not ship it.
 
+**Exporting a game to one file (2026-09-02).** The editor could build a whole
+game, but nobody else could play it — and the reason is not deployment. Every
+level, world, skin, invented thing, uploaded background and track lives in *the
+author's* Google Drive and is read at runtime through *the author's* OAuth token.
+A relative opening a link has no token and would load nothing. So shipping is a
+**content** problem first, and this is the first of three parts that solve it:
+collect, then play from it, then publish.
+
+That reordering was deliberate. The stated order had cut scenes ahead of this,
+and it was wrong: this is the one genuinely risky unknown left, and every content
+feature added before it is one more thing the bundle would have to learn to
+carry.
+
+**Heavy assets are collected by reach; light ones travel whole.** Backgrounds and
+music are named per area by id, so the walk is exact — and it matters, because
+`musicUpload.ts` caps a track at 4MB and carrying spares is the difference
+between a few MB on a link and tens of them. Skins and invented things go in
+**entirely**, which is correctness rather than laziness: a level's own `skins`
+map is *not* enough to know what it renders, because `resolveSkinTextureKeys`
+iterates the whole library and per brush takes the level's choice **or the
+library default** (`skinSelection.resolveSkinId`). A level with an empty map
+still shows custom art. Reproducing that rule in the collector would mean two
+copies of a subtle thing that must agree forever, and the risk is lopsided — a
+missed skin is broken art, an extra one is under a kilobyte.
+
+`src/game/gameBundle.ts` holds the shape and the rules, pure and Phaser-free:
+the reference walk (across Main, Sub *and* Up — every asset choice lives on an
+area, not on the level), `bundleProblems` naming every dangling reference, and
+the size summary. `src/game/collectBundle.ts` is the thin layer of Drive reads
+that feeds it, kept separate so "which assets does a game need" stays testable
+without a browser. Levels are de-duplicated on the way in, since two worlds
+sharing one level should not carry it twice.
+
+**Problems are reported, not blocking.** A missing background falls back and a
+missing track plays silence, but a missing *level* ends a world early — so the
+export names what is wrong and still writes the file. Refusing would leave you
+unable to inspect the very thing you need to see in order to fix it.
+
+**Two things the screenshots caught.** The report is the one piece of that screen
+whose length nothing controls — it says whatever is missing — so an unwrapped
+line simply left the canvas; it now wraps, and `describeProblems` trims to the
+two that fit with a "(+N more)" count. And it was rendering **green** while
+listing missing levels, because the colour was keyed off whether the text started
+with "Saved". Green reads as "all fine". There is now an explicit tone, and an
+export with problems is amber.
+
+`tests/e2e/game-bundle.spec.ts` captures the real download through Playwright's
+download event and parses it. Its load-bearing assertion is not that a file
+appeared but **what is in it and what is not**: the used track is present and a
+second uploaded track that no level plays is absent. Mutation-checked three ways
+— carrying every track, dropping the skins library, and silencing the
+missing-level report each fail the test meant to catch them.
+
+**Not done here:** no import, no playing from a bundle, no publishing. Those are
+the next two parts, split so that if playing from a bundle misbehaves there is
+one suspect rather than two. Bundle size is *reported* rather than solved — if a
+real game lands at tens of MB, that number is what would justify compressing or
+splitting assets later.
+
 **The Thing Maker (2026-09-01).** Custom entities have worked end to end since
 the step before this — stored, placed, played — but the only way to *make* one
 was `window.__debugCustomEntities`, a dev-only hook that does not exist in a
@@ -4379,6 +4438,7 @@ full layout. Implemented so far:
 src/
 ├── main.ts                  Phaser game config + boot
 ├── ui/
+│   ├── downloadFile.ts       hands the browser a file to save (Blob + a temporary <a download>) — see "Exporting a game to one file" under Art
 │   └── textDefaults.ts       patches Phaser's text factory with a default fontFamily/resolution — see "Text legibility pass" under Art
 ├── scenes/
 │   ├── BootScene.ts          loads wizard/Kenney/entity art + procedural textures, starts ProfileGate
@@ -4457,6 +4517,11 @@ src/
 │   ├── customEntity.ts         the rules for an invented entity type: validation and resolveBehaviour (pure, no Phaser) (+ unit tests)
 │   ├── entityRegistry.ts       built-ins ∪ valid custom defs, as one list — what PlayScene and the palette read instead of the constants (+ unit tests)
 │   └── customEntityStorage.ts  load/save/remove against the shared, non-profile-scoped custom-entities.json, same caching pattern as skinStorage.ts
+├── game/
+│   ├── GameSchema.ts           GameData (title, ordered worldIds, ending) + its rules: createEmptyGame/validationError/moveWorld/isGameComplete (pure, + unit tests)
+│   ├── gameStorage.ts          the one game per profile, mirroring the world adapter's file-per-record appProperties pattern
+│   ├── gameBundle.ts           a whole game in one file: the reference walk, bundleProblems, the size summary (pure, + unit tests) — see "Exporting a game to one file" under Art
+│   └── collectBundle.ts        the Drive reads that fill a bundle, kept apart from the rules above
 ├── game/
 │   ├── GameSchema.ts           GameData: a title, worlds in order, an ending — plus validation, reordering and isGameComplete (pure, no Phaser) (+ unit tests)
 │   └── gameStorage.ts          load/save the one game per profile, same appProperties pattern as the world adapter
