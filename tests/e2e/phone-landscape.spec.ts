@@ -284,6 +284,10 @@ test("a ninth saved level is still reachable, through the pager", async ({ page 
   expect(first.length).toBeLessThan(names.length); // it pages at all
 
   await clickByText(page, "LevelBrowser", "Next ›");
+  // Polled for the same reason as page one, which I fixed here and then left
+  // this read bare six lines below it — page two renders from the same async
+  // list, so a single read can catch it empty and lose three levels.
+  await expect.poll(() => listedNames(page, "LevelBrowser").then((n) => n.length)).toBeGreaterThan(0);
   const second = await listedNames(page, "LevelBrowser");
 
   // The guarantee: every level appears exactly once across the pages, and the

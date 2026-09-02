@@ -25,6 +25,26 @@ import { assertLayoutSound } from "./support/layout";
  * that agrees with nothing.
  */
 
+/**
+ * The exported bundle, built once for the whole file.
+ *
+ * Producing it means a full editor session — boot, seed, arrange, download —
+ * and every test here wants the same one. Exporting per test cost four of those
+ * and pushed the whole suite's runtime up enough to tip the slowest unrelated
+ * spec over its 90s budget. Cached at module scope, which is safe because this
+ * project runs Playwright with a single worker.
+ */
+let cachedBundle: GameBundle | null = null;
+
+async function realBundle(browser: Browser): Promise<GameBundle> {
+  if (cachedBundle) return cachedBundle;
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  cachedBundle = await exportRealBundle(page);
+  await context.close();
+  return cachedBundle;
+}
+
 /** Builds a two-world game in the editor and exports it, exactly as an author
  * would, returning the file's contents. */
 async function exportRealBundle(page: Page): Promise<GameBundle> {
@@ -134,12 +154,9 @@ async function beatCurrentWorld(page: Page): Promise<void> {
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMap"));
 }
 
-test("a published bundle plays start to finish with no editor and no sign-in", async ({ page, browser }) => {
+test("a published bundle plays start to finish with no editor and no sign-in", async ({ browser }) => {
   test.slow();
-  const bundle = await exportRealBundle(page);
-
-  const published = await openPublished(browser, bundle);
-  page = published;
+  const page = await openPublished(browser, await realBundle(browser));
   // The title, not a profile picker and not the Menu — the two things a visitor
   // could not get past.
   expect(await labels(page, "GameTitle")).toContain("Grampa's Quest");
@@ -166,12 +183,11 @@ test("a published bundle plays start to finish with no editor and no sign-in", a
   expect(ending).not.toContain("Back to Menu");
 });
 
-test("the level content itself comes from the bundle, not from storage", async ({ page, browser }) => {
+test("the level content itself comes from the bundle, not from storage", async ({ browser }) => {
   test.slow();
   // The load-bearing check: in a context with no mocked Drive and no profile, a
   // level that renders at all can only have come from the file.
-  const bundle = await exportRealBundle(page);
-  page = await openPublished(browser, bundle);
+  const page = await openPublished(browser, await realBundle(browser));
   await clickByText(page, "GameTitle", "Play ▶");
   await expect.poll(() => nodes(page).then((n) => n.length)).toBe(1);
 
@@ -188,10 +204,9 @@ test("the level content itself comes from the bundle, not from storage", async (
   expect(tiles.types).toContain("goal");
 });
 
-test("leaving a world in a published game goes to the title, not the editor", async ({ page, browser }) => {
+test("leaving a world in a published game goes to the title, not the editor", async ({ browser }) => {
   test.slow();
-  const bundle = await exportRealBundle(page);
-  page = await openPublished(browser, bundle);
+  const page = await openPublished(browser, await realBundle(browser));
   await clickByText(page, "GameTitle", "Play ▶");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMap"));
 
@@ -200,12 +215,11 @@ test("leaving a world in a published game goes to the title, not the editor", as
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameTitle"));
 });
 
-test("the published screens are laid out soundly too", async ({ page, browser }) => {
+test("the published screens are laid out soundly too", async ({ browser }) => {
   test.slow();
   // A published game is a new screen family, and it gets no free pass on the
   // geometry the editor's screens are held to.
-  const bundle = await exportRealBundle(page);
-  const published = await openPublished(browser, bundle);
+  const published = await openPublished(browser, await realBundle(browser));
   await assertLayoutSound(published, "GameTitle");
 
   await clickByText(published, "GameTitle", "Play ▶");
