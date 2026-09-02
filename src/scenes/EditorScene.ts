@@ -112,7 +112,9 @@ export class EditorScene extends Phaser.Scene {
   // state, same as currentBrush/eraserActive — unaffected by switching
   // which area is being edited.
   private currentSize: EnemySize = DEFAULT_ENEMY_SIZE;
-  private storage: StorageAdapter = getLevelStorage();
+  private get storage(): StorageAdapter {
+    return getLevelStorage();
+  }
   private brushesByType = new Map<PlaceableType, Brush>();
   // One stack per area rather than one shared stack — undoing while
   // editing Sub shouldn't reach back and undo something done in Main

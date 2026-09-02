@@ -1,6 +1,7 @@
 import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFileContent } from "../drive/driveClient";
 import { getAccessToken } from "../drive/googleAuth";
 import { MusicAsset, MusicLibraryFile } from "./MusicLibrary";
+import { activeBundle } from "../game/contentSource";
 
 const MUSIC_FILE_NAME = "music.json";
 
@@ -16,6 +17,9 @@ const MUSIC_FILE_NAME = "music.json";
  * backgrounds had.
  */
 export async function loadMusicLibrary(): Promise<MusicLibraryFile> {
+  const bundle = activeBundle();
+  if (bundle) return structuredClone(bundle.music);
+
   const token = await getAccessToken();
   const folderId = await ensureAppFolder(token);
   const file = await findFileByName(token, folderId, MUSIC_FILE_NAME);

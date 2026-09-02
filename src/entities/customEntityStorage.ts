@@ -1,6 +1,7 @@
 import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFileContent } from "../drive/driveClient";
 import { getAccessToken } from "../drive/googleAuth";
 import { CustomEntityDef, CustomEntityId } from "./customEntity";
+import { activeBundle } from "../game/contentSource";
 
 const FILE_NAME = "custom-entities.json";
 
@@ -48,6 +49,9 @@ async function fetchDefs(): Promise<CustomEntitiesFile> {
  * read-mutate-write, so handing back the cache by reference would let a failed
  * write leave it holding state that was never saved. */
 export function loadCustomEntities(): Promise<CustomEntitiesFile> {
+  const bundle = activeBundle();
+  if (bundle) return Promise.resolve(structuredClone(bundle.customEntities));
+
   if (cached) return Promise.resolve(structuredClone(cached));
   if (!inFlightRead) {
     inFlightRead = fetchDefs().finally(() => {

@@ -1,6 +1,7 @@
 import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFileContent } from "../drive/driveClient";
 import { getAccessToken } from "../drive/googleAuth";
 import { CustomSkinsFile, PixelSkinData, SkinAsset, SkinLibraryEntry } from "./CustomSkins";
+import { activeBundle } from "../game/contentSource";
 
 const SKINS_FILE_NAME = "skins.json";
 
@@ -94,6 +95,12 @@ function cloneSkins(skins: CustomSkinsFile): CustomSkinsFile {
  * 3-person household.
  */
 export function loadCustomSkins(): Promise<CustomSkinsFile> {
+  const bundle = activeBundle();
+  // structuredClone for the same reason the Drive path caches a copy: callers
+  // read-mutate-write, and handing out the bundle's own object would let one of
+  // them quietly edit what every later read returns.
+  if (bundle) return Promise.resolve(structuredClone(bundle.skins));
+
   if (cachedSkins) return Promise.resolve(cloneSkins(cachedSkins));
   if (!inFlightRead) {
     inFlightRead = fetchCustomSkins().finally(() => {

@@ -4,6 +4,8 @@ import { applyAudioPrefs } from "../audio/audioPrefs";
 import { WIZARD_FRAME_KEYS } from "../gameplay/wizardAnimation";
 import { groundIconKey, groundTilesetKey } from "../level/groundSkins";
 import { STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
+import { playFromBundle } from "../game/contentSource";
+import { fetchPublishedBundle } from "../game/publishedBundle";
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -101,6 +103,27 @@ export class BootScene extends Phaser.Scene {
     // plays, means every later scene (Menu's theme, PlayScene's level
     // music) just inherits it rather than re-reading localStorage itself.
     applyAudioPrefs(this.sound);
+    void this.chooseBoot();
+  }
+
+  /**
+   * Editor, or published game?
+   *
+   * The whole difference is whether a readable `game.json` sits beside this
+   * page. If it does, this is somebody's game: the bundle becomes the content
+   * source and the title screen opens, with no profile picker and no sign-in,
+   * because a visitor has neither and needs neither. If it does not — which is
+   * every dev server, every test that does not stub it, and the editor's own
+   * deployment — the ordinary ProfileGate chain runs exactly as before.
+   */
+  private async chooseBoot(): Promise<void> {
+    const bundle = await fetchPublishedBundle();
+    if (!this.scene.isActive()) return;
+    if (bundle) {
+      playFromBundle(bundle);
+      this.scene.start("GameTitle");
+      return;
+    }
     this.scene.start("ProfileGate");
   }
 }

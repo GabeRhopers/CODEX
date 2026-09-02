@@ -1,6 +1,7 @@
 import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFileContent } from "../drive/driveClient";
 import { getAccessToken } from "../drive/googleAuth";
 import { BackgroundAsset, BackgroundLibraryFile } from "./BackgroundLibrary";
+import { activeBundle } from "../game/contentSource";
 
 const BACKGROUNDS_FILE_NAME = "backgrounds.json";
 
@@ -20,6 +21,9 @@ const BACKGROUNDS_FILE_NAME = "backgrounds.json";
  * backgroundLoader.ts for how an id becomes a Phaser texture.
  */
 export async function loadBackgroundLibrary(): Promise<BackgroundLibraryFile> {
+  const bundle = activeBundle();
+  if (bundle) return structuredClone(bundle.backgrounds);
+
   const token = await getAccessToken();
   const folderId = await ensureAppFolder(token);
   const file = await findFileByName(token, folderId, BACKGROUNDS_FILE_NAME);

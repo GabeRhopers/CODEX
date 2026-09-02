@@ -88,7 +88,9 @@ function describeProblems(problems: string[]): string {
 }
 
 export class GameMakerScene extends Phaser.Scene {
-  private worldStorage: WorldStorageAdapter = getWorldStorage();
+  private get worldStorage(): WorldStorageAdapter {
+    return getWorldStorage();
+  }
   private gameDoc: GameData = createEmptyGame("");
   private worlds: WorldSummary[] = [];
   private worldNames = new Map<string, string>();

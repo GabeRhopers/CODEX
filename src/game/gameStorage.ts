@@ -2,6 +2,7 @@ import { createFile, ensureAppFolder, findFileByName, getFileContent, listFiles,
 import { getAccessToken } from "../drive/googleAuth";
 import { loadActiveProfile } from "../profile/Profile";
 import { GameData } from "./GameSchema";
+import { activeBundle } from "./contentSource";
 
 /**
  * The one game each profile is building.
@@ -37,6 +38,10 @@ function requireProfile(): string {
  * like (`createEmptyGame`) and this module stays about storage only.
  */
 export async function loadGame(): Promise<GameData | null> {
+  // A published game carries its own document; there is no Drive to ask.
+  const bundle = activeBundle();
+  if (bundle) return bundle.game;
+
   const token = await getAccessToken();
   const folderId = await ensureAppFolder(token);
   const profile = requireProfile();

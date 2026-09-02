@@ -94,8 +94,13 @@ const ROW_FOOTER = 4;
  * peer of the four standing choices anyway.
  */
 export class MenuScene extends Phaser.Scene {
-  private levelStorage: StorageAdapter = getLevelStorage();
-  private worldStorage: WorldStorageAdapter = getWorldStorage();
+  private get levelStorage(): StorageAdapter {
+    return getLevelStorage();
+  }
+
+  private get worldStorage(): WorldStorageAdapter {
+    return getWorldStorage();
+  }
   private theme?: Phaser.Sound.BaseSound;
 
   private targets: MenuTarget[] = [];

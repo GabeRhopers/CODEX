@@ -21,7 +21,9 @@ const ROWS_PER_PAGE = rowsPerPage(ROW_START_Y, PAGER_Y, ROW_HEIGHT);
  * single-slot Save/Load never had. Persistence already supported this
  * (StorageAdapter.list/remove); this scene is purely the missing UI. */
 export class LevelBrowserScene extends Phaser.Scene {
-  private storage: StorageAdapter = getLevelStorage();
+  private get storage(): StorageAdapter {
+    return getLevelStorage();
+  }
   private page = 0;
   private listContainer!: Phaser.GameObjects.Container;
   private statusText!: Phaser.GameObjects.Text;

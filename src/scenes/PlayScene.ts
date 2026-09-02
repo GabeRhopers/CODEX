@@ -214,7 +214,9 @@ export class PlayScene extends Phaser.Scene {
   private level!: LevelData;
   private world?: WorldPlayContext;
   private returnScene?: string;
-  private levelStorage: StorageAdapter = getLevelStorage();
+  private get levelStorage(): StorageAdapter {
+    return getLevelStorage();
+  }
   private player!: Phaser.Physics.Arcade.Sprite;
   // Which of Main/Sub/Up the player is currently in — see "Sub/Up areas"
   // under Art. Set once up front (see startingAreaKey) and again on every

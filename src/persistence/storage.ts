@@ -1,3 +1,5 @@
+import { activeBundle } from "../game/contentSource";
+import { BundleLevelStorage, BundleWorldStorage } from "./BundleStorage";
 import { GoogleDriveStorageAdapter } from "./GoogleDriveStorageAdapter";
 import { GoogleDriveWorldStorageAdapter } from "./GoogleDriveWorldStorageAdapter";
 import { StorageAdapter } from "./StorageAdapter";
@@ -12,10 +14,27 @@ import { WorldStorageAdapter } from "./WorldStorageAdapter";
 const levelStorage: StorageAdapter = new GoogleDriveStorageAdapter();
 const worldStorage: WorldStorageAdapter = new GoogleDriveWorldStorageAdapter();
 
+// A published game reads from its bundle instead of Drive.
+//
+// Resolved per call rather than captured once, and that is load-bearing: Phaser
+// constructs every scene when the Game is created, which is *before* the boot
+// has decided whether this page is a game or the editor. A scene that grabbed an
+// adapter in a field initializer would hold the Drive one for the life of a
+// published page and never read the bundle at all — which is exactly the bug a
+// mutation test caught here. Scenes therefore ask on each use (see their
+// `get levelStorage()`), and these instances are memoised so that costs nothing.
+let bundleLevelStorage: { source: unknown; adapter: StorageAdapter } | null = null;
+let bundleWorldStorage: { source: unknown; adapter: WorldStorageAdapter } | null = null;
 export function getLevelStorage(): StorageAdapter {
-  return levelStorage;
+  const bundle = activeBundle();
+  if (!bundle) return levelStorage;
+  if (bundleLevelStorage?.source !== bundle) bundleLevelStorage = { source: bundle, adapter: new BundleLevelStorage(bundle) };
+  return bundleLevelStorage.adapter;
 }
 
 export function getWorldStorage(): WorldStorageAdapter {
-  return worldStorage;
+  const bundle = activeBundle();
+  if (!bundle) return worldStorage;
+  if (bundleWorldStorage?.source !== bundle) bundleWorldStorage = { source: bundle, adapter: new BundleWorldStorage(bundle) };
+  return bundleWorldStorage.adapter;
 }

@@ -17,7 +17,9 @@ const ROWS_PER_PAGE = rowsPerPage(ROW_START_Y, PAGER_Y, ROW_HEIGHT);
  * LevelBrowserScene, same layout on purpose so the two screens feel like
  * one family rather than two different UIs. */
 export class WorldBrowserScene extends Phaser.Scene {
-  private worldStorage: WorldStorageAdapter = getWorldStorage();
+  private get worldStorage(): WorldStorageAdapter {
+    return getWorldStorage();
+  }
   private page = 0;
   private listContainer!: Phaser.GameObjects.Container;
   private statusText!: Phaser.GameObjects.Text;

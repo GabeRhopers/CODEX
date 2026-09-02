@@ -109,8 +109,13 @@ function nodeHitArgs(): [number, number, number, number] {
  * used to have and the selection is right there to act on.
  */
 export class WorldMakerScene extends Phaser.Scene {
-  private levelStorage: StorageAdapter = getLevelStorage();
-  private worldStorage: WorldStorageAdapter = getWorldStorage();
+  private get levelStorage(): StorageAdapter {
+    return getLevelStorage();
+  }
+
+  private get worldStorage(): WorldStorageAdapter {
+    return getWorldStorage();
+  }
   private world!: WorldData;
   private backdropContainer!: Phaser.GameObjects.Container;
   private availableContainer!: Phaser.GameObjects.Container;

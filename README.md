@@ -2600,6 +2600,53 @@ new textarea overlay — worth doing when cut scenes arrive, not for a headline 
 a sign-off. There is no "you are on world 3" resume, and no export: this makes
 the object a later step can ship, it does not ship it.
 
+**A published game: no editor, no sign-in (2026-09-02).** The second of the
+three shipping parts. A bundle existed but nothing could play it; now the same
+app boots as either the editor or somebody's game, and the whole difference is
+whether a readable `game.json` sits beside index.html. That is why publishing
+adds a file rather than building a second application.
+
+The intercept surface turned out to be six functions, not the sprawl I expected:
+levels and worlds (already behind adapter interfaces — `storage.ts` was written
+as "one place to swap the backend again later", and this is that later), plus
+`loadGame`, `loadCustomSkins`, `loadCustomEntities`, and the two library
+loaders. `backgroundLoader` and `musicLoader` both route through those last two,
+so nothing beneath them needed touching. Each gets a two-line early return
+against `contentSource.ts`, which leaves the Drive path exactly as it was rather
+than rewriting it into an abstraction it never needed. Bundle-backed **writes
+throw** rather than no-op: a published game never saves, so reaching one means a
+code path assumed an editor that is not there, and a silent no-op would hide
+that until someone noticed their progress vanishing.
+
+**A mutation caught a real bug, and a test that was lying about itself.**
+Removing the bundle branch from `getLevelStorage` left the suite green. Two
+causes, both worth writing down. First, the product: Phaser constructs every
+scene when the Game is created — *before* the boot decides what this page is —
+so eight scenes captured the Drive adapter in a field initializer and would have
+held it for the life of a published page, never reading the bundle at all. They
+ask per use now (`private get levelStorage()`), and the bundle adapters are
+memoised so that costs nothing. Second, the test: Playwright's `route` handlers
+and `addInitScript` survive navigation, so exporting in one page and then
+visiting "/" in the same page left the mocked Drive and the seeded profile
+installed. The published page opens in **its own browser context** now, which is
+what makes "a visitor has nothing" true in the test and not only in the claim.
+Both mutations fail correctly today, including deliberately reintroducing the
+construction-time capture.
+
+`GameTitleScene` is the front door and the one place a game's title is ever
+shown at full size. The map's back button and the ending's both change wording
+and destination under `isPlayOnly()` — "Menu" is an editor word, and a published
+game has none to go back to.
+
+`tests/e2e/published-game.spec.ts` exports a real bundle through the real Game
+Maker, serves it at `game.json` in a clean context, and plays it start to finish
+to the author's own ending. The layout invariants moved to
+`tests/e2e/support/layout.ts` so those new screens are judged by exactly the
+same three rules the editor's are, rather than getting a free pass for being new.
+
+**Still to come:** publishing itself — writing a bundle into the built site and
+deploying it. Nothing here deploys anything.
+
 **Exporting a game to one file (2026-09-02).** The editor could build a whole
 game, but nobody else could play it — and the reason is not deployment. Every
 level, world, skin, invented thing, uploaded background and track lives in *the
@@ -4521,7 +4568,9 @@ src/
 │   ├── GameSchema.ts           GameData (title, ordered worldIds, ending) + its rules: createEmptyGame/validationError/moveWorld/isGameComplete (pure, + unit tests)
 │   ├── gameStorage.ts          the one game per profile, mirroring the world adapter's file-per-record appProperties pattern
 │   ├── gameBundle.ts           a whole game in one file: the reference walk, bundleProblems, the size summary (pure, + unit tests) — see "Exporting a game to one file" under Art
-│   └── collectBundle.ts        the Drive reads that fill a bundle, kept apart from the rules above
+│   ├── collectBundle.ts        the Drive reads that fill a bundle, kept apart from the rules above
+│   ├── contentSource.ts        whether this page reads from Drive or from a bundle — the one switch a published game flips
+│   └── publishedBundle.ts      fetches game.json beside the page, and checks it really is a bundle before believing it
 ├── game/
 │   ├── GameSchema.ts           GameData: a title, worlds in order, an ending — plus validation, reordering and isGameComplete (pure, no Phaser) (+ unit tests)
 │   └── gameStorage.ts          load/save the one game per profile, same appProperties pattern as the world adapter

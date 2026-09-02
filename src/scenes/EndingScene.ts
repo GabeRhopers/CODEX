@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { DEFAULT_ENDING_HEADLINE, DEFAULT_ENDING_MESSAGE, GameEnding } from "../game/GameSchema";
+import { isPlayOnly } from "../game/contentSource";
 
 /**
  * The screen after the last world.
@@ -69,8 +70,11 @@ export class EndingScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
 
+    // "Menu" is an editor word. A published game goes back to its own title.
+    const backLabel = isPlayOnly() ? "Back to Title" : "Back to Menu";
+    const backScene = isPlayOnly() ? "GameTitle" : "Menu";
     const back = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 64, "Back to Menu", {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 64, backLabel, {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: "#0f3460",
@@ -78,9 +82,9 @@ export class EndingScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0.5)
       .setInteractive({ useHandCursor: true });
-    back.on("pointerdown", () => this.scene.start("Menu"));
+    back.on("pointerdown", () => this.scene.start(backScene));
     back.on("pointerover", () => back.setStyle({ backgroundColor: "#3a5a9c" }));
     back.on("pointerout", () => back.setStyle({ backgroundColor: "#0f3460" }));
-    this.input.keyboard?.on("keydown-ESC", () => this.scene.start("Menu"));
+    this.input.keyboard?.on("keydown-ESC", () => this.scene.start(backScene));
   }
 }

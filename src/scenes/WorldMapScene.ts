@@ -10,6 +10,7 @@ import { circleHitArgs } from "../ui/touchTarget";
 import { completedCount, currentIndex, isUnlocked, isWorldComplete } from "../world/worldProgress";
 import { WorldData } from "../world/WorldSchema";
 import { GameEnding } from "../game/GameSchema";
+import { isPlayOnly } from "../game/contentSource";
 
 /** Where this world sits in a game, when it is being played as part of one.
  *
@@ -62,8 +63,13 @@ const MARKER_WALK_MS = 420;
  * have and a mask four other call sites depend on.
  */
 export class WorldMapScene extends Phaser.Scene {
-  private worldStorage: WorldStorageAdapter = getWorldStorage();
-  private levelStorage: StorageAdapter = getLevelStorage();
+  private get worldStorage(): WorldStorageAdapter {
+    return getWorldStorage();
+  }
+
+  private get levelStorage(): StorageAdapter {
+    return getLevelStorage();
+  }
   private worldId!: string;
   private justCompletedIndex?: number;
   private gameRun?: GameRunContext;
@@ -87,8 +93,9 @@ export class WorldMapScene extends Phaser.Scene {
   create(): void {
     // Leaving a world reached *through a game* goes back to the game, not to the
     // world list — the list is not where you came from and not where the run
-    // continues from.
-    const backLabel = this.gameRun ? "← Game" : "← Worlds";
+    // continues from. In a published game there is no maker either, so the
+    // label has to match where `leave` actually goes.
+    const backLabel = isPlayOnly() ? "← Title" : this.gameRun ? "← Game" : "← Worlds";
     this.add
       .text(24, 18, backLabel, { fontSize: "13px", color: "#ffffff", backgroundColor: "#0f3460", padding: { x: 10, y: 12 } })
       .setInteractive({ useHandCursor: true })
@@ -107,6 +114,12 @@ export class WorldMapScene extends Phaser.Scene {
   /** Where "back" goes. One method rather than two call sites, so the button and
    * Esc can never disagree about it. */
   private leave(): void {
+    // A published game has no maker and no browser to return to — the title
+    // screen is the only "back" that exists there.
+    if (isPlayOnly()) {
+      this.scene.start("GameTitle");
+      return;
+    }
     this.scene.start(this.gameRun ? "GameMaker" : "WorldBrowser");
   }
 
