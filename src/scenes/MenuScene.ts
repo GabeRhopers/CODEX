@@ -457,6 +457,36 @@ export class MenuScene extends Phaser.Scene {
       activate: () => this.scene.start("ThingMaker"),
     });
 
+    // The third chip goes to Grampa's *right*: the two to his left end at x=427
+    // and he occupies roughly 505-545, so a fourth column on that side would sit
+    // on him. Measured off the rendered menu rather than guessed.
+    const gameChipX = GAME_WIDTH / 2 + 36;
+    const gameChipBg = this.add
+      .rectangle(gameChipX, chipTop, chipWidth, chipHeight, CARD_FILL)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, CARD_STROKE)
+      .setInteractive({ useHandCursor: true });
+    this.add.rectangle(gameChipX, chipTop, ACCENT_WIDTH, chipHeight, 0xffc93c).setOrigin(0, 0);
+    const gameIcon = this.add.image(gameChipX + ACCENT_WIDTH + 20, FOOTER_ROW_Y, "trophy").setOrigin(0.5);
+    gameIcon.setScale(Math.min(1, 22 / gameIcon.width, 22 / gameIcon.height));
+    const gameLabel = this.add
+      .text(gameChipX + ACCENT_WIDTH + 38, FOOTER_ROW_Y, "Game Maker", { fontSize: "13px", color: MUTED_TEXT })
+      .setOrigin(0, 0.5);
+    const gameChevron = this.add
+      .text(gameChipX + chipWidth - 16, FOOTER_ROW_Y, "\u203a", { fontSize: "18px", color: CHEVRON_IDLE })
+      .setOrigin(0.5);
+    this.register(gameChipBg, {
+      row: ROW_FOOTER,
+      col: 2,
+      setHighlighted: (on) => {
+        gameChipBg.setFillStyle(on ? CARD_FILL_ACTIVE : CARD_FILL);
+        gameChipBg.setStrokeStyle(on ? 2 : 1, on ? CARD_STROKE_ACTIVE : CARD_STROKE);
+        gameLabel.setColor(on ? "#ffffff" : MUTED_TEXT);
+        gameChevron.setColor(on ? "#ffffff" : CHEVRON_IDLE);
+      },
+      activate: () => this.scene.start("GameMaker"),
+    });
+
     // Grampa, front and centre at the bottom — the mascot the whole game is
     // about, and the piece of art that fills what used to be ~90px of empty
     // page between the last control and the footer line.

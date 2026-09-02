@@ -256,6 +256,46 @@ test("the Skin Creator's target grid is laid out soundly once it has to page", a
   await assertLayoutSound(page, "SkinEditor");
 });
 
+test("the Game Maker is laid out soundly, with a paged list and a refusal showing", async ({ page }) => {
+  test.slow();
+  // The worst case the screen has: the available list needs a pager *and* a
+  // save was refused, so the pager, the reason and both buttons stack below the
+  // panels at once. Anything mis-spaced there reads as broken.
+  await gotoApp(page);
+  const levels = await seedLevels(page, ["Green Hill"]);
+  await seedWorlds(
+    page,
+    Array.from({ length: 9 }, (_, i) => makeWorld(`w${i + 1}`, `World ${String(i + 1).padStart(2, "0")}`, levels)),
+  );
+  await clickByText(page, "Menu", "Game Maker");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameMaker"));
+  await expect.poll(() => boxes(page, "GameMaker").then((all) => all.some((b) => b.label === "World 01"))).toBe(true);
+  await clickByText(page, "GameMaker", "Save");
+  await expect
+    .poll(() => boxes(page, "GameMaker").then((all) => all.some((b) => b.label === "Give your game a title.")))
+    .toBe(true);
+  await assertLayoutSound(page, "GameMaker");
+
+  // And with worlds in it, so the ordered column's rows and their buttons are up.
+  await clickByText(page, "GameMaker", "Add");
+  await clickByText(page, "GameMaker", "Add");
+  await assertLayoutSound(page, "GameMaker");
+});
+
+test("the Ending is laid out soundly", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  await page.evaluate(() =>
+    window.__debugGame!.scene.getScene("Menu").scene.start("Ending", {
+      title: "Grampa's Quest",
+      ending: { headline: "You did it!", message: "Thanks for playing. Love, Grampa." },
+    }),
+  );
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Ending"));
+  await expect.poll(() => boxes(page, "Ending").then((b) => b.length)).toBeGreaterThan(3);
+  await assertLayoutSound(page, "Ending");
+});
+
 test("the World Maker is laid out soundly, with a level added and selected", async ({ page }) => {
   test.slow();
   // The screen both regressions landed on, in the state the screenshot showed:

@@ -2534,6 +2534,72 @@ Nothing is wired yet: no storage, no palette entry, no way to make one. The
 `PlayScene` table move is the only behavioural surface touched, and its proof is
 that the existing e2e suite passes unchanged.
 
+**A game: a title, worlds in order, and an ending (2026-09-02).** Everything
+needed to *make* content existed — levels, worlds, skins, invented entities —
+but not the thing that turns a pile of worlds into something you can hand to
+someone. Anyone opening this project landed on an editor menu, not on a game.
+This is that object, and it is what a publish step will eventually ship: until a
+game exists as a document, there is nothing to publish.
+
+**One game per profile**, scoped exactly as levels and worlds already are
+(`kind: "game"` in `appProperties`, the same file-per-record pattern as
+`GoogleDriveWorldStorageAdapter`, so the mocked Drive needed no changes at all).
+Skins and invented things stay shared because they are the shop everyone builds
+from; a game is the thing *one person is making*, so Mike's and Gabriel's must
+not be the same document.
+
+**The symmetry that kept it small.** `PlayScene` already chains *levels inside a
+world* — bank the win, offer the next, return to the map when the world is done.
+So a game chains *worlds inside a game* exactly one layer up, in
+`WorldMapScene`, which already knew when a world was complete. Finishing a world
+inside a game offers **Next world →**, and on the last one **Finish →**, which
+shows the ending.
+
+**Progress is derived, not stored again.** A game is finished when its last world
+is, and `world/worldProgress.ts` already tracks that per world. So there is no
+game-progress record that could disagree with the world-progress record —
+`isGameComplete` takes the per-world answers and asks whether all of them are
+yes.
+
+**I was wrong that PlayScene would not need touching.** The plan said the whole
+change sat one layer up. It nearly did — but `PlayScene` restarts the map on the
+way back from a level, so the game context was dropped the moment you played
+anything, and the run silently stopped being part of a game. Three lines: it
+rides along in `WorldPlayContext` and comes back out. Better to change the design
+than to preserve a sentence in a plan.
+
+**Two collisions with `Phaser.Scene`, both caught by the compiler.** `Scene`
+already owns `game` (the `Phaser.Game` instance) and `load` (the
+`LoaderPlugin`) — so a scene field named either shadows something the framework
+depends on. Renamed to `gameRun` / `gameDoc` and `readAll`. The `game` one would
+have been genuinely nasty at runtime rather than merely wrong.
+
+**Two layout problems the screenshots caught and no assertion would have.**
+`Remove` overflowed the ordered column by 4px, and in the screen's worst case —
+an available list that needs a pager *and* a save that was refused — the pager
+and the reason would have sat within a few pixels of each other. Four things can
+stack below the panels at once, so they now have explicit constants spaced for
+that case, and that exact case is what was rendered to check. Same class of
+defect as the Skin Creator pager last week: passes an overlap test, reads as
+broken.
+
+`tests/e2e/game-maker.spec.ts` is eight tests. The one that matters builds a game
+from two worlds, presses Play Game, finishes both, and reads **the author's own
+words** off the ending — the whole claim in one run. The others cover the ways
+that run could go wrong: the order not being the order, reordering wrapping past
+the ends, removing taking two taps, an untitled or empty game being savable, and
+— the regression the optional game context could most easily cause — **playing a
+world outside a game still returning to the world browser**. Mutation-checked
+three ways: ignoring the game context on completion, making `moveWorld` wrap
+instead of clamp, and rendering the ending from the defaults rather than what was
+typed each fail the test meant to catch them.
+
+**Known and deliberate:** the ending is two single lines, because every text
+field here is a `LevelNameInput` (a one-line DOM input) and a paragraph means a
+new textarea overlay — worth doing when cut scenes arrive, not for a headline and
+a sign-off. There is no "you are on world 3" resume, and no export: this makes
+the object a later step can ship, it does not ship it.
+
 **The Thing Maker (2026-09-01).** Custom entities have worked end to end since
 the step before this — stored, placed, played — but the only way to *make* one
 was `window.__debugCustomEntities`, a dev-only hook that does not exist in a
@@ -4324,6 +4390,8 @@ src/
 │   ├── PlayScene.ts          runs a level with Arcade Physics (optionally chained via a World or returning to Templates)
 │   ├── WorldBrowserScene.ts  lists saved Worlds with Play/Edit/Delete
 │   ├── WorldMakerScene.ts    build/edit a World's level order
+│   ├── GameMakerScene.ts     title + worlds in order + an ending, and Play Game — see "A game" under Art
+│   ├── EndingScene.ts        the screen after the last world: the author's own words over the trophy
 │   └── ThingMakerScene.ts    invent an item/enemy/decoration: name it, say what it acts like, hand off to the Skin Creator to draw it — see "The Thing Maker" under Art
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions
@@ -4389,6 +4457,9 @@ src/
 │   ├── customEntity.ts         the rules for an invented entity type: validation and resolveBehaviour (pure, no Phaser) (+ unit tests)
 │   ├── entityRegistry.ts       built-ins ∪ valid custom defs, as one list — what PlayScene and the palette read instead of the constants (+ unit tests)
 │   └── customEntityStorage.ts  load/save/remove against the shared, non-profile-scoped custom-entities.json, same caching pattern as skinStorage.ts
+├── game/
+│   ├── GameSchema.ts           GameData: a title, worlds in order, an ending — plus validation, reordering and isGameComplete (pure, no Phaser) (+ unit tests)
+│   └── gameStorage.ts          load/save the one game per profile, same appProperties pattern as the world adapter
 ├── world/
 │   └── WorldSchema.ts        WorldData: an ordered list of level ids + a name
 ├── config/

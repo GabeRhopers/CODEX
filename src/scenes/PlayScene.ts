@@ -20,6 +20,7 @@ import { resolveLevelMusicKey } from "../gameplay/musicLoader";
 import { collectAsFor, decorTypes, enemyDefs, itemTypes, textureKeyFor } from "../entities/entityRegistry";
 import { CustomEntityDef, isCustomEntityId, type PlaceableType } from "../entities/customEntity";
 import { loadCustomEntities } from "../entities/customEntityStorage";
+import type { GameRunContext } from "./WorldMapScene";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import {
   canDoubleJump,
@@ -158,6 +159,11 @@ interface WorldPlayContext {
    * optional so an older launch path (or a test) that only knows the id list
    * still plays, it just lands back on the list. */
   worldId?: string;
+  /** Set when this world is being played as part of a game. Carried rather than
+   * read: returning to the map restarts that scene, so without passing this
+   * back the run would quietly stop being part of a game the moment a level was
+   * played. Opaque here — PlayScene never reads inside it. */
+  game?: GameRunContext;
 }
 
 /** Tile coordinates (plus which area they're in — see "Sub/Up areas"
@@ -1548,7 +1554,7 @@ export class PlayScene extends Phaser.Scene {
     }
     this.scene.start("Play", {
       level: nextLevel,
-      world: { levelIds: this.world.levelIds, index: nextIndex, worldId: this.world.worldId },
+      world: { levelIds: this.world.levelIds, index: nextIndex, worldId: this.world.worldId, game: this.world.game },
     });
   }
 
@@ -1575,6 +1581,7 @@ export class PlayScene extends Phaser.Scene {
       this.scene.start("WorldMap", {
         worldId: this.world.worldId,
         justCompletedIndex: this.outcome === "won" ? this.world.index : undefined,
+        game: this.world.game,
       });
     }
     else if (this.world) this.scene.start("WorldBrowser");

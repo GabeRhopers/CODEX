@@ -9,6 +9,19 @@ import { cellCenter, MAP_COLS, MAP_ROWS, orderedCells, resolveLayout, type MapRe
 import { circleHitArgs } from "../ui/touchTarget";
 import { completedCount, currentIndex, isUnlocked, isWorldComplete } from "../world/worldProgress";
 import { WorldData } from "../world/WorldSchema";
+import { GameEnding } from "../game/GameSchema";
+
+/** Where this world sits in a game, when it is being played as part of one.
+ *
+ * Carried through the run rather than re-read, because the game document is
+ * this screen's caller's to own — and `ending` travels with it so finishing has
+ * the author's words in hand without a second read that could disagree. */
+export interface GameRunContext {
+  worldIds: string[];
+  index: number;
+  title: string;
+  ending: GameEnding;
+}
 
 interface WorldMapSceneData {
   worldId: string;
@@ -16,6 +29,9 @@ interface WorldMapSceneData {
    * completion itself is banked in PlayScene.onWin, because pressing N for
    * the next level never comes back through here. */
   justCompletedIndex?: number;
+  /** Absent for the ordinary "play a world from the browser" path, which must
+   * keep behaving exactly as it always has. */
+  game?: GameRunContext;
 }
 
 /** The map is the whole canvas below the header — unlike the editor, nothing
@@ -50,6 +66,7 @@ export class WorldMapScene extends Phaser.Scene {
   private levelStorage: StorageAdapter = getLevelStorage();
   private worldId!: string;
   private justCompletedIndex?: number;
+  private gameRun?: GameRunContext;
   private levelNames = new Map<string, string>();
   private marker?: Phaser.GameObjects.Image;
   private statusText!: Phaser.GameObjects.Text;
@@ -62,24 +79,35 @@ export class WorldMapScene extends Phaser.Scene {
   init(data: WorldMapSceneData): void {
     this.worldId = data.worldId;
     this.justCompletedIndex = data.justCompletedIndex;
+    this.gameRun = data.game;
     this.levelNames = new Map();
     this.marker = undefined;
   }
 
   create(): void {
+    // Leaving a world reached *through a game* goes back to the game, not to the
+    // world list — the list is not where you came from and not where the run
+    // continues from.
+    const backLabel = this.gameRun ? "← Game" : "← Worlds";
     this.add
-      .text(24, 18, "← Worlds", { fontSize: "13px", color: "#ffffff", backgroundColor: "#0f3460", padding: { x: 10, y: 12 } })
+      .text(24, 18, backLabel, { fontSize: "13px", color: "#ffffff", backgroundColor: "#0f3460", padding: { x: 10, y: 12 } })
       .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("WorldBrowser"));
+      .on("pointerdown", () => this.leave());
 
     this.titleText = this.add.text(GAME_WIDTH / 2, 20, "", { fontSize: "18px", color: "#ffffff" }).setOrigin(0.5, 0);
     this.statusText = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 18, "", { fontSize: "12px", color: "#a6a6c8" })
       .setOrigin(0.5);
 
-    this.input.keyboard?.on("keydown-ESC", () => this.scene.start("WorldBrowser"));
+    this.input.keyboard?.on("keydown-ESC", () => this.leave());
 
     void this.build();
+  }
+
+  /** Where "back" goes. One method rather than two call sites, so the button and
+   * Esc can never disagree about it. */
+  private leave(): void {
+    this.scene.start(this.gameRun ? "GameMaker" : "WorldBrowser");
   }
 
   private async build(): Promise<void> {
@@ -202,11 +230,15 @@ export class WorldMapScene extends Phaser.Scene {
       });
     }
 
+    const complete = isWorldComplete(completed, world.levelIds.length);
     this.statusText.setText(
-      isWorldComplete(completed, world.levelIds.length)
-        ? "World complete! Click any node to replay it."
+      complete
+        ? this.gameRun
+          ? `World ${this.gameRun.index + 1} of ${this.gameRun.worldIds.length} complete!`
+          : "World complete! Click any node to replay it."
         : `Level ${index + 1} of ${world.levelIds.length} — click the lit node to play.`,
     );
+    if (complete) this.drawGameContinue();
   }
 
   private async playLevel(world: WorldData, index: number): Promise<void> {
@@ -220,7 +252,48 @@ export class WorldMapScene extends Phaser.Scene {
     }
     this.scene.start("Play", {
       level,
-      world: { levelIds: world.levelIds, index, worldId: world.id },
+      // The game context rides along so it survives the round trip: PlayScene
+      // restarts this scene on the way back, and without carrying it there the
+      // run would silently stop being part of a game the moment you played a
+      // level.
+      world: { levelIds: world.levelIds, index, worldId: world.id, game: this.gameRun },
+    });
+  }
+
+  /**
+   * What finishing this world means when it is part of a game.
+   *
+   * The symmetry that keeps this small: PlayScene chains *levels inside a
+   * world*, so a game chains *worlds inside a game* exactly one layer up —
+   * here, where a world already knows it is complete.
+   */
+  private drawGameContinue(): void {
+    const game = this.gameRun;
+    if (!game) return;
+    const isLast = game.index + 1 >= game.worldIds.length;
+    const label = isLast ? "Finish →" : "Next world →";
+
+    const button = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 52, label, {
+        fontSize: "14px",
+        color: "#ffffff",
+        backgroundColor: "#2e7d32",
+        padding: { x: 16, y: 12 },
+      })
+      .setOrigin(0.5, 0.5)
+      .setDepth(5)
+      .setInteractive({ useHandCursor: true });
+    button.on("pointerover", () => button.setStyle({ backgroundColor: "#3f9d44" }));
+    button.on("pointerout", () => button.setStyle({ backgroundColor: "#2e7d32" }));
+    button.on("pointerdown", () => {
+      if (isLast) {
+        this.scene.start("Ending", { ending: game.ending, title: game.title });
+        return;
+      }
+      this.scene.start("WorldMap", {
+        worldId: game.worldIds[game.index + 1],
+        game: { ...game, index: game.index + 1 },
+      });
     });
   }
 }
