@@ -147,12 +147,16 @@ test("the Game Maker is laid out soundly, with a paged list and a refusal showin
   await assertLayoutSound(page, "GameMaker");
 });
 
-test("the Game Maker survives an export report long enough to wrap", async ({ page }) => {
+test("the Publish screen survives an export report long enough to wrap", async ({ page }) => {
   test.slow();
-  // The status line is the one piece of this screen whose length is not under
+  // The status line is the one piece of that screen whose length is not under
   // the layout's control — it reports whatever is missing. Two worlds naming
-  // deleted levels is what pushes it onto a second line, right above the
-  // buttons.
+  // deleted levels is what pushes it onto a second line, in the tightest gap
+  // the screen has: between step 1's button and step 2's heading.
+  //
+  // This lived on the Game Maker until the export moved to its own screen. It
+  // followed the report rather than staying with the button that used to
+  // trigger it, because the report is what it is actually about.
   await gotoApp(page);
   const levels = await seedLevels(page, ["Green Hill"]);
   await seedWorlds(page, [
@@ -167,15 +171,17 @@ test("the Game Maker survives an export report long enough to wrap", async ({ pa
   await clickByText(page, "GameMaker", "Add");
   await clickByText(page, "GameMaker", "Add");
 
+  await clickByText(page, "GameMaker", "Publish…");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Publish"));
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    clickByText(page, "GameMaker", "Download game file"),
+    clickByText(page, "Publish", "Download"),
   ]);
   await download.path();
   await expect
-    .poll(() => boxes(page, "GameMaker").then((all) => all.some((b) => b.label.includes("+1 more"))))
+    .poll(() => boxes(page, "Publish").then((all) => all.some((b) => b.label.includes("+1 more"))))
     .toBe(true);
-  await assertLayoutSound(page, "GameMaker");
+  await assertLayoutSound(page, "Publish");
 });
 
 test("the Ending is laid out soundly", async ({ page }) => {

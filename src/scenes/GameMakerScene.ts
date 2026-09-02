@@ -361,11 +361,12 @@ export class GameMakerScene extends Phaser.Scene {
 
   private drawActions(): void {
     if (this.status) {
-      // Wrapped, and anchored from its top rather than its middle: a report of
-      // what is missing runs to two lines easily, and an unwrapped one simply
-      // leaves the canvas. Two lines is what fits between the panels and the
-      // buttons, which is why exportBundle trims the list rather than trusting
-      // this to cope.
+      // Wrapped, and anchored from its top rather than its middle: a refusal
+      // names what is wrong and an unwrapped one simply leaves the canvas. Two
+      // lines is what fits between the panels and the buttons. Since the export
+      // moved to PublishScene this line only ever carries a `validationError`
+      // reason or a save result, both short — the long one was the export's
+      // report of everything missing, and it wraps over there now.
       this.add
         .text(24, STATUS_TOP_Y, this.status, {
           fontSize: "12px",

@@ -301,14 +301,20 @@ test("a ?game= value that could point elsewhere is refused outright", async ({ b
   // Every request the page makes, watched rather than intercepted: the boot's
   // own game.json fetch is legitimate and must still happen, so what is checked
   // is that nothing reaching for the crafted path is ever asked for.
-  const requested: string[] = [];
-  page.on("request", (request) => requested.push(request.url()));
+  //
+  // Judged on the **path**, not the whole URL. The navigation itself carries the
+  // crafted name in its query string — matching on the URL flags that and calls
+  // it a traversal, which is how the first version of this test failed against a
+  // perfectly sound guard. A traversal that worked would show up as a path:
+  // `games/../../secret` resolves to `/secret`, outside the games folder.
+  const paths: string[] = [];
+  page.on("request", (request) => paths.push(new URL(request.url()).pathname));
   await page.goto("/?game=..%2F..%2Fsecret");
   await waitForGame(page);
   // A refused slug means no game was asked for, so this is an ordinary editor
   // visit — and nothing climbed out of the games folder to get there.
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("ProfileGate"), undefined, { timeout: 20_000 });
-  expect(requested.filter((url) => url.includes("secret"))).toEqual([]);
+  expect(paths.filter((path) => path.includes("secret"))).toEqual([]);
   await context.close();
 });
 
