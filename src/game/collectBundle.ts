@@ -5,6 +5,7 @@ import { loadMusicLibrary } from "../music/musicLibraryStorage";
 import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { loadCustomSkins } from "../skins/skinStorage";
 import { WorldData } from "../world/WorldSchema";
+import { cutSceneBackgroundIds } from "./CutScene";
 import { BUNDLE_FORMAT, GameBundle, referencedBackgroundIds, referencedMusicIds } from "./gameBundle";
 import { GameData } from "./GameSchema";
 
@@ -45,7 +46,14 @@ export async function collectGameBundle(game: GameData): Promise<GameBundle> {
   // The heavy libraries are filtered to what the levels actually name; the light
   // ones travel whole. See GameBundle's own docstring for why that asymmetry is
   // correctness rather than laziness.
-  const wantedBackgrounds = new Set(referencedBackgroundIds(levels));
+  // Unioned with the cut scenes' own pictures, which are library ids like any
+  // other. Collecting only what the *levels* name would publish a game whose
+  // opening is blank — art that was plainly there in the editor and silently
+  // gone on the link.
+  const wantedBackgrounds = new Set([
+    ...referencedBackgroundIds(levels),
+    ...cutSceneBackgroundIds(game.opening, game.closing),
+  ]);
   const wantedMusic = new Set(referencedMusicIds(levels));
 
   return {

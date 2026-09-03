@@ -21,12 +21,14 @@
  * `entities/customEntity.ts` and `world/worldLayout.ts` use.
  */
 
+import { CutScene } from "./CutScene";
+
 /** The words shown after the last world is beaten.
  *
- * Two single lines rather than a paragraph: every text field in this app is a
- * `LevelNameInput`, which is a one-line DOM input, and a real multi-line field
- * means a new textarea overlay. A headline and a sign-off is a genuine ending;
- * anything longer belongs with the cut-scene work. */
+ * Two single lines rather than a paragraph: this is the moment over the trophy,
+ * not the story. Anything longer belongs in the closing cut scene below, which
+ * runs *before* this and is where `ParagraphInput` — the textarea overlay this
+ * comment used to be waiting on — actually lives. */
 export interface GameEnding {
   headline: string;
   message: string;
@@ -39,6 +41,17 @@ export interface GameData {
    * the sequence it runs in — the same role `levelIds` plays for a world. */
   worldIds: string[];
   ending: GameEnding;
+  /**
+   * Shown after Play ▶, before the first world.
+   *
+   * Optional, and absent on every game written before cut scenes existed —
+   * which is why nothing here or in `validationError` requires one. A game
+   * without cut scenes is an ordinary game, and must keep starting exactly the
+   * way it always did.
+   */
+  opening?: CutScene;
+  /** Shown after the last world, before the ending. */
+  closing?: CutScene;
   createdAt: string;
   updatedAt: string;
 }

@@ -2647,6 +2647,56 @@ same three rules the editor's are, rather than getting a free pass for being new
 **Still to come:** publishing itself — writing a bundle into the built site and
 deploying it. Nothing here deploys anything.
 
+## Cut scenes
+
+Two of them, both edited from the Game Maker: **Opening…** plays when someone
+presses Play, before the first world; **Closing…** plays after the last world,
+just before the ending. Each is a few panels, and a panel is a picture and some
+words — either alone is enough.
+
+**Skip is always on screen.** A family game gets replayed, and a story you
+cannot get past turns into an obstacle the second time through.
+
+**Cut scenes (2026-09-02).** The one content feature named in the original goal
+and not yet built. Deliberately after publishing rather than before it: every
+content feature added ahead of the bundle is one more thing the bundle has to
+learn to carry, and it had now been carried once.
+
+**A picture is a background-library id.** Not a new asset store — the pool
+behind *Upload BG* already downscales to 1600px, re-encodes as JPEG, is shared
+across profiles, and travels in a bundle by reference, and `AssetPickerMenu` is
+already the dropdown that picks from it. So cut scenes added no upload path, no
+storage and no loader; what they added is one more reference walk for the
+collector, and **that shipped in the same commit**. It had to: a picture
+collected only from levels would have been plainly there while authoring and
+silently gone on the link.
+
+**`hasContent`, not `panels.length`.** Someone who presses *Add panel* three
+times and types nothing has not made a cut scene, and answering the seam with a
+count would hand them three blank screens to click through before their own game
+started. The maker says so too — an empty panel's chip is outlined rather than
+filled, and its preview reads "This panel is empty, so it will not play."
+
+**`ParagraphInput` is a sibling of `LevelNameInput`, not a copy of it.** That
+class's docstring records three fixes found the hard way — keydown
+`stopPropagation` (or a space in your caption launches Test Play), a
+capture-phase `document` blur (or clicking Save commits the *previous* value),
+and Escape-reverts — and a second copy would reintroduce them the next time
+either was touched. The one deliberate divergence: **Enter types a newline**, so
+a paragraph commits on blur alone, which the capture-phase handler makes
+reliable.
+
+**Pictures load under a key per asset id**, not the single shared
+`bg-static-custom` a level uses. A cut scene shows several pictures in sequence,
+and one shared key would mean removing and re-adding a texture on every panel
+turn — the exact destructive path `backgroundLoader.ts` documents crashing on.
+
+`CutSceneScene` knows nothing about games: it takes the panels and an
+instruction for what to start afterwards, which is what lets one scene serve
+both ends and what will keep a per-world cut scene, later, out of this file.
+Where a run begins and ends lives in `game/gameRun.ts` — both seams together, so
+the two ends of a game cannot drift apart.
+
 ## Publishing a game
 
 Three steps, none of them a command line. The **Publish…** button in the Game
@@ -4554,7 +4604,9 @@ src/
 │   ├── GameMakerScene.ts     title + worlds in order + an ending, and Play Game — see "A game" under Art
 │   ├── EndingScene.ts        the screen after the last world: the author's own words over the trophy
 │   ├── ThingMakerScene.ts    invent an item/enemy/decoration: name it, say what it acts like, hand off to the Skin Creator to draw it — see "The Thing Maker" under Art
-│   └── PublishScene.ts       download the file, put it in public/games/, send the link — see "Publishing a game"
+│   ├── PublishScene.ts       download the file, put it in public/games/, send the link — see "Publishing a game"
+│   ├── CutSceneMakerScene.ts one panel at a time: its picture, its words, and where it sits — see "Cut scenes"
+│   └── CutSceneScene.ts      plays a cut scene, and knows nothing about games — Next, Skip, then whatever comes after
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions
 │   ├── TilePainter.ts        raw mutator for the ground tile layer
@@ -4562,6 +4614,7 @@ src/
 │   ├── EditorUI.ts           header + footer + left Palette panel (category chip/dropdown + 2-col grid + Skin) + right Level Settings panel rendering
 │   ├── FileInputOverlay.ts   a real, invisible <input type=file> positioned over an EditorUI upload button (Upload BG or Upload Music) — see "Custom uploaded backgrounds" under Art for why a Phaser-driven click can't open a real file picker
 │   ├── LevelNameInput.ts     a real, visible <input type=text> for the level name (Phaser has no native text-entry widget) — see "Level name" under Art, including two non-obvious bugs found/fixed while building it
+│   ├── ParagraphInput.ts     the same, as a <textarea>, for a cut-scene panel's several lines — shares those two fixes; Enter types a newline, so it commits on blur
 │   ├── domOverlay.ts         positionOverlay() — converts game coordinates to real CSS pixels over the canvas, shared by FileInputOverlay and LevelNameInput
 │   ├── customBackgroundUpload.ts downscales/re-encodes a picked image file into a background-ready JPEG data URL
 │   ├── musicUpload.ts        reads a picked audio file as-is (no re-encoding possible), rejecting anything over 4MB — see "Music" under Art
@@ -4620,7 +4673,9 @@ src/
 │   ├── entityRegistry.ts       built-ins ∪ valid custom defs, as one list — what PlayScene and the palette read instead of the constants (+ unit tests)
 │   └── customEntityStorage.ts  load/save/remove against the shared, non-profile-scoped custom-entities.json, same caching pattern as skinStorage.ts
 ├── game/
-│   ├── GameSchema.ts           GameData (title, ordered worldIds, ending) + its rules: createEmptyGame/validationError/moveWorld/isGameComplete (pure, + unit tests)
+│   ├── GameSchema.ts           GameData (title, ordered worldIds, ending, the two cut scenes) + its rules (pure, + unit tests)
+│   ├── CutScene.ts             panels of picture-and-words: what plays, what moving one means, and which pictures a game reaches (pure, + unit tests)
+│   ├── gameRun.ts              where a run starts and ends — the opening's and closing's seams in one place (pure, + unit tests)
 │   ├── gameStorage.ts          the one game per profile, mirroring the world adapter's file-per-record appProperties pattern
 │   ├── gameBundle.ts           a whole game in one file: the reference walk, bundleProblems, the size summary, and the slug the file and link share (pure, + unit tests)
 │   ├── collectBundle.ts        the Drive reads that fill a bundle, kept apart from the rules above

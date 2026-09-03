@@ -1,5 +1,6 @@
 import { BackgroundAsset } from "../backgrounds/BackgroundLibrary";
 import { CustomEntityDef, CustomEntityId, isCustomEntityId } from "../entities/customEntity";
+import { cutSceneBackgroundIds } from "./CutScene";
 import { LevelArea, LevelData } from "../level/LevelSchema";
 import { MusicAsset } from "../music/MusicLibrary";
 import { CustomSkinsFile } from "../skins/CustomSkins";
@@ -125,6 +126,9 @@ export function bundleProblems(bundle: GameBundle): string[] {
   }
   for (const id of referencedBackgroundIds(bundle.levels)) {
     if (!backgroundIds.has(id)) problems.push(`An uploaded background is missing (${id}); those areas fall back.`);
+  }
+  for (const id of cutSceneBackgroundIds(bundle.game.opening, bundle.game.closing)) {
+    if (!backgroundIds.has(id)) problems.push(`A cut-scene picture is missing (${id}); that panel shows its words only.`);
   }
   for (const id of referencedMusicIds(bundle.levels)) {
     if (!musicIds.has(id)) problems.push(`An uploaded track is missing (${id}); those areas play silently.`);

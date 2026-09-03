@@ -42,6 +42,38 @@ function loadCustomTexture(scene: Phaser.Scene, dataUrl: string): Promise<string
 }
 
 /**
+ * One library image, under a key of its own.
+ *
+ * Deliberately *not* the shared `CUSTOM_BACKGROUND_TEXTURE_KEY` above. That key
+ * is right for a level, where exactly one custom background is on screen at a
+ * time; a cut scene shows several pictures in sequence, and a single shared key
+ * would mean removing and re-adding a texture on every panel turn — the exact
+ * destructive path the comment above documents crashing on. Keyed per asset id
+ * instead: nothing is ever removed, panels can flip back and forth freely, and
+ * a level's background and a cut scene's picture never contend for one key even
+ * when they are the same image.
+ *
+ * Returns null when the id names nothing — a picture deleted from the library
+ * after a panel referenced it. The panel then shows its words on the plain
+ * backdrop, which is the same "fall back rather than fail" stance
+ * `resolveBackgroundTextureKey` takes below.
+ */
+export async function loadLibraryImageTexture(scene: Phaser.Scene, assetId: string): Promise<string | null> {
+  const key = `cutscene-bg-${assetId}`;
+  if (scene.textures.exists(key)) return key;
+  const library = await loadBackgroundLibrary();
+  const asset = library.find((item) => item.id === assetId);
+  if (!asset) return null;
+  // Re-checked after the await: two panels naming the same picture can both be
+  // in flight, and addBase64 on an existing key is the destructive path.
+  if (scene.textures.exists(key)) return key;
+  return new Promise((resolve) => {
+    scene.textures.once(Phaser.Textures.Events.ADD_KEY + key, () => resolve(key));
+    scene.textures.addBase64(key, asset.imageData);
+  });
+}
+
+/**
  * Resolves which texture key `StaticBackground` should render for this
  * level — synchronous (well, immediately-resolving) for every built-in
  * background, since BootScene already preloaded it, or a genuine async

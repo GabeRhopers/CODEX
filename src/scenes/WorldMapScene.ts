@@ -9,20 +9,18 @@ import { cellCenter, MAP_COLS, MAP_ROWS, orderedCells, resolveLayout, type MapRe
 import { circleHitArgs } from "../ui/touchTarget";
 import { completedCount, currentIndex, isUnlocked, isWorldComplete } from "../world/worldProgress";
 import { WorldData } from "../world/WorldSchema";
-import { GameEnding } from "../game/GameSchema";
+import { endOfGameScene, type GameRunContext } from "../game/gameRun";
 import { isPlayOnly } from "../game/contentSource";
 
-/** Where this world sits in a game, when it is being played as part of one.
+/**
+ * Where this world sits in a game, when it is being played as part of one.
  *
- * Carried through the run rather than re-read, because the game document is
- * this screen's caller's to own — and `ending` travels with it so finishing has
- * the author's words in hand without a second read that could disagree. */
-export interface GameRunContext {
-  worldIds: string[];
-  index: number;
-  title: string;
-  ending: GameEnding;
-}
+ * Defined in `game/gameRun.ts` now and re-exported here, because the two screens
+ * that *begin* a run build it and this one only receives it. Re-exported rather
+ * than moved outright so `PlayScene`'s existing import keeps working and this
+ * change stays about cut scenes.
+ */
+export type { GameRunContext };
 
 interface WorldMapSceneData {
   worldId: string;
@@ -300,7 +298,12 @@ export class WorldMapScene extends Phaser.Scene {
     button.on("pointerout", () => button.setStyle({ backgroundColor: "#2e7d32" }));
     button.on("pointerdown", () => {
       if (isLast) {
-        this.scene.start("Ending", { ending: game.ending, title: game.title });
+        // The closing cut scene, then the ending — or straight to the ending
+        // when there is no closing. Which of those it is lives in `gameRun.ts`
+        // beside the opening's own branch, so the two ends of a game cannot
+        // drift apart.
+        const next = endOfGameScene(game);
+        this.scene.start(next.key, next.data);
         return;
       }
       this.scene.start("WorldMap", {

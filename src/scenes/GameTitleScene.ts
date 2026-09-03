@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { activeBundle } from "../game/contentSource";
+import { firstSceneOfGame } from "../game/gameRun";
 
 /**
  * The front door of a published game.
@@ -72,16 +73,10 @@ export class GameTitleScene extends Phaser.Scene {
   private start(): void {
     const bundle = activeBundle();
     if (!bundle || bundle.worlds.length === 0) return;
-    // The same shape the Game Maker's own Play Game hands over, so a published
+    // `firstSceneOfGame` decides whether an opening cut scene comes first, and
+    // builds the hand-over the Game Maker's own Play Game uses too — a published
     // run and a tested one go down one code path rather than two.
-    this.scene.start("WorldMap", {
-      worldId: bundle.game.worldIds[0],
-      game: {
-        worldIds: bundle.game.worldIds,
-        index: 0,
-        title: bundle.game.title,
-        ending: bundle.game.ending,
-      },
-    });
+    const first = firstSceneOfGame(bundle.game);
+    this.scene.start(first.key, first.data);
   }
 }

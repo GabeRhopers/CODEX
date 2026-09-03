@@ -10,6 +10,8 @@ import { SkinEditorScene } from "./scenes/SkinEditorScene";
 import { ThingMakerScene } from "./scenes/ThingMakerScene";
 import { GameMakerScene } from "./scenes/GameMakerScene";
 import { PublishScene } from "./scenes/PublishScene";
+import { CutSceneScene } from "./scenes/CutSceneScene";
+import { CutSceneMakerScene } from "./scenes/CutSceneMakerScene";
 import { EndingScene } from "./scenes/EndingScene";
 import { GameTitleScene } from "./scenes/GameTitleScene";
 import { TemplateBrowserScene } from "./scenes/TemplateBrowserScene";
@@ -73,6 +75,8 @@ const config: Phaser.Types.Core.GameConfig = {
     ThingMakerScene,
     GameMakerScene,
     PublishScene,
+    CutSceneMakerScene,
+    CutSceneScene,
     EndingScene,
     GameTitleScene,
   ],

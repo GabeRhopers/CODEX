@@ -11,6 +11,8 @@ import {
   validationError,
 } from "../game/GameSchema";
 import { loadGame, saveGame } from "../game/gameStorage";
+import { firstSceneOfGame } from "../game/gameRun";
+import type { CutSceneSlot } from "./CutSceneMakerScene";
 import { getWorldStorage } from "../persistence/storage";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { WorldSummary } from "../world/WorldSchema";
@@ -378,6 +380,11 @@ export class GameMakerScene extends Phaser.Scene {
     this.makeButton(24, ACTIONS_Y, "Save", () => void this.save());
     this.makeButton(90, ACTIONS_Y, "Play Game ▶", () => void this.play());
     this.makeButton(206, ACTIONS_Y, "Publish…", () => void this.publish());
+    // The two cut scenes, named by when they play rather than "Cut scenes…" —
+    // this row is where someone decides what happens, and "Opening" says that
+    // without needing the screen opened to find out.
+    this.makeButton(320, ACTIONS_Y, "Opening…", () => void this.editCutScene("opening"));
+    this.makeButton(404, ACTIONS_Y, "Closing…", () => void this.editCutScene("closing"));
   }
 
   /** The reason is `validationError`'s, verbatim — this screen never composes
@@ -417,6 +424,19 @@ export class GameMakerScene extends Phaser.Scene {
    * of three steps, and the other two — where to put it, and what the link ends
    * up being — need room this screen's single status line does not have.
    */
+  /**
+   * Opens one of the game's two cut scenes for editing.
+   *
+   * Saves first, exactly as Publish and Play do, and for a load-bearing reason
+   * here: the cut-scene screen writes the game document back when it leaves, so
+   * it must start from one that is already valid and stored. That is what lets
+   * it save without re-running validation it has no way to show.
+   */
+  private async editCutScene(slot: CutSceneSlot): Promise<void> {
+    if (!(await this.save())) return;
+    this.scene.start("CutSceneMaker", { game: this.gameDoc, slot });
+  }
+
   private async publish(): Promise<void> {
     if (!(await this.save())) return;
     this.scene.start("Publish", { game: this.gameDoc });
@@ -431,14 +451,7 @@ export class GameMakerScene extends Phaser.Scene {
    */
   private async play(): Promise<void> {
     if (!(await this.save())) return;
-    this.scene.start("WorldMap", {
-      worldId: this.gameDoc.worldIds[0],
-      game: {
-        worldIds: this.gameDoc.worldIds,
-        index: 0,
-        title: this.gameDoc.title,
-        ending: this.gameDoc.ending,
-      },
-    });
+    const first = firstSceneOfGame(this.gameDoc);
+    this.scene.start(first.key, first.data);
   }
 }
