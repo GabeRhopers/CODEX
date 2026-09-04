@@ -39,8 +39,21 @@ jobs:
   # drives its own `npm run dev` instance via playwright.config.ts's
   # webServer, not the production bundle `build` produces) so both can run
   # in parallel; `deploy` below waits on both.
+  # Sharded across three runners because this job gates the deploy and had
+  # grown to ~53 minutes at 171 tests. Each shard is a separate machine
+  # running its own third of the suite, and every one of them keeps
+  # playwright.config.ts's `workers: 1` — so this is three machines doing a
+  # third each, not one machine running three tests at once. That
+  # distinction is the whole point: the timing-sensitive physics specs never
+  # share a CPU with anything.
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      # Keeps every shard running when one fails, so a red run reports all
+      # of its failures at once instead of one per push.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,11 +61,14 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          # Named per shard: three jobs uploading "playwright-report" would
+          # collide, and upload-artifact v4 rejects a duplicate name rather
+          # than merging.
+          name: playwright-report-shard-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
 
