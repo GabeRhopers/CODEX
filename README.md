@@ -4689,6 +4689,9 @@ src/
 └── assets/
     └── generateTextures.ts   procedural art still in use: Castle's blocks + UI chrome
 
+art-source/
+└── parallax-scenes/          the dormant parallax art, kept out of public/ so it is not shipped — see BootScene's commented-out preload
+
 public/assets/
 ├── wizard/                   idle.png, walk1.png, walk2.png, jump.png, cast.png (hand-drawn)
 ├── entities/                 ghost-pillow.png (hand-drawn); caged-sheep.png (goal art, project-owner-supplied — see "Goal art" under Art); bat.png, bat-perched.png, spike-crawler.png, golem.png, trophy.png, chest.png (Kenney)

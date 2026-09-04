@@ -91,6 +91,14 @@ export class BootScene extends Phaser.Scene {
     // backgrounds.ts's docstring — so they were dropped from the pool
     // entirely.
     //
+    // **The art moved out of public/ on 2026-09-04** and now lives in
+    // `art-source/parallax-scenes/`. Vite copies public/ verbatim, so eight
+    // dormant PNGs nothing preloads were still 1.8MB of every visitor's
+    // download — a quarter of the whole site — for a feature that is switched
+    // off. Reviving the picker means moving them back here *and* uncommenting
+    // the loop below; the loop is left pointing at the old path on purpose, so
+    // whoever does one is forced to notice the other.
+    //
     // for (const scene of ["green-valley", "pirate-cove", "overgrown-ruins", "snowy-peaks"]) {
     //   this.load.image(`bg-${scene}-far`, `assets/backgrounds/scenes/${scene}-far.png`);
     //   this.load.image(`bg-${scene}-near`, `assets/backgrounds/scenes/${scene}-near.png`);

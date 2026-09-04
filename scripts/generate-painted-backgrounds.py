@@ -22,9 +22,22 @@ descriptions. `pirate-cove`/`overgrown-ruins`/`snowy-peaks` replace
 earlier, sparser versions of the same three scenes; `green-valley` is
 new and is the pool's default (see backgrounds.ts).
 
-Reproducible: every random placement below is seeded, so re-running this
-script regenerates byte-identical output. Not part of the build — run it
-once, commit the PNGs, same as prepare-kenney-assets.py.
+Not part of the build — run it once, commit the PNGs, same as
+prepare-kenney-assets.py.
+
+**Its output is NOT byte-identical on a re-run, despite the seeding.** That was
+claimed here and checked on 2026-09-04 before deleting the committed art on the
+strength of it: six of the eight files reproduce exactly, and `green-valley`'s
+two do not. Whatever drifts (an unseeded call in its generator, a Pillow version
+difference, or a later hand-edit) has not been chased down, because the art is
+committed and that is what the game would use. Treat the committed PNGs as the
+source of truth, not this script.
+
+The art lives in `art-source/parallax-scenes/`, deliberately *outside*
+`public/`: it is dormant (see BootScene's commented-out preload) and Vite copies
+`public/` verbatim, so leaving it there shipped 1.8MB to every visitor for art
+nothing loads. Move it back under public/assets/backgrounds/scenes/ when the
+parallax picker returns.
 """
 
 import random
@@ -36,7 +49,7 @@ WIDTH = 2048
 HEIGHT = 476
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = REPO_ROOT / "public" / "assets" / "backgrounds" / "scenes"
+OUT_DIR = REPO_ROOT / "art-source" / "parallax-scenes"
 
 
 def lerp_color(a, b, t):
