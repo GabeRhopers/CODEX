@@ -259,13 +259,16 @@ test("the cut-scene screens are laid out soundly", async ({ page }) => {
   await assertLayoutSound(page, "CutScene");
 });
 
-test("the published game plays its opening, with no Drive at all", async ({ browser }) => {
+test("the published game plays its opening, with no Drive at all", async ({ page: authorPage, browser }) => {
   test.slow();
-  // Authored in one context, played in a clean one: a published visitor has no
-  // token and no profile, so a cut scene that renders there can only have come
-  // from the bundle.
-  const authorContext = await browser.newContext();
-  const authorPage = await authorContext.newPage();
+  // Authored in the ordinary editor page, played in a clean context: a published
+  // visitor has no token and no profile, so a cut scene that renders there can
+  // only have come from the bundle.
+  //
+  // The author side uses the `page` fixture rather than a hand-rolled context.
+  // Creating and closing contexts is not free — measured at a 6.6x blow-up on
+  // the specs that follow published-game.spec.ts, see its own note — so this
+  // file makes exactly the one it genuinely needs.
   await gotoApp(authorPage);
   await buildGame(authorPage);
   await clickByText(authorPage, "GameMaker", "Opening…");
@@ -280,7 +283,6 @@ test("the published game plays its opening, with no Drive at all", async ({ brow
     clickByText(authorPage, "Publish", "Download"),
   ]);
   const bundle = JSON.parse(readFileSync(await download.path(), "utf8")) as GameBundle;
-  await authorContext.close();
 
   const context = await browser.newContext();
   const page = await context.newPage();

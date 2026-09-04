@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { clickByText, gotoApp, waitForGame } from "./support/coords";
 import { makeWorld, seedLevels, seedWorlds } from "./support/worlds";
@@ -35,6 +35,36 @@ import { assertLayoutSound } from "./support/layout";
  * project runs Playwright with a single worker.
  */
 let cachedBundle: GameBundle | null = null;
+
+/**
+ * One clean context for every published visit, rather than one per test.
+ *
+ * **Measured, not guessed.** Opening and closing a browser context per test was
+ * costing far more than the tests themselves: the three Skin Creator specs that
+ * run straight after this file took 108s on their own, 120s after an equally
+ * long spec that does not churn contexts, and **792s** after this one — a 6.6x
+ * blow-up that produced the suite's recurring "passes alone, fails together"
+ * failures. One context, a fresh page per test, and that disappears.
+ *
+ * **The isolation is unchanged, and it is the whole point of this file.** What
+ * makes a published visit honest is that the mocked Drive and the seeded profile
+ * were never installed — a mutation once proved a shared *editor* context hid
+ * exactly that. This context is created by `browser.newContext()` and
+ * `installMockDrive` is never called on it, so a visitor here still has nothing;
+ * `openPublished` clears localStorage on top, so they do not even inherit the
+ * previous test's progress.
+ */
+let cleanContext: BrowserContext | null = null;
+
+async function publishedContext(browser: Browser): Promise<BrowserContext> {
+  if (!cleanContext) cleanContext = await browser.newContext();
+  return cleanContext;
+}
+
+test.afterAll(async () => {
+  await cleanContext?.close();
+  cleanContext = null;
+});
 
 async function realBundle(browser: Browser): Promise<GameBundle> {
   if (cachedBundle) return cachedBundle;
@@ -81,8 +111,12 @@ async function exportRealBundle(page: Page): Promise<GameBundle> {
  * file.
  */
 async function openPublished(browser: Browser, bundle: GameBundle): Promise<Page> {
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const page = await (await publishedContext(browser)).newPage();
+  // Cleared at every navigation, which is what a *page* per test buys back from
+  // sharing a context: localStorage is per-origin, so one test beating both
+  // worlds would otherwise leave its progress banked for the next one. Nothing
+  // here needs storage to persist — the game arrives from the route below.
+  await page.addInitScript(() => localStorage.clear());
   await page.route("**/game.json", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(bundle) }),
   );
@@ -101,8 +135,8 @@ async function openPublished(browser: Browser, bundle: GameBundle): Promise<Page
  * served here so neither can quietly stop working.
  */
 async function openPublishedBySlug(browser: Browser, slug: string, bundle: GameBundle | null): Promise<Page> {
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const page = await (await publishedContext(browser)).newPage();
+  await page.addInitScript(() => localStorage.clear());
   await page.route(`**/games/${slug}.json`, (route) =>
     bundle
       ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(bundle) })
@@ -296,8 +330,8 @@ test("a ?game= value that could point elsewhere is refused outright", async ({ b
   // `new URL("games/../../x", base)` resolves happily, so the slug pattern is
   // the only thing stopping a crafted link from making the page fetch somewhere
   // else. Refused before any request: the route below must never be hit.
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const page = await (await publishedContext(browser)).newPage();
+  await page.addInitScript(() => localStorage.clear());
   // Every request the page makes, watched rather than intercepted: the boot's
   // own game.json fetch is legitimate and must still happen, so what is checked
   // is that nothing reaching for the crafted path is ever asked for.
@@ -315,13 +349,14 @@ test("a ?game= value that could point elsewhere is refused outright", async ({ b
   // visit — and nothing climbed out of the games folder to get there.
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("ProfileGate"), undefined, { timeout: 20_000 });
   expect(paths.filter((path) => path.includes("secret"))).toEqual([]);
-  await context.close();
 });
 
-test("the Publish screen is laid out soundly", async ({ browser }) => {
+// The `page` fixture, not a hand-rolled context: this is an ordinary *editor*
+// session — `gotoApp` installs the mocked Drive — so it must stay off the clean
+// context the published visits share, and Playwright already gives the fixture a
+// fresh context of its own per test.
+test("the Publish screen is laid out soundly", async ({ page }) => {
   test.slow();
-  const context = await browser.newContext();
-  const page = await context.newPage();
   await gotoApp(page);
   const levels = await seedLevels(page, ["Green Hill"]);
   await seedWorlds(page, [makeWorld("w1", "World One", [levels[0]])]);
@@ -349,5 +384,4 @@ test("the Publish screen is laid out soundly", async ({ browser }) => {
   // The report of what was written must not run into the step below it.
   await expect.poll(() => labels(page, "Publish").then((l) => l.join(" "))).toContain("Saved 1 world");
   await assertLayoutSound(page, "Publish");
-  await context.close();
 });
