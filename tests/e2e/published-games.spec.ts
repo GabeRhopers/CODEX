@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundleProblems, gameSlug, type GameBundle } from "../../src/game/gameBundle";
+import { EMPTY_TILE } from "../../src/level/LevelSchema";
 
 /**
  * The games actually published on this site still work.
@@ -51,5 +52,34 @@ test("every published game is complete and reachable at its own link", () => {
     expect(bundle.game.worldIds.length, `${file} has no worlds`).toBeGreaterThan(0);
     expect(bundle.worlds.length).toBe(bundle.game.worldIds.length);
     expect(bundle.levels.length, `${file} has no levels`).toBeGreaterThan(0);
+
+    // Every level is finishable in the only sense a file can be checked for:
+    // there is a goal, there is a spawn, and neither is hanging in mid-air.
+    // Not what caught the first demo — its goal did sit on its slab — but the
+    // same family of defect, and cheap.
+    for (const level of bundle.levels) {
+      const ground = level.layers.ground;
+      const solid = (x: number, y: number): boolean =>
+        y >= 0 && y < ground.length && x >= 0 && x < ground[y].length && ground[y][x] !== EMPTY_TILE;
+      const where = `${file}: "${level.name}"`;
+
+      for (const type of ["player-spawn", "goal"] as const) {
+        const marker = level.entities.find((entity) => entity.type === type);
+        expect(marker, `${where} has no ${type}`).toBeDefined();
+        expect(
+          solid(marker!.x, marker!.y + 1),
+          `${where}: the ${type} at (${marker!.x}, ${marker!.y}) has nothing under it`,
+        ).toBe(true);
+      }
+
+      // **This is the one that would have caught the first demo.** All three of
+      // its levels were 20 tiles — 640px against a 1050px canvas — so the whole
+      // level was visible from the spawn point, including the void past its
+      // right-hand edge, and nothing scrolled. They were also a single row of
+      // ground with nothing under it, which no file check can call wrong on its
+      // own (a floating platform is a legitimate thing to build); the width is
+      // the proxy that fails on a level nobody walked through before shipping.
+      expect(level.width, `${where} is only ${level.width} tiles — it fits on one screen`).toBeGreaterThan(33);
+    }
   }
 });
