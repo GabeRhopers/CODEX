@@ -98,6 +98,48 @@ export function panForAnchor(
   return clampPan(anchor - fraction * newContentSize, newContentSize, viewportSize);
 }
 
+/**
+ * Below this many screen pixels a checkerboard square stops reading as "this
+ * area is empty" and starts being visual noise. 8 is what the board was fixed
+ * at before it was made cell-aware, so the busiest case it can reach now is the
+ * one that always shipped.
+ */
+const MIN_CHECKER_PX = 8;
+
+/**
+ * On-screen size of one square of the transparency checkerboard, in CSS pixels
+ * — always a **whole number of cells**.
+ *
+ * The board used to be a flat 16px tile (two 8px squares) at every zoom, on the
+ * reasoning that it answers "is this transparent", a question about what you can
+ * see rather than about the grid. That reasoning is sound and the result was
+ * still wrong, because of what an empty canvas actually is: nothing *but* this
+ * board, with the grid lines off by default. Its squares are therefore the only
+ * grid a first-time user has, and they were not the grid. At fit zoom on the 32
+ * canvas a cell is 12.19px against an 8px square, so the squares you count are
+ * two thirds of the cells you paint and every stroke straddles them. Reported
+ * from use, in those words.
+ *
+ * Whole cells rather than one-square-per-cell: at the bottom of the zoom ladder
+ * a cell is 3.3px, and a board that fine is a shimmer. Grouping cells keeps the
+ * squares comfortable to look at while every square boundary stays on a cell
+ * boundary, which is the property that was missing.
+ *
+ * Deliberately *not* clamped from above. One square per cell at ×8 zoom is a
+ * board of 97px squares, which looks like a lot until you notice it is telling
+ * you exactly where each pixel you are placing begins and ends — the reason to
+ * be zoomed in that far at all.
+ */
+export function checkerSquarePx(contentPx: number, gridSize: number): number {
+  // A zero-width content box happens for real: reposition() runs before the
+  // game canvas has been laid out. Returning the floor keeps the CSS valid
+  // rather than writing NaN into background-size.
+  if (!(contentPx > 0) || !(gridSize > 0)) return MIN_CHECKER_PX;
+  const cellPx = contentPx / gridSize;
+  const cellsPerSquare = Math.min(gridSize, Math.max(1, Math.ceil(MIN_CHECKER_PX / cellPx)));
+  return cellsPerSquare * cellPx;
+}
+
 /** The readout beside the zoom buttons — "×1" at fit, "×0.5" zoomed out. */
 export function formatZoom(index: number): string {
   return `×${zoomFactorAt(index)}`;

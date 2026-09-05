@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import {
+  checkerSquarePx,
   clampPan,
   clampZoomIndex,
   contentSizeFor,
@@ -69,15 +70,18 @@ export interface PixelCanvasOptions {
 // (canvas.toDataURL) only ever serializes the canvas's own drawn bitmap, so
 // no styling here can leak into a saved skin's transparency.
 //
-// Its squares are a fixed screen size rather than a fixed number of cells:
-// it answers "is this transparent", which is a question about what you can
-// see, not about the grid — a checkerboard that zoomed with the drawing would
-// turn into two enormous squares behind a magnified pixel.
+// A single conic gradient: its four quadrants tile into a 2x2 checker with the
+// squares' edges on the tile's own centre lines, so the *only* thing that has
+// to be right is `background-size` — which is written per-zoom by
+// applyCheckerboard(), because the squares track the cells (see
+// checkerSquarePx). The four-linear-gradient version this replaced needed a
+// matching set of four background-positions as well, and got them wrong for
+// any square size it had not been hardcoded for.
+//
+// `backgroundColor` is the fallback where conic-gradient is unsupported: a flat
+// grey, which still reads as "not the page behind" even with no checker at all.
 const CHECKERBOARD_CSS = {
-  backgroundImage:
-    "linear-gradient(45deg, #666 25%, transparent 25%), linear-gradient(-45deg, #666 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #666 75%), linear-gradient(-45deg, transparent 75%, #666 75%)",
-  backgroundSize: "16px 16px",
-  backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
+  backgroundImage: "conic-gradient(#666 0deg 90deg, #999 90deg 180deg, #666 180deg 270deg, #999 270deg 360deg)",
   backgroundColor: "#999999",
 };
 
@@ -840,6 +844,21 @@ export class PixelCanvasOverlay {
     this.contentEl.style.top = `${this.panY * scale}px`;
     this.contentEl.style.width = `${size * scale}px`;
     this.contentEl.style.height = `${size * scale}px`;
+    // The board is sized in real screen pixels, so it has to be rewritten
+    // whenever the content box changes size — which is here, and only here.
+    this.applyCheckerboard(size * scale);
+  }
+
+  /**
+   * Squares the transparency checkerboard to the cells, in the same CSS-pixel
+   * scale everything else in the content box uses.
+   *
+   * The conic gradient's own quadrants are the squares, so one tile is two
+   * squares across and nothing else needs positioning — see CHECKERBOARD_CSS.
+   */
+  private applyCheckerboard(contentPx: number): void {
+    const tile = checkerSquarePx(contentPx, this.gridSize) * 2;
+    this.checkerEl.style.backgroundSize = `${tile}px ${tile}px`;
   }
 
   destroy(): void {

@@ -4022,9 +4022,10 @@ canvas box stopped being the window.
 as an inset box-shadow so it costs no layout — a real 1px border shifts an
 absolutely-positioned child by a pixel) wrapping one `contentEl` that scales and
 moves, with the checkerboard, reference, canvas and grid filling it. Pan/zoom is
-then one position write rather than four kept in step. The checkerboard stays a
-fixed 16px on screen rather than scaling with the drawing: it answers "is this
-transparent", a question about what you can see. Grid lines stop drawing below
+then one position write rather than four kept in step. The checkerboard was a
+fixed 16px on screen rather than scaling with the drawing, on the reasoning that
+it answers "is this transparent", a question about what you can see — which was
+wrong for a reason that took a bug report to see (below). Grid lines stop drawing below
 4px per cell without switching the toggle off, so zooming back in restores them.
 The left column gained Fit and a `x2` readout — without it, three clicks of
 Zoom + and three of Zoom - are indistinguishable from having done nothing.
@@ -4072,6 +4073,43 @@ rather than stretching; a plain scale-to-fill widened him by more than half
 again. And the first version listed every skinnable brush: the screenshot
 showed ~30 entries running off the bottom of the canvas with their labels
 colliding, so the list became the animated cast plus whatever you're editing.
+
+**The background didn't match the pixels you painted (2026-09-05).** Reported
+from use, in those words. The checkerboard was a fixed 16px tile — two 8px
+squares — at every zoom, while a cell at fit zoom on the 32 canvas is
+**12.19px**. The reasoning above ("it answers *is this transparent*, a question
+about what you can see") is sound and the conclusion was still wrong, because of
+what an empty canvas actually is: nothing *but* that board, with the grid lines
+off by default. Its squares are therefore the only grid a first-time user has,
+and they were two thirds the size of the cells, so every stroke straddled them.
+A screenshot of a blank canvas with three cells painted made it obvious
+instantly — the painted blocks are visibly a different size from the squares
+behind them.
+
+`checkerSquarePx` (in `canvasZoom.ts`, unit-tested there) now sizes a square as
+a **whole number of cells**: `max(1, ceil(8 / cellPx))` of them, so a square
+boundary is always a cell boundary. Whole cells rather than one-per-cell because
+the bottom of the zoom ladder on the 48 canvas is 3.3px per cell and a board
+that fine is a shimmer; 8px is what it was fixed at before, so the busiest case
+it can now reach is the one that always shipped. Not capped from above — one
+square per cell at x8 is exactly what you want when placing a single pixel. The
+four stacked linear gradients became one `conic-gradient` whose quadrants *are*
+the squares, so `background-size` is the only thing that has to be right; the
+old version also needed four matching `background-position`s, and got them wrong
+for any size it hadn't been hardcoded for.
+
+*A wrong diagnosis, recorded because it was expensive.* The first theory blamed
+the grid **lines**: a CSS gradient repeats at exact fractions (`k x width /
+gridSize`) while a `pixelated` upscale is nearest-neighbour and snaps to whole
+device pixels (`round(k x width / gridSize)`), so they agree only when the box
+is an exact multiple of `gridSize`, which nothing arranges. All true, and
+irrelevant — instrumented in the browser, the worst disagreement was **0.48px**.
+The fix it implied (round each cell to a whole device pixel) was also mis-costed
+as sub-pixel: rounding a *cell* moves the *box* by up to half a grid, turning
+390.09px into 384px, which would leave the drawing not filling its own window at
+fit zoom. Measuring first would have cost one browser run. `skin-grid-alignment.spec.ts`
+keeps a 0.5px guard on that drift anyway, alongside the test that actually
+failed.
 
 **Multi-frame sprite editor: a paintable character and animated enemies
 (2026-08-22).** The Skin Creator can now paint *several* frames per skin —

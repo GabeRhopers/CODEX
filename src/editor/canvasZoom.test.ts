@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkerSquarePx,
   clampPan,
   clampZoomIndex,
   contentSizeFor,
@@ -97,5 +98,63 @@ describe("panForAnchor", () => {
     // Coming back down past fit, the "keep the anchor fixed" answer would leave
     // the sprite off-centre in a window it no longer fills; clampPan wins.
     expect(panForAnchor(-300, 640, 160, 0, 320)).toBe(80);
+  });
+});
+
+describe("the transparency checkerboard", () => {
+  // The property the reported bug was missing: an empty canvas is nothing but
+  // this board, with the grid lines off by default, so its squares are the only
+  // grid there is and they have to be the real one.
+  const landsOnCellBoundaries = (contentPx: number, gridSize: number): boolean => {
+    const square = checkerSquarePx(contentPx, gridSize);
+    const cell = contentPx / gridSize;
+    const cellsPerSquare = square / cell;
+    return Math.abs(cellsPerSquare - Math.round(cellsPerSquare)) < 1e-9;
+  };
+
+  it("is a whole number of cells at every zoom on both grid sizes", () => {
+    // The real range: the content box is VIEWPORT_SIZE * zoom * the display
+    // scale, and 1.219 is the scale a 1280-wide window produces — the case the
+    // bug was reported from.
+    for (const scale of [0.75, 1, 1.219, 2]) {
+      for (const gridSize of [32, 48]) {
+        for (let index = 0; index < ZOOM_FACTORS.length; index++) {
+          const contentPx = contentSizeFor(VIEWPORT_SIZE, index) * scale;
+          expect(
+            landsOnCellBoundaries(contentPx, gridSize),
+            `grid ${gridSize} at ×${ZOOM_FACTORS[index]}, scale ${scale}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("never draws squares so small they become a shimmer", () => {
+    // The bottom of the ladder on the 48 canvas is 3.3px per cell. One square
+    // per cell there would be a 3px board; grouping keeps it legible.
+    const contentPx = contentSizeFor(VIEWPORT_SIZE, 0);
+    expect(contentPx / 48).toBeLessThan(8);
+    expect(checkerSquarePx(contentPx, 48)).toBeGreaterThanOrEqual(8);
+  });
+
+  it("stops grouping as soon as a single cell is big enough", () => {
+    // 12.19px per cell — fit zoom on the 32 canvas, the exact case that was
+    // wrong: one square per cell, not two thirds of one.
+    expect(checkerSquarePx(390.09375, 32)).toBeCloseTo(12.1904, 4);
+    // And it keeps up rather than sticking: one square per cell all the way up.
+    expect(checkerSquarePx(3120.75, 32)).toBeCloseTo(97.523, 3);
+  });
+
+  it("survives the zero-sized box reposition() sees before layout", () => {
+    // Not hypothetical: reposition() runs before the game canvas has a size.
+    // NaN here would land in background-size and blank the board.
+    expect(Number.isFinite(checkerSquarePx(0, 32))).toBe(true);
+    expect(Number.isFinite(checkerSquarePx(390, 0))).toBe(true);
+    expect(Number.isFinite(checkerSquarePx(Number.NaN, 32))).toBe(true);
+  });
+
+  it("never asks for more squares than there are cells", () => {
+    // A drawing smaller than one square is one square, not a fraction of one.
+    expect(checkerSquarePx(4, 32)).toBe(4);
   });
 });
