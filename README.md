@@ -4074,6 +4074,48 @@ again. And the first version listed every skinnable brush: the screenshot
 showed ~30 entries running off the bottom of the canvas with their labels
 colliding, so the list became the animated cast plus whatever you're editing.
 
+**The drawing got the middle of the screen (2026-09-05).** Asked for from use:
+*"we need more room in the middle to do the drawings, maybe have a short one line
+at the footer for save undo etc and everything else on the sides."*
+
+The painting window was 320x320 in a 1050x468 scene, and the reason was directly
+above it: four stacked full-width rows — name and Save, the status line, the
+palette selector, the swatches-and-tools row — held its top edge at y=132. That
+is 28% of the scene height for about 96px of content, most of the band being the
+gaps between rows. Sideways was worse: the strips either side of the canvas were
+simply empty.
+
+So actions became one footer line (Back, the brush name, the name field, Undo,
+Redo, Save), and controls became columns: TOOLS and VIEW at x=16, FRAMES,
+COLOURS and SHADES at x=120, and PALETTE, DRAWING, REFERENCE and THIS SKIN on
+the rail at 766 that the reference picker's width already fixed. The columns run
+*past* the bottom of the canvas down to the footer, which is where the height to
+stack them vertically comes from. `VIEWPORT_SIZE` went 320 to **384** — 44% more
+area, and a cell at fit zoom on the 32 grid goes from 12.19px to 14.63px. Not
+400, which the width would also allow: the bottom of the zoom ladder has to stay
+under the old 200px floor for zooming out to still mean anything, and 400 x 0.5
+is exactly 200.
+
+Nothing changed but position and grouping — same buttons, same handlers, same
+two-tap confirms. Three things only screenshots caught. The right rail's last
+button ended at y=426 against a footer starting at 421, which `assertLayoutSound`
+did flag; tightening the heading and group gaps from 22/16 to 18/12 fixed it. The
+other two it could not flag, because it only compares *interactive* text: an
+empty "Yours" palette left a two-line hint hanging off a one-row colour grid and
+straight through the SHADES heading below, and the status line — whose longest
+message, "Copy — saving adds a new skin, the original is untouched", measures
+about 280px — had only 247px of footer to sit in. The status moved to the band
+between the drawing and the footer, where it has the whole width and sits under
+the thing it is talking about.
+
+The old code carried a lot of measured reasoning for geometry that no longer
+exists — the tool row's 4px clearance against the widest palette, the swatch gap
+cut from 6 to 4 to buy it back, the shade ramp costing no height "because the row
+left of the centred palette was empty". Those were rewritten rather than left
+arguing for a layout that is gone, and `skin-erase.spec.ts`'s guard on that
+clearance became a canvas-mode `assertLayoutSound` — the general form of the same
+check, and the only one this mode had.
+
 **The background didn't match the pixels you painted (2026-09-05).** Reported
 from use, in those words. The checkerboard was a fixed 16px tile — two 8px
 squares — at every zoom, while a cell at fit zoom on the 32 canvas is

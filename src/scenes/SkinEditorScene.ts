@@ -63,11 +63,49 @@ const ROW_START_Y = 90;
 const ROW_HEIGHT = 44;
 // Where the painting window sits. Fixed for the life of the scene: zoom moves
 // the drawing inside this box, never the box itself, so no button can be pushed
-// off the scene's 468px floor however far someone zooms in. 132 + 320 = 452.
-const CANVAS_TOP_Y = 132;
+// off the scene's 468px floor however far someone zooms in. 10 + 384 = 394,
+// which leaves the footer row its line and the side columns 40px of run-on
+// below the canvas — see buildCanvas's layout note.
+const CANVAS_TOP_Y = 10;
 /** Width of the reference picker, and therefore of the whole right rail — see
  * buildReferenceControls for why the picker cannot be narrower. */
 const REFERENCE_WIDTH = 260;
+
+// Everything this scene draws is a Phaser shape on one canvas, so a test that
+// wants "the shade ramp" and not "the palette" has no DOM to query and has to
+// pick the objects out of the display list somehow. It used to be by geometry —
+// `width === 24 && x < 250`, the ramp being the only 24px swatches left of the
+// centred palette row. That is a coincidence of a layout, not a fact about the
+// objects, and it broke the moment the 2026-09-05 rework put both groups in the
+// same column. Naming them says what they are and survives being moved.
+const SHADE_STEP_NAME = "shade-step";
+const PALETTE_SWATCH_NAME = "palette-swatch";
+
+// --- canvas-mode layout ---------------------------------------------------
+// One place for the geometry, so the three regions can be read against each
+// other rather than reconstructed from scattered literals. Everything here is
+// checked by eye and by assertLayoutSound; see buildCanvas.
+
+/** The one action line, at the scene's floor: Back, name, status, Undo/Redo/Save. */
+const FOOTER_Y = 434;
+/** Top of every side column. Above the canvas by a hair, so the first heading
+ * sits level with the drawing's top edge rather than below it. */
+const RAIL_TOP_Y = 8;
+/** Left region: two columns, both clear of the canvas's left edge at 333. */
+const LEFT_COL_X = 16;
+const LEFT_COL2_X = 120;
+/** Rendered height of a makeSmallButton: 12px text plus its 6px padding, twice. */
+const SMALL_BUTTON_H = 26;
+/** Small-button pitch in a vertical stack — the button plus 6px of air. */
+const STACK_STEP = SMALL_BUTTON_H + 6;
+// The two gaps below are what decides whether a column fits. The right rail is
+// the tight one — PALETTE (5 rows), DRAWING, REFERENCE and THIS SKIN have to
+// finish above the footer at y=421, and at 22/16 the last button ended at 426,
+// measurably on top of "↶ Undo". 18 still leaves 5px under a 13px heading.
+/** Heading to its first row. */
+const HEADING_GAP = 18;
+/** Between one labelled group and the next heading. */
+const GROUP_GAP = 12;
 
 type Mode = "browse" | "pick-brush" | "canvas";
 
@@ -334,9 +372,11 @@ export class SkinEditorScene extends Phaser.Scene {
 
   // --- shared header/button helpers, same shape as TemplateBrowserScene/WorldBrowserScene ---
 
-  private addBackButton(onClick: () => void): void {
+  /** `y` is the button's top edge. Canvas mode overrides it to put Back on the
+   * footer line with the other actions; browse and pick-brush keep the header. */
+  private addBackButton(onClick: () => void, y = 20): void {
     this.add
-      .text(24, 20, "← Back", {
+      .text(24, y, "← Back", {
         fontSize: "14px",
         color: "#ffffff",
         backgroundColor: BUTTON_HEX,
@@ -716,13 +756,35 @@ export class SkinEditorScene extends Phaser.Scene {
       return;
     }
 
-    this.addBackButton(() => this.goTo("browse"));
-    // The brush is now context rather than the headline — the name field is
-    // what identifies the skin, so "Editing: Ghost" moves out of the centre and
-    // left, into the empty band between Back and the name field.
+    // --- the footer: one line, everything you *do* to the skin ---------------
+    //
+    // The whole layout of this mode follows from this row existing (2026-09-05).
+    // Before it, four stacked full-width rows — name and Save, the status line,
+    // the palette selector, the swatches-and-tools row — held the painting
+    // window's top edge at y=132. That is 28% of a 468px scene spent on about
+    // 96px of content, with the gaps between rows costing more than the rows.
+    //
+    // So actions went here, controls went to the side columns, and the drawing
+    // got the middle: 320px square to 384px, 44% more area. The columns are free
+    // to run *past* the bottom of the canvas down to this line, which is where
+    // the height to stack them vertically comes from.
+    //
+    // Laid out from both ends inwards: Back and the brush name from the left,
+    // Save/Redo/Undo from the right (each placed from its own rendered `.width`,
+    // right-to-left, since makeSmallButton has no fixed-width rectangle the way
+    // EditorUI's header buttons do), the name field centred, and the status text
+    // in the gap that leaves.
+    this.addBackButton(() => this.goTo("browse"), FOOTER_Y - 13);
+    const footerMidY = FOOTER_Y;
     this.add
-      .text(150, 20, `Editing: ${target.brush.label}`, { fontSize: "14px", color: "#a6a6c8" })
-      .setOrigin(0, 0);
+      .text(110, footerMidY, `Editing: ${target.brush.label}`, { fontSize: "13px", color: "#a6a6c8" })
+      .setOrigin(0, 0.5);
+
+    const saveButton = this.makeSmallButton(GAME_WIDTH - 24 - 60, footerMidY, "Save", () => this.onSave());
+    const redoButton = this.makeSmallButton(0, footerMidY, "↷ Redo", () => this.performRedo());
+    redoButton.setX(saveButton.x - 8 - redoButton.width);
+    const undoButton = this.makeSmallButton(0, footerMidY, "↶ Undo", () => this.performUndo());
+    undoButton.setX(redoButton.x - 8 - undoButton.width);
 
     // The name field. Reuses LevelNameInput rather than a second DOM input of
     // its own: that class carries the capture-phase blur that makes clicking
@@ -731,7 +793,7 @@ export class SkinEditorScene extends Phaser.Scene {
     // Phaser's shortcuts. Both were found the hard way; a copy would lose them.
     this.nameInput = new LevelNameInput(
       this,
-      { x: GAME_WIDTH / 2 - 120, y: 14, width: 240, height: 26 },
+      { x: GAME_WIDTH / 2 - 120, y: footerMidY - 13, width: 240, height: 26 },
       target.name,
       (value) => {
         if (this.target) this.target.name = value;
@@ -739,43 +801,75 @@ export class SkinEditorScene extends Phaser.Scene {
       { fallback: target.name, placeholder: "Skin name" },
     );
 
-    // --- header right cluster: Undo, Redo, Save — Save stays at its
-    // fixed spot; Redo/Undo are auto-width Text buttons (makeSmallButton
-    // has no fixed-width rectangle the way EditorUI's header buttons do),
-    // so each is positioned from its *own* rendered `.width` immediately
-    // after creation, right-to-left, rather than a guessed pixel offset. ---
-    const saveButton = this.makeSmallButton(GAME_WIDTH - 24 - 60, 20 + 10, "Save", () => this.onSave());
-    const redoButton = this.makeSmallButton(0, 20 + 10, "↷ Redo", () => this.performRedo());
-    redoButton.setX(saveButton.x - 8 - redoButton.width);
-    const undoButton = this.makeSmallButton(0, 20 + 10, "↶ Undo", () => this.performUndo());
-    undoButton.setX(redoButton.x - 8 - undoButton.width);
+    // In the band between the drawing and the footer, not on the footer itself.
+    // The footer's own free space is the ~247px between the name field and
+    // Undo, and the longest message this shows — "Copy — saving adds a new skin,
+    // the original is untouched" — measures about 280px, so it would have run
+    // under Undo. assertLayoutSound would not have caught it either: this text
+    // is a label, not interactive. Here it has the whole width and sits right
+    // under the thing it is talking about.
+    this.statusText = this.add
+      .text(GAME_WIDTH / 2, CANVAS_TOP_Y + VIEWPORT_SIZE + 13, "", { fontSize: "12px", color: "#4ade80" })
+      .setOrigin(0.5, 0.5);
 
-    this.statusText = this.add.text(GAME_WIDTH / 2, 44, "", { fontSize: "12px", color: "#4ade80" }).setOrigin(0.5, 0);
+    // --- the three regions -------------------------------------------------
+    //
+    //   left column 1 (x=16)    VIEW, then TOOLS
+    //   left column 2 (x=120)   FRAMES, COLOURS, SHADES
+    //   the drawing (x=333)     384x384, dead centre
+    //   right rail (x=766)      PALETTE, DRAWING, REFERENCE, THIS SKIN
+    //
+    // Each column is a running y rather than a list of literals, so inserting a
+    // control is one line and cannot silently land on top of its neighbour. The
+    // right rail keeps the x it always had — GAME_WIDTH - 24 - REFERENCE_WIDTH,
+    // set by the reference picker, which is the widest thing in the scene that
+    // is not the drawing (see buildReferenceControls).
+    const railX = GAME_WIDTH - 24 - REFERENCE_WIDTH;
+    let leftY = RAIL_TOP_Y;
+    let left2Y = RAIL_TOP_Y;
+    let railY = RAIL_TOP_Y;
 
-    // --- palette selector row ---
+    // Every cursor above is the **top edge** of the next thing to place, all the
+    // way down a column. makeSmallButton takes a middle instead, so its callers
+    // add half a button; nothing else has to think about it.
+    /** Draws a group's heading and returns the top edge of its first row. */
+    const heading = (x: number, y: number, text: string): number => {
+      this.add.text(x, y, text.toUpperCase(), { fontSize: "10px", color: "#8a8ab0", fontStyle: "bold" });
+      return y + HEADING_GAP;
+    };
+    /** Closes a stacked group. A stack loop leaves the cursor one whole step
+     * past the last row's top, which is 6px below its bottom edge; back up to
+     * that edge and add the space between groups. */
+    const endGroup = (y: number): number => y - (STACK_STEP - SMALL_BUTTON_H) + GROUP_GAP;
+
+    // --- PALETTE -------------------------------------------------------------
     // "Yours" is offered alongside the presets rather than as a separate
     // control: it *is* a palette, it just fills itself from the colours you
     // used that no preset had (see customPalette.ts). Built fresh here because
     // canvas mode is rebuilt on every frame and palette switch, so it always
     // reflects the latest picks.
+    //
+    // A stacked column on the rail rather than the centred row of five it used
+    // to be. Full width of the rail, so "DawnBringer 16" fits at 11px with room
+    // to spare — the old 110px row was sized to that name and had none.
     this.customColors = loadCustomColors();
     const yours: PixelPalette = { id: CUSTOM_PALETTE_ID, name: "Yours", colors: this.customColors };
     const paletteChoices = [...PIXEL_PALETTES, yours];
     const palette = target.paletteId === CUSTOM_PALETTE_ID ? yours : findPalette(target.paletteId);
-    const paletteButtonWidth = 110;
-    const paletteRowWidth = paletteChoices.length * (paletteButtonWidth + 8) - 8;
-    let px = (GAME_WIDTH - paletteRowWidth) / 2;
+    railY = heading(railX, railY, "Palette");
     for (const p of paletteChoices) {
       const activePalette = p.id === palette.id;
       const bg = this.add
-        .rectangle(px, 62, paletteButtonWidth, 24, activePalette ? SELECTED_FILL : BUTTON_COLOR)
+        .rectangle(railX, railY, REFERENCE_WIDTH, 24, activePalette ? SELECTED_FILL : BUTTON_COLOR)
         .setOrigin(0, 0)
         .setInteractive({ useHandCursor: true });
       // The open palette gets the same ring the armed tool and the chosen
       // colour get, rather than the hover blue it used to wear — which made the
       // open palette indistinguishable from one you were merely pointing at.
       if (activePalette) bg.setStrokeStyle(2, SELECTED_RING_COLOR);
-      this.add.text(px + paletteButtonWidth / 2, 74, p.name, { fontSize: "11px", color: "#ffffff" }).setOrigin(0.5);
+      this.add
+        .text(railX + 10, railY + 12, p.name, { fontSize: "11px", color: "#ffffff" })
+        .setOrigin(0, 0.5);
       bg.on("pointerdown", () => {
         if (!this.target || !this.pixelCanvas || p.id === this.target.paletteId) return;
         // Capture the live in-progress drawing before switching, so
@@ -784,25 +878,26 @@ export class SkinEditorScene extends Phaser.Scene {
         this.target = { ...this.captureActiveFrame(), paletteId: p.id };
         this.goTo("canvas");
       });
-      px += paletteButtonWidth + 8;
+      railY += 28;
     }
+    railY += GROUP_GAP;
 
-    this.buildFrameStrip(target);
+    // FRAMES heads the second left column when the skin has more than one pose;
+    // buildFrameStrip returns where it finished so COLOURS follows it.
+    left2Y = this.buildFrameStrip(target, LEFT_COL2_X, left2Y, heading);
 
-    // --- tool-mode buttons, right-aligned on the swatch row's own y —
-    // declared before the swatch row below since a swatch click resumes Paint
+    // --- TOOLS ---------------------------------------------------------------
+    // Declared before the swatches below, since a swatch click resumes Paint
     // mode (see setTool inside the swatch handler), same "eyedropper is
     // momentary" reasoning the onColorPicked callback further down uses.
     //
-    // Laid out right-to-left from the row's right edge rather than relative to
-    // the swatch row's own (palette-dependent) width, and built from a list so
-    // adding a tool is one entry rather than another hand-chained setX. Order
-    // below is right-to-left, so it reads Pan · Paint · Erase · Fill · Pick on
-    // screen. Clearance against the widest 17-swatch palette is measured, not
-    // assumed — see the e2e check in skin-erase.spec.ts, which is what stops a
-    // sixth tool silently sliding under the swatches. ---
-    const sy = 96;
-    const TOOL_GAP = 6;
+    // A vertical stack in the first left column. It used to be a row
+    // right-aligned across the top of the scene, closing on the centred swatch
+    // row from the opposite direction — with a measured 4px between them at the
+    // widest palette, which is why the labels carried no icons and why
+    // skin-erase.spec.ts had a test guarding the gap. In separate columns there
+    // is no gap to defend: a sixth tool lengthens this stack and touches
+    // nothing. Order reads top-to-bottom as listed.
     const toolButtons: { tool: PixelTool; button: Phaser.GameObjects.Text }[] = [];
     // A ring around the armed tool, so which one is live is a shape and not
     // only a fill colour. Sized and placed by refreshToolHighlight once the
@@ -828,45 +923,51 @@ export class SkinEditorScene extends Phaser.Scene {
     };
     // Erase and Pan are both here because a touchscreen can reach neither
     // otherwise: erasing is right-click and panning is the wheel or the middle
-    // button, and a finger has none of the three.
-    // No icon prefixes on this row, and the reason is measured rather than
-    // aesthetic: the swatch row is centred and the tool row is right-aligned, so
-    // they close on each other, and the widest palette already left only ~4px
-    // between them. Prefixing all five labels widened the row by ~47px and put
-    // the tool buttons 43px *over* the swatches. The row's clarity problem was
-    // never the labels anyway — it was that the armed tool wasn't visible, which
-    // SELECTED_COLOR and the ring now handle. Icons live where there is room:
-    // Undo/Redo above and the zoom buttons on the View rail.
+    // button, and a finger has none of the three. Listed in the order they read
+    // down the column, commonest first.
     const toolSpecs: { tool: PixelTool; label: string }[] = [
-      { tool: "eyedropper", label: "Pick" },
-      { tool: "fill", label: "Fill" },
-      { tool: "erase", label: "Erase" },
       { tool: "paint", label: "Paint" },
+      { tool: "erase", label: "Erase" },
+      { tool: "fill", label: "Fill" },
+      { tool: "eyedropper", label: "Pick" },
       { tool: "pan", label: "Pan" },
     ];
-    let toolRight = GAME_WIDTH - 24;
+    leftY = heading(LEFT_COL_X, leftY, "Tools");
     for (const { tool, label } of toolSpecs) {
-      const button = this.makeSmallButton(0, sy + 12, label, () => setTool(tool), () => this.currentTool === tool);
-      button.setX(toolRight - button.width);
-      toolRight = button.x - TOOL_GAP;
+      const button = this.makeSmallButton(
+        LEFT_COL_X,
+        leftY + SMALL_BUTTON_H / 2,
+        label,
+        () => setTool(tool),
+        () => this.currentTool === tool,
+      );
       toolButtons.push({ tool, button });
+      leftY += STACK_STEP;
     }
+    leftY = endGroup(leftY);
     refreshToolHighlight();
 
-    // --- color swatch row (palette colors + a transparent "eraser") ---
-    // The gap was 6 until the Erase tool arrived. This row is centred and the
-    // tool row is right-aligned, so the two close on each other from opposite
-    // directions, and a fifth tool left a measured 4px between them. Taking 2px
-    // off each of the widest palette's 16 gaps buys back 32px of centred row —
-    // 20px of clearance — which is a cheaper fix than exiling Pan to the View
-    // column and splitting five mutually-exclusive tools across two corners of
-    // the screen. The swatches are still 24px targets; only the air between
-    // them shrank. skin-erase.spec.ts measures the result.
+    // --- COLOURS: the palette's colours plus a transparent "eraser" ----------
+    //
+    // A six-wide grid in the second left column, not the single centred row it
+    // used to be. The row was the reason for a lot of measured fiddling — the
+    // swatch gap cut from 6 to 4 to buy 20px of clearance against the tool row
+    // approaching from the right, and a guard test to keep a sixth tool from
+    // landing on top of it. A grid in its own column ends all of that.
+    //
+    // Six columns because the widest case is bounded and known: every preset
+    // palette tops out at 16 colours and MAX_CUSTOM_COLORS caps "Yours" at 16
+    // too, so with the transparent swatch it is never more than 17 — three rows
+    // of six, 164px wide, comfortably inside this column.
     const swatchSize = 24;
     const swatchGap = 4;
+    const swatchStep = swatchSize + swatchGap;
+    const SWATCH_COLS = 6;
     const swatchColors: (string | null)[] = [...palette.colors, null];
-    const swatchRowWidth = swatchColors.length * (swatchSize + swatchGap) - swatchGap;
-    let sx = (GAME_WIDTH - swatchRowWidth) / 2;
+    left2Y = heading(LEFT_COL2_X, left2Y, "Colours");
+    const swatchTop = left2Y;
+    let sx = LEFT_COL2_X;
+    let sy = swatchTop;
     // A colour the active palette doesn't contain used to be replaced by
     // palette.colors[0] right here — and since canvas mode is rebuilt on every
     // frame and palette switch, sampling a colour off a traced reference and
@@ -877,16 +978,6 @@ export class SkinEditorScene extends Phaser.Scene {
       this.currentColor = palette.colors[0] ?? "#ffffff";
     } else if (!palette.colors.includes(this.currentColor)) {
       this.rememberColor(this.currentColor);
-    }
-    // "Yours" starts empty, and an empty row is indistinguishable from a broken
-    // one — say what fills it instead. Right-aligned to end just before the
-    // row's own transparent swatch rather than centred on the row: with no
-    // colours the row *is* that one swatch, sitting dead centre, so a centred
-    // hint reads straight through it.
-    if (palette.colors.length === 0) {
-      this.add
-        .text(sx - 10, sy + swatchSize / 2, "Colours you pick land here", { fontSize: "11px", color: "#8a8ab0" })
-        .setOrigin(1, 0.5);
     }
     const swatchNodes: { color: string | null; bg: Phaser.GameObjects.Rectangle }[] = [];
     const refreshSwatchHighlight = (): void => {
@@ -900,7 +991,10 @@ export class SkinEditorScene extends Phaser.Scene {
         .rectangle(sx, sy, swatchSize, swatchSize, color ? Phaser.Display.Color.HexStringToColor(color).color : 0x333333)
         .setOrigin(0, 0)
         .setStrokeStyle(1, 0x000000, 0.4)
-        .setInteractive({ useHandCursor: true });
+        .setInteractive({ useHandCursor: true })
+        // Named so tests can find these without guessing from geometry — see
+        // SHADE_STEP_NAME's note below.
+        .setName(PALETTE_SWATCH_NAME);
       if (!color) {
         this.add.text(sx + swatchSize / 2, sy + swatchSize / 2, "✕", { fontSize: "13px", color: "#ffffff" }).setOrigin(0.5);
       }
@@ -927,36 +1021,62 @@ export class SkinEditorScene extends Phaser.Scene {
         refreshSwatchHighlight();
       });
       swatchNodes.push({ color, bg });
-      sx += swatchSize + swatchGap;
+      sx += swatchStep;
+      if (sx >= LEFT_COL2_X + SWATCH_COLS * swatchStep) {
+        sx = LEFT_COL2_X;
+        sy += swatchStep;
+      }
     }
     refreshSwatchHighlight();
+    // One row past whichever row the last swatch landed on — `sx` back at the
+    // column's left edge means the loop already wrapped and `sy` is that row.
+    left2Y = (sx === LEFT_COL2_X ? sy : sy + swatchStep) - swatchGap + GROUP_GAP;
 
-    // --- shade ramp: one step darker and one step lighter than the selected
-    // colour, immediately left of the palette row on the same line.
+    // "Yours" starts empty, and an empty grid is indistinguishable from a broken
+    // one — say what fills it instead. Below the swatches rather than beside
+    // them: with no colours the grid *is* the single transparent swatch, and
+    // this column is not wide enough to put a sentence next to it.
+    //
+    // Its own height is added to the column, which is the whole reason it is
+    // placed here rather than with the swatches: an empty palette leaves the
+    // grid one row tall, and a two-line hint hanging off the bottom of a
+    // one-row grid ran straight through the SHADES heading below. Not caught by
+    // assertLayoutSound — it only compares *interactive* text, and this is a
+    // label — so it took reading a screenshot.
+    if (palette.colors.length === 0) {
+      const hint = this.add
+        .text(LEFT_COL2_X, left2Y - GROUP_GAP + 4, "Colours you\npick land here", {
+          fontSize: "11px",
+          color: "#8a8ab0",
+          lineSpacing: 2,
+        })
+        .setOrigin(0, 0);
+      left2Y = hint.y + hint.height + GROUP_GAP;
+    }
+
+    // --- SHADES: one step darker and one step lighter than the selected colour,
+    // directly under the swatches it derives from.
     //
     // Deliberately a ramp for the *selected* colour rather than a darker and
-    // lighter row stacked around every swatch. Stacking costs 52px of height
-    // (three 24px rows plus gaps against one), and there is nowhere to take it
-    // from except the canvas: the palette row ends at y=86 and the painting
-    // window starts at 132, so the whole budget is 46px. Shrinking the drawing
-    // surface from 320px to 268px — permanently, on every skin — to show 32
-    // extra swatches, when shading only ever needs the neighbours of the colour
-    // in your hand, is the wrong trade. This costs no height at all: the row
-    // left of the centred palette was empty.
+    // lighter row stacked around every swatch. Shading only ever needs the
+    // neighbours of the colour in your hand, and three swatches say that as well
+    // as thirty-two do while leaving this column short enough to hold FRAMES
+    // above it.
     const rampSize = 24;
     const rampGap = 4;
-    const rampX = 150;
-    this.add.text(rampX, sy - 14, "SHADES", { fontSize: "10px", color: "#8a8ab0", fontStyle: "bold" });
+    const rampX = LEFT_COL2_X;
+    const rampY = heading(rampX, left2Y, "Shades");
     const rampNodes: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }[] = [];
     for (let i = 0; i < 3; i++) {
       const x = rampX + i * (rampSize + rampGap);
       const bg = this.add
-        .rectangle(x, sy, rampSize, rampSize, 0x333333)
+        .rectangle(x, rampY, rampSize, rampSize, 0x333333)
         .setOrigin(0, 0)
         .setStrokeStyle(1, 0x000000, 0.4)
-        .setInteractive({ useHandCursor: true });
+        .setInteractive({ useHandCursor: true })
+        .setName(SHADE_STEP_NAME);
       const label = this.add
-        .text(x + rampSize / 2, sy + rampSize / 2, "", { fontSize: "11px", color: "#ffffff" })
+        .text(x + rampSize / 2, rampY + rampSize / 2, "", { fontSize: "11px", color: "#ffffff" })
         .setOrigin(0.5);
       rampNodes.push({ bg, label });
     }
@@ -1041,38 +1161,23 @@ export class SkinEditorScene extends Phaser.Scene {
     // so the reference has to be re-applied rather than set once.
     this.pixelCanvas.setReferenceImage(this.referenceDataUrl);
 
-    // --- the side rails.
-    //
-    // These used to be two unrelated stacks ~1200px apart: "View" on the left,
-    // and an unlabelled pile on the right holding Mirror (a drawing mode),
-    // Clear (destructive), the reference controls (tracing) and Set as default
-    // (publishing). Four different jobs with nothing saying so, and you had to
-    // sweep the whole screen to find any one of them.
-    //
-    // Now each rail carries a heading and holds one kind of thing: the left is
-    // everything about *looking* at the drawing, the right everything about
-    // *the drawing itself*. Both stay at their old x — 40 and GAME_WIDTH-154 —
-    // which the 320px window (x 365..685) never reaches at any zoom, since
-    // zooming grows the art inside a fixed window rather than the window.
-    const railHeading = (x: number, y: number, text: string): void => {
-      this.add.text(x, y, text.toUpperCase(), { fontSize: "10px", color: "#8a8ab0", fontStyle: "bold" });
-    };
-
-    railHeading(40, canvasRect.y + 6, "View");
-    this.makeSmallButton(40, canvasRect.y + 40, "＋ Zoom", () => this.adjustZoom(1));
-    this.makeSmallButton(40, canvasRect.y + 80, "－ Zoom", () => this.adjustZoom(-1));
-    this.makeSmallButton(40, canvasRect.y + 120, "Fit", () => {
+    // --- VIEW, under TOOLS in the first left column -------------------------
+    // Everything about *looking* at the drawing, kept together and below the
+    // tools that draw on it. Built here rather than up with TOOLS because these
+    // buttons all reach into `this.pixelCanvas`, which only exists from the line
+    // above; `leftY` has carried the column's position down to meet them.
+    leftY = heading(LEFT_COL_X, leftY, "View");
+    this.makeSmallButton(LEFT_COL_X, leftY + SMALL_BUTTON_H / 2, "＋ Zoom", () => this.adjustZoom(1));
+    leftY += STACK_STEP;
+    this.makeSmallButton(LEFT_COL_X, leftY + SMALL_BUTTON_H / 2, "－ Zoom", () => this.adjustZoom(-1));
+    leftY += STACK_STEP;
+    this.makeSmallButton(LEFT_COL_X, leftY + SMALL_BUTTON_H / 2, "Fit", () => {
       this.pixelCanvas?.fitToViewport();
     });
-    // Where you are on the ladder, in plain multiples of "the whole sprite" —
-    // without it, three clicks of Zoom + and three of Zoom − are indistinguishable
-    // from having done nothing.
-    this.zoomReadout = this.add
-      .text(40, canvasRect.y + 152, formatZoom(this.view.zoomIndex), { fontSize: "13px", color: "#ffffff" })
-      .setOrigin(0, 0.5);
+    leftY += STACK_STEP;
     const gridButton = this.makeSmallButton(
-      40,
-      canvasRect.y + 178,
+      LEFT_COL_X,
+      leftY + SMALL_BUTTON_H / 2,
       this.gridVisible ? "Grid: On" : "Grid: Off",
       () => {
         this.gridVisible = !this.gridVisible;
@@ -1082,23 +1187,28 @@ export class SkinEditorScene extends Phaser.Scene {
       },
       () => this.gridVisible,
     );
+    leftY += STACK_STEP;
+    // Where you are on the ladder, in plain multiples of "the whole sprite" —
+    // without it, three clicks of Zoom + and three of Zoom − are indistinguishable
+    // from having done nothing.
+    this.zoomReadout = this.add
+      .text(LEFT_COL_X, leftY + 2, formatZoom(this.view.zoomIndex), { fontSize: "13px", color: "#ffffff" })
+      .setOrigin(0, 0);
     // The gestures the buttons above have no equivalent for, kept at the foot
-    // of the rail they belong to rather than floating mid-column.
-    this.add.text(40, canvasRect.y + 208, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
-    this.add.text(40, canvasRect.y + 222, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
+    // of the group they belong to rather than floating mid-column.
+    this.add.text(LEFT_COL_X, leftY + 22, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
+    this.add.text(LEFT_COL_X, leftY + 36, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
 
-    // One left edge for the whole rail. The reference picker is the widest
-    // thing in it (260px — its dropdown labels need the room, see
+    // --- DRAWING, REFERENCE, THIS SKIN — continuing the right rail under
+    // PALETTE. One left edge for the whole rail: the reference picker is the
+    // widest thing in it (260px — its dropdown labels need the room, see
     // buildReferenceControls) and has to end at the right margin, so its left
     // edge is what everything else aligns to; three different x values read as
-    // ragged rather than as a column. Still 81px clear of the canvas window's
-    // right edge at 685, at any zoom.
-    const railX = GAME_WIDTH - 24 - REFERENCE_WIDTH;
-
-    railHeading(railX, canvasRect.y + 6, "Drawing");
+    // ragged rather than as a column.
+    railY = heading(railX, railY, "Drawing");
     const mirrorButton = this.makeSmallButton(
       railX,
-      canvasRect.y + 34,
+      railY + SMALL_BUTTON_H / 2,
       this.mirrorEnabled ? "Mirror: On" : "Mirror: Off",
       () => {
         this.mirrorEnabled = !this.mirrorEnabled;
@@ -1108,11 +1218,14 @@ export class SkinEditorScene extends Phaser.Scene {
       },
       () => this.mirrorEnabled,
     );
+    railY += STACK_STEP;
     // Clear (two-tap confirm, same shape as EditorUI's Clear/Delete Area)
-    this.clearButton = this.makeSmallButton(railX, canvasRect.y + 70, "Clear", () => this.onClearClicked());
+    this.clearButton = this.makeSmallButton(railX, railY + SMALL_BUTTON_H / 2, "Clear", () => this.onClearClicked());
+    railY = endGroup(railY + STACK_STEP);
 
-    railHeading(railX, canvasRect.y + 104, "Reference");
-    this.buildReferenceControls(target, canvasRect.y + 132);
+    railY = heading(railX, railY, "Reference");
+    this.buildReferenceControls(target, railY + 13);
+    railY = endGroup(railY + STACK_STEP * 2);
 
     // "Set as default" lives here as well as in the level editor because the
     // player character is only reachable from this scene — it is deliberately
@@ -1120,8 +1233,8 @@ export class SkinEditorScene extends Phaser.Scene {
     // there, and without this a painted character could be saved and never
     // worn by anything. Two-tap confirmed, same as Clear, since it reaches
     // every level that hasn't chosen for itself.
-    railHeading(railX, canvasRect.y + 196, "This skin");
-    this.defaultButton = this.makeSmallButton(railX, canvasRect.y + 224, "Set as default", () =>
+    railY = heading(railX, railY, "This skin");
+    this.defaultButton = this.makeSmallButton(railX, railY + SMALL_BUTTON_H / 2, "Set as default", () =>
       this.onSetDefaultClicked(),
     );
   }
@@ -1315,30 +1428,30 @@ export class SkinEditorScene extends Phaser.Scene {
   }
 
   /**
-   * One button per frame for an animated target, drawn under the palette row.
-   * A painted frame is filled and labelled plainly; an unpainted one is dimmed
-   * and marked with a dot, so "which poses have I actually done" is answerable
-   * at a glance rather than by clicking through all five.
+   * One button per frame for an animated target, heading the left column it
+   * shares with the colours. A painted frame is filled and labelled plainly; an
+   * unpainted one is dimmed and marked with a dot, so "which poses have I
+   * actually done" is answerable at a glance rather than by clicking through
+   * all five.
    *
-   * Nothing at all for a single-frame skin — no strip, no layout shift, so an
-   * ordinary coin skin looks exactly as it did before this feature.
+   * Nothing at all for a single-frame skin — no strip, no heading, and the
+   * colours below simply start higher, so an ordinary coin skin loses no room.
+   *
+   * Returns where the column has reached, so the caller can carry on beneath it
+   * without knowing whether anything was drawn.
    */
-  private buildFrameStrip(target: EditingTarget): void {
+  private buildFrameStrip(
+    target: EditingTarget,
+    x: number,
+    top: number,
+    heading: (x: number, y: number, text: string) => number,
+  ): number {
     const plan = framePlanFor(target.brush.id);
-    if (!plan) return;
+    if (!plan) return top;
 
-    // Stacked down the empty band left of the canvas rather than as a
-    // horizontal row above it: the rows between the palette selector (y=62)
-    // and the canvas (y=132) are already taken by the swatches, and a strip
-    // squeezed in there rendered straight through them. The canvas is centred
-    // from x=385 at its default size, so this column is clear at every zoom
-    // level rather than only the smallest.
     const buttonWidth = 96;
-    const rowHeight = 34;
-    const x = 150;
-    let y = 152;
-
-    this.add.text(x, 130, "FRAMES", { fontSize: "10px", color: "#8a8ab0", fontStyle: "bold" });
+    const rowHeight = 30;
+    let y = heading(x, top, "Frames");
 
     for (const name of plan.frames) {
       const painted = hasPaintedCells(target.frameCells[name]);
@@ -1364,6 +1477,9 @@ export class SkinEditorScene extends Phaser.Scene {
       bg.on("pointerdown", () => this.switchFrame(name));
       y += rowHeight;
     }
+    // The loop leaves y one row past the last button's top, i.e. 4px below its
+    // bottom edge; back up to that edge before adding the gap to the next group.
+    return y - (rowHeight - 26) + GROUP_GAP;
   }
 
   /** Folds whatever is on the live canvas back into the target's own frame

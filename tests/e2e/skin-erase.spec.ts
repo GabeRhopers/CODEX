@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
+import { assertLayoutSound } from "./support/layout";
 
 /**
  * The Erase tool. Erasing was previously reachable only by right-click or by
@@ -8,11 +9,15 @@ import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
  * this covers both halves of "it is a tool": it drags like Paint, and taking it
  * does not take your colour with it.
  *
- * The second test is a layout guard. The tool row is right-aligned and the
- * swatch row is centred and palette-dependent, so they approach each other from
- * opposite directions and nothing in the code stops them meeting — adding this
- * fifth tool spent most of the clearance that was left. A measured floor is
- * what keeps a sixth from silently sliding underneath the swatches.
+ * The second test is a layout guard, and it is the only one this scene's canvas
+ * mode has — layout-invariants.spec.ts covers the pick-brush grid and nothing
+ * covered this. It used to be much narrower: a measured floor on the gap between
+ * the right-aligned tool row and the centred, palette-dependent swatch row,
+ * which approached each other from opposite directions with nothing in the code
+ * stopping them meeting. The 2026-09-05 layout put those in separate columns, so
+ * that particular gap no longer exists — but the columns can still overrun the
+ * footer, which is exactly what assertLayoutSound already looks for, generally,
+ * for every pair of interactive labels on the screen at once.
  */
 
 const GRID = 32;
@@ -87,47 +92,22 @@ test("Erase rubs out a whole drag, and gives your colour back when you leave it"
   await expect.poll(() => readCells(page).then(painted)).toEqual([colour]);
 });
 
-test("the tool row still clears the widest palette's swatches", async ({ page }) => {
+test("canvas mode is laid out soundly with the widest palette showing", async ({ page }) => {
   test.slow();
   await openGhostCanvas(page);
 
-  // PICO-8 is the default and the widest: 16 colours plus the transparent ✕.
-  const layout = await page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor");
-    const labels = ["Pan", "Paint", "Erase", "Fill", "Pick"];
-    let toolLeft = Number.POSITIVE_INFINITY;
-    let swatchRight = Number.NEGATIVE_INFINITY;
-    let swatches = 0;
-    let tools = 0;
-    for (const child of scene.children.list) {
-      const text = child as { text?: string; x?: number };
-      if (typeof text.text === "string" && labels.includes(text.text)) {
-        tools++;
-        toolLeft = Math.min(toolLeft, text.x!);
-      }
-      // Swatches are 24px rectangles drawn from origin (0,0) — but so are the
-      // three shade-ramp swatches, which sit left of the centred palette row
-      // (they end at x≈230; the widest palette starts at x≈289). Without the
-      // x filter this counts 20 and the "widest case" assertion below stops
-      // meaning what it says.
-      const rect = child as { width?: number; height?: number; x?: number; type?: string };
-      if (rect.type === "Rectangle" && rect.width === 24 && rect.height === 24 && rect.x! >= 250) {
-        swatches++;
-        swatchRight = Math.max(swatchRight, rect.x! + 24);
-      }
-    }
-    return { toolLeft, swatchRight, swatches, tools };
-  });
+  // PICO-8 is the default and the widest: 16 colours plus the transparent ✕,
+  // so the colour grid is at its tallest and the columns at their fullest.
+  const swatches = await page.evaluate(
+    () =>
+      window.__debugGame!.scene.getScene("SkinEditor").children.list.filter(
+        (child) => (child as { name?: string }).name === "palette-swatch",
+      ).length,
+  );
+  // Without this the check below could pass on a screen that simply failed to
+  // draw the colours. By name rather than by size and position — see the note in
+  // skin-palette.spec.ts's shadeSwatches for what geometry-matching cost.
+  expect(swatches, "the colour grid is not at its widest — this guard is vacuous").toBe(17);
 
-  // Without this the test passes vacuously: it finds tool buttons by exact
-  // label, so a relabelling makes it match nothing, leaving toolLeft at
-  // Infinity — which clears every swatch by a comfortable infinity. That is
-  // exactly what happened when the tools were given icon prefixes, and the
-  // overlap it was written to catch went straight past it.
-  expect(layout.tools, "no tool buttons matched — the labels below have drifted").toBe(5);
-  expect(layout.swatches).toBe(17); // 16 colours + transparent — the widest case
-  expect(layout.toolLeft).toBeGreaterThan(layout.swatchRight);
-  // Not merely "does not overlap": a gap this side of comfortable is the signal
-  // that the next tool needs a different home rather than another 6px.
-  expect(layout.toolLeft - layout.swatchRight).toBeGreaterThan(8);
+  await assertLayoutSound(page, "SkinEditor");
 });

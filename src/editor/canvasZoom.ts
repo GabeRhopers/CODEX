@@ -1,12 +1,11 @@
 /**
  * The Skin Creator's zoom/pan arithmetic, kept pure and away from the DOM.
  *
- * Why this exists at all: the painting canvas is square, its top is pinned at
- * y=132, and the scene is a fixed 468px tall (GAME_HEIGHT) — so there are 336
- * vertical pixels to spend and no more. The pre-2026-08-23 zoom grew the canvas
- * itself within that band, which capped it at a 1.6x range (200px to 320px, or
- * 4.2 to 6.7 screen pixels per cell on the 48-cell character grid). That is not
- * enough magnification to place one pixel with confidence, and no amount of
+ * Why this exists at all: the painting canvas is square and the scene is a fixed
+ * 468px tall (GAME_HEIGHT). The pre-2026-08-23 zoom grew the canvas itself
+ * within the space left over, which capped it at a 1.6x range (200px to 320px,
+ * or 4.2 to 6.7 screen pixels per cell on the 48-cell character grid). That is
+ * not enough magnification to place one pixel with confidence, and no amount of
  * layout reshuffling fixes it: reclaiming every row above the canvas would buy
  * about 10%.
  *
@@ -17,12 +16,23 @@
  */
 
 /**
- * The window the drawing is seen through, in game units. 320 is exactly the old
- * maximum: at fit zoom the canvas is as large as the largest it could ever be
- * before, so this change costs nobody anything at the default. 132 + 320 = 452
- * leaves 16px before the scene's floor.
+ * The window the drawing is seen through, in game units.
+ *
+ * 384, up from 320 on 2026-09-05, because the surrounding layout stopped
+ * spending the screen on chrome: four stacked full-width rows above the canvas
+ * (name and Save, the status line, the palette selector, the swatch row) held
+ * its top at y=132 — 28% of the scene height for about 96px of actual content.
+ * Those became one footer line plus two side columns, which frees the whole
+ * band; see SkinEditorScene.buildCanvas. 44% more area to draw on, and a cell at
+ * fit zoom on the 32 grid goes from 12.19px to 14.63px.
+ *
+ * Not 400, which the width would also allow: `contentSizeFor(VIEWPORT_SIZE, 0)`
+ * is the bottom of the zoom ladder, and it has to stay *below* the old
+ * grow-the-canvas floor of 200px for zooming out to still mean anything —
+ * 400 x 0.5 is exactly 200 and 384 x 0.5 is 192. canvasZoom.test.ts asserts it.
+ * 384 is also 12 x 32.
  */
-export const VIEWPORT_SIZE = 320;
+export const VIEWPORT_SIZE = 384;
 
 /**
  * Zoom as a multiple of "the whole sprite exactly fills the window", rather

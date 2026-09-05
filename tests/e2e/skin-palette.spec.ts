@@ -33,17 +33,19 @@ async function shadeSwatches(page: Page): Promise<{ x: number; y: number; visibl
     const out: { x: number; y: number; visible: boolean; color: number }[] = [];
     for (const child of scene.children.list) {
       const o = child as unknown as {
-        type?: string;
-        width?: number;
-        height?: number;
+        name?: string;
         x?: number;
         y?: number;
         visible?: boolean;
         fillColor?: number;
       };
-      // 24px swatches left of the centred palette row are the ramp; the palette
-      // row's own swatches are the same size but start further right.
-      if (o.type === "Rectangle" && o.width === 24 && o.height === 24 && o.x! < 250) {
+      // By name, not by geometry. This used to select "24px swatches left of the
+      // centred palette row", which was true only of one particular layout: the
+      // 2026-09-05 rework put the ramp and the colour grid in the same column,
+      // and the filter silently started matching all eighteen palette swatches
+      // too. The scene tags these (SHADE_STEP_NAME) so the question being asked
+      // here is about the objects rather than about where they happen to sit.
+      if (o.name === "shade-step") {
         out.push({ x: o.x!, y: o.y!, visible: o.visible!, color: o.fillColor! });
       }
     }
