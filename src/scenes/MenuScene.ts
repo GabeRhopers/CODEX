@@ -506,6 +506,20 @@ export class MenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // Who made what, bottom-left where it belongs. Phaser is MIT and its notice
+    // is *required* wherever the software is distributed, which a public link
+    // certainly is; Kenney's art is CC0 and needs no attribution, so this is the
+    // half that is owed and the half that is simply deserved. Short because the
+    // controls hint is centred on this same line and the first, longer wording
+    // ran straight into it — which assertLayoutSound cannot catch, since
+    // neither of them is interactive. The full notices are in LICENSE.
+    this.add
+      .text(SIDE_MARGIN, GAME_HEIGHT - 18, "Phaser (MIT) · Kenney (CC0)", {
+        fontSize: "10px",
+        color: "#5d6480",
+      })
+      .setOrigin(0, 0.5);
+
     // The game's internal resolution is landscape; on a phone held in
     // portrait that gets letterboxed quite small by Scale.FIT (see main.ts).
     // Playable either way — touch buttons still work — but a one-time nudge

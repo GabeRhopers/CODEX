@@ -1,0 +1,80 @@
+MIT License
+
+Copyright (c) 2026 Gabriel Rhopers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+Third-party components
+================================================================================
+
+This project is served to the public, so the notices below travel with it.
+
+--------------------------------------------------------------------------------
+Phaser 3 — https://phaser.io — MIT License  (notice REQUIRED)
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2024 Richard Davey, Phaser Studio Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+Kenney game assets — https://kenney.nl — CC0 1.0 Universal (public domain)
+--------------------------------------------------------------------------------
+
+The ground tilesets, block and enemy sprites, item icons and decoration
+sprites under public/assets/ derive from Kenney's "Pixel Platformer" pack,
+composited to this project's tile sizes by scripts/prepare-kenney-assets.py.
+
+CC0 places the work in the public domain and requires no attribution. It is
+given here because it is deserved, not because it is owed.
+
+--------------------------------------------------------------------------------
+Original to this project
+--------------------------------------------------------------------------------
+
+The sound effects (public/assets/audio/sfx/) are synthesised outright by
+scripts/generate-sfx.py and are covered by the MIT licence above, not by any
+third party's terms.
+
+The player character art, the painted level backgrounds
+(scripts/generate-painted-backgrounds.py), the castle tileset's stone and lava
+frames and all UI chrome (src/assets/generateTextures.ts) are likewise this
+project's own.
+
+The home-page music track (public/assets/audio/menu-theme.mp3) was supplied by
+the project owner.

@@ -5,6 +5,24 @@ from scratch on Phaser 3 (MIT). See
 `docs/spellbound-editor-implementation-plan.md` for the full architecture,
 data model, and milestone plan.
 
+## Licence and credits
+
+This project is MIT — see `LICENSE`, which also carries the third-party
+notices, since a published game link distributes all of it to whoever opens
+it.
+
+| | |
+|---|---|
+| **Phaser 3** | MIT. Its notice is **required** wherever the software is distributed, so it travels in full in `LICENSE`. |
+| **Kenney's "Pixel Platformer"** | CC0 — public domain, no attribution required. Credited because it is deserved, not because it is owed. Composited to this project's tile sizes by `scripts/prepare-kenney-assets.py`. |
+| **Sound effects** | Ours. Synthesised outright by `scripts/generate-sfx.py` — no pack, no licence to keep true. |
+| **Painted backgrounds, castle tiles, UI chrome, the player character** | Ours. See `scripts/generate-painted-backgrounds.py` and `src/assets/generateTextures.ts`. |
+| **Home-page music** | Supplied by the project owner. |
+
+The Menu carries a short `Phaser (MIT) · Kenney (CC0)` line for the same
+reason — the full text is here, but a visitor who never sees the repo should
+still see who the engine and the art came from.
+
 ## Status
 
 **MVP + M1 (undo/redo) + M2 content (enemy + real goal art, plus Brick/
