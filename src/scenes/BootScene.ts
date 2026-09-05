@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { generateTextures } from "../assets/generateTextures";
 import { applyAudioPrefs } from "../audio/audioPrefs";
+import { preloadSfx } from "../audio/sfx";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { WIZARD_FRAME_KEYS } from "../gameplay/wizardAnimation";
 import { groundIconKey, groundTilesetKey } from "../level/groundSkins";
@@ -77,6 +78,12 @@ export class BootScene extends Phaser.Scene {
     // Music button) isn't preloaded here since it doesn't exist until a
     // level that has one is actually opened — see gameplay/musicLoader.ts.
     this.load.audio("menu-theme", "assets/audio/menu-theme.mp3");
+
+    // The seven gameplay effects (audio/sfx.ts), synthesised by
+    // scripts/generate-sfx.py rather than licensed from anywhere. Loaded here,
+    // once, rather than per-scene: the first coin of a level should not be
+    // silent while its sound is still being fetched. 86KB for the set.
+    preloadSfx(this);
 
     // --- Dormant: the multi-scene parallax background pool ---
     // Not preloaded right now (no reason to spend load time on textures

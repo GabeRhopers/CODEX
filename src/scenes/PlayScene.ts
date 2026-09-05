@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { VolumeControl } from "../audio/VolumeControl";
+import { playSfx } from "../audio/sfx";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y, TILE_SIZE } from "../config/gameConfig";
 import { UP_BASKET_TINT_COLOR } from "../editor/Palette";
 import {
@@ -1189,6 +1190,16 @@ export class PlayScene extends Phaser.Scene {
 
     if (body.blocked.down) {
       resetDoubleJump(this.stats);
+      // A grounded jump is applied further down, inside updatePlayerMovement —
+      // PlayerController is where the jump lives and it has no business knowing
+      // about audio, so the sound mirrors its condition here instead.
+      //
+      // `jumpDown` rather than `justPressedJump`, because that *is* the
+      // condition it uses: holding jump through a landing bunny-hops, and a
+      // press-edge test would silently skip the sound for exactly those jumps.
+      // It cannot repeat, either — one frame later the player is airborne and
+      // `blocked.down` is false.
+      if (jumpDown) playSfx(this, "jump");
     } else if (swimming) {
       // Direct per-frame vertical control instead of the normal jump/
       // gravity branches below — held jump/up swims up, released gently
@@ -1199,6 +1210,7 @@ export class PlayScene extends Phaser.Scene {
     } else if (justPressedJump && canDoubleJump(this.stats, body.blocked.down)) {
       body.setVelocityY(JUMP_VELOCITY);
       useDoubleJump(this.stats);
+      playSfx(this, "jump");
     }
 
     // Keeps the two shock buttons showing whether they can actually do
@@ -1344,27 +1356,40 @@ export class PlayScene extends Phaser.Scene {
     const effective = isCustomEntityId(type) ? collectAsFor(this.customEntities, type) : type;
     if (!effective) return;
     const now = this.time.now;
+    // One sound per case rather than a single "picked something up" noise: a
+    // coin and a heart are different events to the player, and the whole reason
+    // for having sound is that you can tell what happened without looking at
+    // the HUD. The power-ups share the heart's chime — they are all "something
+    // good, and it is not money" — rather than each getting a sound of its own
+    // for a distinction nobody would learn.
     switch (effective) {
       case "item-coin":
         collectCoin(this.stats);
+        playSfx(this, "coin");
         break;
       case "item-heart":
         collectHeart(this.stats);
+        playSfx(this, "heart");
         break;
       case "item-speed":
         collectSpeed(this.stats, now);
+        playSfx(this, "heart");
         break;
       case "item-feather":
         collectFeather(this.stats);
+        playSfx(this, "heart");
         break;
       case "item-thunder-hat":
         collectThunderHat(this.stats);
+        playSfx(this, "heart");
         break;
       case "item-shield":
         collectShield(this.stats, now);
+        playSfx(this, "heart");
         break;
       case "item-key":
         collectKey(this.stats);
+        playSfx(this, "key");
         break;
       default:
         return;
@@ -1386,6 +1411,7 @@ export class PlayScene extends Phaser.Scene {
   private tryOpenChest(sprite: Phaser.GameObjects.Image, zone: Phaser.GameObjects.Zone): void {
     if (!sprite.active) return;
     if (openChest(this.stats) !== "opened") return;
+    playSfx(this, "chest");
     sprite.destroy();
     zone.destroy();
     this.updateHud();
@@ -1500,9 +1526,14 @@ export class PlayScene extends Phaser.Scene {
    * for the invincible/absorbed/fatal decision. */
   private takeHit(): void {
     const result = registerHit(this.stats, this.time.now);
+    // Not on every result: "invincible" is what this returns for each physics
+    // frame of a hit the i-frames are already absorbing, so playing there would
+    // turn one bump into a burst of noise.
     if (result === "fatal") {
+      playSfx(this, "hurt");
       this.onLose();
     } else if (result === "absorbed") {
+      playSfx(this, "hurt");
       applyStompBounce(this.player);
       this.updateHud();
     }
@@ -1511,6 +1542,7 @@ export class PlayScene extends Phaser.Scene {
   private onWin(): void {
     if (this.outcome !== "playing") return;
     this.outcome = "won";
+    playSfx(this, "goal");
     // Recorded here rather than on the map, because N (next level) skips the
     // map entirely — banking it there would quietly lose every completion of
     // anyone who plays a world straight through. recordCompletion is
