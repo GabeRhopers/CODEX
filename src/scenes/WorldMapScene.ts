@@ -142,10 +142,18 @@ export class WorldMapScene extends Phaser.Scene {
     // Cover-fit, same idea as StaticBackground's: scale by whichever axis needs
     // it more so the image never falls short on either.
     image.setScale(Math.max(GAME_WIDTH / image.width, GAME_HEIGHT / image.height));
-    // Dimmed hard, because this is a backdrop for nodes and paths rather than
-    // the subject. At full strength the painted sun and trees win the screen
-    // and the route reads as an overlay on someone else's picture.
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x10121f, 0.72).setOrigin(0, 0).setDepth(-99);
+    // Dimmed, because this is a backdrop for nodes and paths rather than the
+    // subject: at full strength the painted sun and trees win the screen and
+    // the route reads as an overlay on someone else's picture.
+    //
+    // 0.42, down from 0.72 on 2026-09-05. Playing a real game through this
+    // screen, the art behind was simply unreadable — the first thing anyone
+    // sees after the opening cut scene was a murky rectangle. The hard dimming
+    // was doing two jobs, and only one of them was its own: text contrast is
+    // already handled by the two solid bands below, which is why this can drop
+    // this far without the title or the status line losing anything. The nodes
+    // are filled circles with strokes and read fine against the art.
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x10121f, 0.42).setOrigin(0, 0).setDepth(-99);
     // Solid bands behind the title and the status line — dimming alone still
     // leaves text sitting on whatever happens to be behind it.
     this.add.rectangle(0, 0, GAME_WIDTH, HEADER_HEIGHT, 0x141726, 0.92).setOrigin(0, 0).setDepth(-98);
@@ -195,10 +203,21 @@ export class WorldMapScene extends Phaser.Scene {
         .setDepth(2);
       // The level's own name under its node — a numbered dot alone doesn't say
       // which of your levels it is.
+      //
+      // Outlined, because this text is the one thing on the map that sits
+      // directly on the background art with no band behind it. That was hidden
+      // while the backdrop was dimmed to 0.72; lightening it to 0.42 so the art
+      // is actually visible left a locked level's grey name unreadable against
+      // a green tree. A dark outline works the way the Skin Creator's grid
+      // lines do — no fixed colour is safe against art you do not control, so
+      // the answer is contrast the text carries with it rather than a colour
+      // chosen to suit one picture.
       this.add
         .text(point.x, point.y + NODE_RADIUS + 12, this.levelNames.get(levelId) ?? "(deleted level)", {
           fontSize: "10px",
-          color: unlocked || done ? "#d8dcf0" : "#6a6f90",
+          color: unlocked || done ? "#ffffff" : "#b9bed8",
+          stroke: "#10121f",
+          strokeThickness: 3,
         })
         .setOrigin(0.5, 0)
         .setDepth(2);

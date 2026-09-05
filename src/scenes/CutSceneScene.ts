@@ -78,7 +78,7 @@ export class CutSceneScene extends Phaser.Scene {
 
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x12122a).setOrigin(0, 0);
     if (panel.imageId) void this.drawPicture(panel.imageId);
-    if (panel.words?.trim()) this.drawWords(panel.words.trim());
+    if (panel.words?.trim()) this.drawWords(panel.words.trim(), !!panel.imageId);
 
     this.drawControls();
   }
@@ -104,17 +104,49 @@ export class CutSceneScene extends Phaser.Scene {
     this.children.sendToBack(image);
   }
 
-  private drawWords(words: string): void {
-    this.add.rectangle(0, GAME_HEIGHT - BAND_HEIGHT, GAME_WIDTH, BAND_HEIGHT, 0x0b0b1c, 0.82).setOrigin(0, 0);
+  /**
+   * The words, laid out one of two ways depending on whether there is a picture
+   * to caption.
+   *
+   * **With a picture** they sit in the band across the bottom: a caption that
+   * lands on somebody's face is the usual way this looks wrong, and a fixed band
+   * is also a fixed place for the eye to return to.
+   *
+   * **Without one** the band is the wrong answer, and playing a real game
+   * through this screen is what showed it — a picture-less panel put three lines
+   * of story hunched at the bottom of an otherwise empty screen, with two thirds
+   * of it flat `0x12122a` above them. There is no picture to avoid covering, so
+   * the words take the middle, larger and wider. Panels of both kinds sit in the
+   * same cut scene (the shipped demo has some of each), so this has to be per
+   * panel rather than per scene.
+   */
+  private drawWords(words: string, hasPicture: boolean): void {
+    if (hasPicture) {
+      this.add.rectangle(0, GAME_HEIGHT - BAND_HEIGHT, GAME_WIDTH, BAND_HEIGHT, 0x0b0b1c, 0.82).setOrigin(0, 0);
+      this.add
+        .text(GAME_WIDTH / 2, GAME_HEIGHT - BAND_HEIGHT + 22, words, {
+          fontSize: "16px",
+          color: "#eeeeee",
+          align: "center",
+          lineSpacing: 6,
+          wordWrap: { width: GAME_WIDTH - 220 },
+        })
+        .setOrigin(0.5, 0);
+      return;
+    }
+
+    // Centred on the space between the panel counter at the top and the
+    // Skip/Next row at the bottom, rather than on the scene, so a long passage
+    // grows into the room it has instead of creeping under the buttons.
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - BAND_HEIGHT + 22, words, {
-        fontSize: "16px",
+      .text(GAME_WIDTH / 2, (GAME_HEIGHT - 20) / 2, words, {
+        fontSize: "20px",
         color: "#eeeeee",
         align: "center",
-        lineSpacing: 6,
-        wordWrap: { width: GAME_WIDTH - 220 },
+        lineSpacing: 10,
+        wordWrap: { width: GAME_WIDTH - 260 },
       })
-      .setOrigin(0.5, 0);
+      .setOrigin(0.5, 0.5);
   }
 
   private drawControls(): void {
