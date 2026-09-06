@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, pixelCanvasBox } from "./support/coords";
 
 /**
  * What you can see behind the drawing has to agree with the cells you paint.
@@ -43,12 +43,9 @@ async function clickSwatch(page: Page, hex: string): Promise<void> {
   await page.mouse.click(point.x, point.y);
 }
 
-function canvasBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
-  return page.evaluate((grid) => {
-    const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === grid)!;
-    const r = canvas.getBoundingClientRect();
-    return { x: r.left, y: r.top, width: r.width, height: r.height };
-  }, GRID);
+async function canvasBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
+  const b = await pixelCanvasBox(page, GRID);
+  return { x: b.left, y: b.top, width: b.width, height: b.height };
 }
 
 /** Paints the cell whose *exact-fraction* centre is under the cursor — which is
@@ -123,10 +120,8 @@ async function openNewSkin(page: Page): Promise<void> {
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
   await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
-  await page.waitForFunction(
-    (grid) => !!Array.from(document.querySelectorAll("canvas")).find((c) => c.width === grid),
-    GRID,
-  );
+  await pixelCanvasBox(page, GRID); // waits for the canvas; every measurement below needs it
+
   // The grid lines start hidden (PixelCanvasOverlay's `gridVisible = false`),
   // which is what these measurements want: the lines blend with `difference`,
   // so one sitting on a boundary under test would recolour that column and be

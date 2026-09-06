@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, startEditorWithLevel } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, startEditorWithLevel , pixelCanvasBox } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 
 /**
@@ -19,15 +19,7 @@ import { makeArea, makeLevel } from "./support/levels";
 const CHARACTER_GRID = 48;
 
 async function paintCell(page: Page, gridSize: number, cellX: number, cellY: number): Promise<void> {
-  const box = await page.evaluate(
-    ({ g }) => {
-      const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === g && c.height === g);
-      if (!canvas) throw new Error(`no ${g}x${g} pixel canvas on the page`);
-      const r = canvas.getBoundingClientRect();
-      return { left: r.left, top: r.top, width: r.width, height: r.height };
-    },
-    { g: gridSize },
-  );
+  const box = await pixelCanvasBox(page, gridSize);
   await page.mouse.click(box.left + ((cellX + 0.5) * box.width) / gridSize, box.top + ((cellY + 0.5) * box.height) / gridSize);
 }
 

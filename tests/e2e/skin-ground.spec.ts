@@ -6,7 +6,7 @@ import {
   readSceneField,
   selectPaletteCategory,
   startEditorWithLevel,
-  waitForSkinCanvas,
+  waitForSkinCanvas,  pixelCanvasBox,
 } from "./support/coords";
 import { makeLevel } from "./support/levels";
 import { hangSkinsRead } from "./support/mockDrive";
@@ -171,11 +171,7 @@ async function paintSkinFor(page: Page, targetLabel: string): Promise<void> {
   await clickIconWithLabel(page, "SkinEditor", targetLabel);
   await waitForSkinCanvas(page);
 
-  const box = await page.evaluate((grid) => {
-    const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === grid)!;
-    const r = canvas.getBoundingClientRect();
-    return { left: r.left, top: r.top, width: r.width, height: r.height };
-  }, GRID);
+  const box = await pixelCanvasBox(page, GRID);
   for (let y = 4; y < 12; y += 2) {
     for (let x = 4; x < 28; x += 2) {
       await page.mouse.click(box.left + ((x + 0.5) * box.width) / GRID, box.top + ((y + 0.5) * box.height) / GRID);

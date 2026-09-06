@@ -203,6 +203,18 @@ export class SkinEditorScene extends Phaser.Scene {
   private defaultButton?: Phaser.GameObjects.Text;
   private defaultArmed = false;
   private defaultArmTimer?: Phaser.Time.TimerEvent;
+  /**
+   * Which build of the screen is currently on display. Incremented by every
+   * `rebuild()`, captured by any build that finishes its work asynchronously,
+   * and compared before that work touches the display list.
+   *
+   * The mode alone cannot answer the question. `buildBrowse` used to guard its
+   * late append with `if (this.mode !== "browse") return`, which is true again
+   * the moment you go browse → canvas → browse — so a chain started by the
+   * first browse would append its rows on top of the second one's, over a
+   * display list `rebuild()` had already destroyed out from under it.
+   */
+  private buildId = 0;
   // Every field below is a *tool preference*, not per-skin data — deliberately
   // never reset in create()/rebuild(), same convention currentColor already
   // followed before this pass: picking Fill or zooming in once should still
@@ -359,6 +371,9 @@ export class SkinEditorScene extends Phaser.Scene {
     // actually relies on — copied into an array first since `.destroy()`
     // mutates `this.children.list` out from under a direct iteration.
     for (const child of [...this.children.list]) child.destroy();
+    // After the teardown, before the build: anything still in flight from the
+    // build being torn down is now stale by definition.
+    this.buildId++;
 
     if (this.mode === "browse") this.buildBrowse();
     else if (this.mode === "pick-brush") this.buildPickBrush();
@@ -469,9 +484,14 @@ export class SkinEditorScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, ROW_START_Y + 20, "Loading…", { fontSize: "14px", color: "#a6a6c8" })
       .setOrigin(0.5);
 
+    // Captured, not re-read: everything below belongs to *this* build of the
+    // browse screen, and must not touch the display list once another build has
+    // replaced it. See the note on `buildId`.
+    const build = this.buildId;
+
     void listPixelSkins().then(async (entries) => {
+      if (build !== this.buildId) return; // this screen has since been rebuilt
       loadingText.destroy();
-      if (this.mode !== "browse") return; // navigated away before this resolved
 
       if (entries.length === 0) {
         this.add
@@ -495,7 +515,7 @@ export class SkinEditorScene extends Phaser.Scene {
       for (const brushId of new Set(entries.map((e) => e.brushId))) {
         thumbsByBrush.set(brushId, await resolveSkinThumbnails(this, brushId));
       }
-      if (this.mode !== "browse") return;
+      if (build !== this.buildId) return;
 
       entries.forEach((entry, i) => {
         const brush = brushesById.get(entry.brushId);
@@ -1341,6 +1361,10 @@ export class SkinEditorScene extends Phaser.Scene {
    * built-ins are their own already-loaded textures; saved skins reuse
    * resolveSkinThumbnails, exactly as the browse list does. */
   private async refreshReferenceItems(): Promise<void> {
+    // Same reason as buildBrowse's: `this.mode === "canvas"` is true again
+    // after canvas → browse → canvas, and this list is built for one specific
+    // brush, so a stale chain would offer the *previous* character's traces.
+    const build = this.buildId;
     const sources: ReferenceSource[] = [...builtInReferenceSources(this.target?.brush.id)];
     try {
       const saved = await listPixelSkins();
@@ -1367,7 +1391,7 @@ export class SkinEditorScene extends Phaser.Scene {
       // most, so this degrades rather than failing the whole picker.
       console.error("Couldn't list saved skins for tracing:", err);
     }
-    if (this.mode !== "canvas") return;
+    if (build !== this.buildId) return;
 
     this.referenceSources = sources;
     const items: AssetPickerItem[] = [

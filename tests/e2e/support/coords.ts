@@ -104,6 +104,7 @@ const TARGET_TIMEOUT_MS = 15_000;
 export async function clickByText(page: Page, sceneKey: string, text: string): Promise<void> {
   const point = await waitForScenePoint(
     page,
+    sceneKey,
     ({ sceneKey, text }) => {
       const game = window.__debugGame!;
       const scene = game.scene.getScene(sceneKey);
@@ -140,22 +141,162 @@ export async function clickByText(page: Page, sceneKey: string, text: string): P
   await clickScenePoint(page, point.x, point.y);
 }
 
-/** Polls `predicate` inside the page until it returns a point, then hands
- * it back — Playwright's own rAF-driven waiting rather than a sleep loop.
+/**
+ * Waits until `sceneKey`'s input plugin can actually hit-test the objects that
+ * are already on screen.
+ *
+ * Being in the display list and being clickable are two different states, and
+ * there is a window between them. `InputPlugin.queueForInsertion` (see
+ * node_modules/phaser/src/input/InputPlugin.js) pushes every freshly
+ * `setInteractive` object onto `_pendingInsertion`, and only `preUpdate` — the
+ * next input tick — moves it into `_list`, which is the list hit testing walks.
+ * So a button can be found by `clickByText` (it reads `scene.children.list`)
+ * a frame or more before a click on it can possibly land.
+ *
+ * Locally that window is one 16ms frame and no CDP round trip ever fits inside
+ * it. Under CI contention the game loop stalls for hundreds of milliseconds
+ * while CDP round trips stay fast, and the click sails straight through the
+ * button. That is the mechanism behind the failures reproduced on 2026-09-06
+ * with `--workers=4 --repeat-each=4`: a screenshot of one showed the app still
+ * on the browse screen, "+ New Skin" plainly visible and plainly unclicked,
+ * with the *next* helper burning its full 15s looking for a screen that was
+ * never going to be built.
+ *
+ * The gate: the queues are drained **and** at least one whole game frame has
+ * elapsed since we looked. Anything visible when the caller found it was
+ * therefore queued no later than `startFrame` and drained by `startFrame + 1`.
+ *
+ * Best-effort on purpose. If a scene somehow never settles, carrying on and
+ * clicking is exactly what this helper did before it existed — never worse,
+ * and the diagnostics below say so.
+ */
+async function waitForInputReady(page: Page, sceneKey: string): Promise<boolean> {
+  const startFrame = await page.evaluate(() => window.__debugGame!.loop.frame);
+  try {
+    await page.waitForFunction(
+      ({ sceneKey, startFrame }) => {
+        const game = window.__debugGame!;
+        const scene = game.scene.getScene(sceneKey) as unknown as {
+          input?: { _pendingInsertion?: unknown[]; _pendingRemoval?: unknown[]; isActive?: () => boolean };
+        } | null;
+        const input = scene?.input;
+        if (!input || typeof input.isActive !== "function" || !input.isActive()) return false;
+        if ((input._pendingInsertion?.length ?? 0) > 0 || (input._pendingRemoval?.length ?? 0) > 0) return false;
+        return game.loop.frame > startFrame;
+      },
+      { sceneKey, startFrame },
+      { timeout: INPUT_READY_TIMEOUT_MS },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** How far a re-checked target may drift and still be considered the same
+ * target. Text bounds wobble by a fraction of a pixel as a label re-renders;
+ * a rebuild moves things by tens. */
+const SAME_POINT_PX = 2;
+
+/** A screen that is still settling gets a couple of extra goes rather than one
+ * flat failure — the point is only ever stale because something repainted. */
+const FIND_ATTEMPTS = 3;
+
+const INPUT_READY_TIMEOUT_MS = 5_000;
+
+/**
+ * Polls `predicate` inside the page until it returns a point, waits for that
+ * point to be genuinely clickable, and re-checks it before handing it back.
+ *
+ * Three steps, because a canvas gives Playwright nothing to check for itself:
+ * Phaser draws to one `<canvas>`, so the actionability guarantees a DOM
+ * selector gets for free (visible, stable, receives events) apply to none of
+ * this and have to be rebuilt by hand.
+ *
+ *   1. Find it — Playwright's rAF-driven waiting rather than a sleep loop.
+ *   2. Wait for the scene's input plugin to be able to hit it (above).
+ *   3. Look again. If it moved, the screen repainted underneath us and the
+ *      point we hold is a lie; start over.
+ *
  * On expiry it throws `message`, the same text the callers used to throw
  * immediately, so failures still name the label and scene rather than
- * surfacing as an anonymous timeout. */
+ * surfacing as an anonymous timeout — now with the scene's own state attached,
+ * since "the thing you asked for was never built" and "it was built and then
+ * replaced" want different fixes and used to look identical.
+ */
 async function waitForScenePoint<A>(
   page: Page,
+  sceneKey: string,
   predicate: (arg: A) => { x: number; y: number } | null,
   arg: A,
   message: string,
 ): Promise<{ x: number; y: number }> {
+  let settled = true;
+  let moved: string | null = null;
+
+  for (let attempt = 0; attempt < FIND_ATTEMPTS; attempt++) {
+    let found: { x: number; y: number };
+    try {
+      const handle = await page.waitForFunction(predicate, arg, { timeout: TARGET_TIMEOUT_MS });
+      found = await handle.jsonValue();
+    } catch {
+      throw new Error(`${message}\n${await describeScene(page, sceneKey)}`);
+    }
+
+    settled = await waitForInputReady(page, sceneKey);
+
+    const still = await page.evaluate(predicate, arg);
+    if (still && Math.abs(still.x - found.x) <= SAME_POINT_PX && Math.abs(still.y - found.y) <= SAME_POINT_PX) {
+      return still;
+    }
+    moved = still
+      ? `moved from (${found.x.toFixed(1)}, ${found.y.toFixed(1)}) to (${still.x.toFixed(1)}, ${still.y.toFixed(1)})`
+      : `vanished from (${found.x.toFixed(1)}, ${found.y.toFixed(1)})`;
+  }
+
+  throw new Error(
+    `${message}\nTarget never held still: ${moved} across ${FIND_ATTEMPTS} attempts` +
+      `${settled ? "" : " (and the scene's input queue never drained)"}.\n${await describeScene(page, sceneKey)}`,
+  );
+}
+
+/**
+ * What the scene looked like when a click helper gave up.
+ *
+ * A `clickIconWithLabel` timeout has two completely different causes — the
+ * label is wrong, or an earlier click missed and this screen was never built —
+ * and until 2026-09-06 they produced the same sentence, which cost a
+ * screenshot-by-screenshot hunt to tell apart. The mode and the labels actually
+ * present separate them at a glance.
+ */
+async function describeScene(page: Page, sceneKey: string): Promise<string> {
   try {
-    const handle = await page.waitForFunction(predicate, arg, { timeout: TARGET_TIMEOUT_MS });
-    return await handle.jsonValue();
-  } catch {
-    throw new Error(message);
+    return await page.evaluate((sceneKey) => {
+      const game = window.__debugGame!;
+      const active = game.scene
+        .getScenes(true)
+        .map((s) => s.scene.key)
+        .join(", ");
+      const scene = game.scene.getScene(sceneKey) as unknown as
+        | ({ mode?: string; children: { list: unknown[] } } | null);
+      if (!scene) return `Scene "${sceneKey}" does not exist. Active scenes: [${active}].`;
+      type Listable = { list?: Listable[]; type?: string; text?: string; input?: unknown };
+      const labels: string[] = [];
+      const walk = (list: Listable[]): void => {
+        for (const child of list) {
+          if (child.type === "Text" && child.input && typeof child.text === "string") labels.push(child.text);
+          if (child.list) walk(child.list);
+        }
+      };
+      walk((scene.children.list as unknown as Listable[]) ?? []);
+      return (
+        `Scene "${sceneKey}" mode=${(scene as { mode?: string }).mode ?? "(n/a)"}; ` +
+        `active scenes: [${active}]; clickable labels now on screen: ` +
+        `[${labels.map((l) => JSON.stringify(l)).join(", ")}]`
+      );
+    }, sceneKey);
+  } catch (error) {
+    return `(could not read scene state: ${String(error)})`;
   }
 }
 
@@ -169,6 +310,7 @@ async function waitForScenePoint<A>(
 export async function clickIconWithLabel(page: Page, sceneKey: string, label: string): Promise<void> {
   const point = await waitForScenePoint(
     page,
+    sceneKey,
     ({ sceneKey, label }) => {
       const scene = window.__debugGame!.scene.getScene(sceneKey);
       if (!scene) return null;
@@ -212,6 +354,7 @@ export async function clickIconWithLabel(page: Page, sceneKey: string, label: st
 export async function clickDeleteBadgeFor(page: Page, sceneKey: string, label: string): Promise<void> {
   const point = await waitForScenePoint(
     page,
+    sceneKey,
     ({ sceneKey, label }) => {
       const scene = window.__debugGame!.scene.getScene(sceneKey);
       if (!scene) return null;
@@ -280,25 +423,30 @@ export async function selectPaletteCategory(
   sceneKey: string,
   label: "Blocks" | "Markers" | "Enemies" | "Items" | "Decor",
 ): Promise<void> {
-  const chipPoint = await page.evaluate((sceneKey) => {
-    const scene = window.__debugGame!.scene.getScene(sceneKey);
-    if (!scene) return null;
-    type Listable = { list?: Listable[]; type?: string; text?: string; x?: number; y?: number };
-    const search = (list: Listable[]): { x: number; y: number } | null => {
-      for (const child of list) {
-        if (child.type === "Text" && typeof child.text === "string" && child.text.endsWith(" ▾")) {
-          return { x: child.x ?? 0, y: child.y ?? 0 };
+  const chipPoint = await waitForScenePoint(
+    page,
+    sceneKey,
+    (sceneKey) => {
+      const scene = window.__debugGame!.scene.getScene(sceneKey);
+      if (!scene) return null;
+      type Listable = { list?: Listable[]; type?: string; text?: string; x?: number; y?: number };
+      const search = (list: Listable[]): { x: number; y: number } | null => {
+        for (const child of list) {
+          if (child.type === "Text" && typeof child.text === "string" && child.text.endsWith(" ▾")) {
+            return { x: child.x ?? 0, y: child.y ?? 0 };
+          }
+          if (child.list) {
+            const found = search(child.list);
+            if (found) return found;
+          }
         }
-        if (child.list) {
-          const found = search(child.list);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-    return search((scene.children.list as unknown as Listable[]) ?? []);
-  }, sceneKey);
-  if (!chipPoint) throw new Error(`selectPaletteCategory: category chip not found in scene "${sceneKey}"`);
+        return null;
+      };
+      return search((scene.children.list as unknown as Listable[]) ?? []);
+    },
+    sceneKey,
+    `selectPaletteCategory: category chip not found in scene "${sceneKey}"`,
+  );
   await clickScenePoint(page, chipPoint.x, chipPoint.y);
   await clickByText(page, sceneKey, label);
 }
@@ -432,4 +580,58 @@ export async function waitForSkinCanvas(page: Page, timeout = 20_000): Promise<v
         `mode=${state.mode} status="${state.status}" target=${state.targetBrush}/${state.targetId}`,
     );
   }
+}
+
+/** Where the Skin Creator's pixel canvas is on screen, in CSS pixels. */
+export interface PixelCanvasBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Waits for the Skin Creator's pixel canvas and returns its on-screen box.
+ *
+ * Six specs each had their own copy of this lookup, and half of them wrote it
+ * as `Array.from(document.querySelectorAll("canvas")).find(...)!` — a non-null
+ * assertion that is simply a lie whenever the canvas has not been built yet.
+ * When it lies you do not get a useful failure, you get
+ * `TypeError: Cannot read properties of undefined (reading
+ * 'getBoundingClientRect')` from somewhere inside a page.evaluate.
+ *
+ * Which is exactly what happened: reproduced on 2026-09-06 by running the skin
+ * specs four workers wide on a four-core box, where `skin-names.spec.ts`'s
+ * "two skins for the same brush get distinct default names" went straight from
+ * opening a new skin to painting a cell. Its five siblings in that same file
+ * call `waitForSkinCanvas` first; that one did not, and under contention the
+ * canvas had not arrived. The other three copies do not lie — they throw a
+ * clear message — but none of the six *wait*, which is the actual fix.
+ *
+ * `gridSize` identifies it: the pixel canvas is the only `<canvas>` in the
+ * document whose backing store is exactly gridSize x gridSize (the game's own
+ * canvas is 1050x468). See PixelCanvasOverlay, which sizes the buffer to one
+ * pixel per cell.
+ */
+export async function pixelCanvasBox(page: Page, gridSize: number, timeout = TARGET_TIMEOUT_MS): Promise<PixelCanvasBox> {
+  try {
+    await page.waitForFunction(
+      (g) => !!Array.from(document.querySelectorAll("canvas")).find((c) => c.width === g && c.height === g),
+      gridSize,
+      { timeout },
+    );
+  } catch {
+    const sizes = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("canvas")).map((c) => `${c.width}x${c.height}`),
+    );
+    throw new Error(
+      `No ${gridSize}x${gridSize} pixel canvas after ${timeout}ms — the Skin Creator never reached canvas mode. ` +
+        `Canvases present: [${sizes.join(", ")}].`,
+    );
+  }
+  return page.evaluate((g) => {
+    const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === g && c.height === g)!;
+    const r = canvas.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  }, gridSize);
 }

@@ -42,15 +42,71 @@ function skinThumbTextureKey(brushId: string, skinId: string): string {
  * registerTexture call sites below (active skins and picker thumbnails). */
 const loadedByKey = new Map<string, string>();
 
-function registerTexture(scene: Phaser.Scene, key: string, dataUrl: string): Promise<string> {
+/**
+ * How long one texture registration may take before it is written off.
+ *
+ * These are 32x32 or 48x48 base64 PNGs, so the real work is well under a
+ * millisecond; anything approaching this is not slow, it is stuck. Deliberately
+ * shorter than the e2e suite's own 15s target timeout, so a stuck decode
+ * surfaces as the named error below rather than as an anonymous test timeout
+ * that says nothing about which texture or why.
+ */
+const TEXTURE_TIMEOUT_MS = 8000;
+
+/**
+ * Registers one base64 image as a Phaser texture, and **always settles**.
+ *
+ * The `null` return, and the timeout that produces it, are the whole point.
+ * This used to be a promise with a single resolve path, on the ADD_KEY event:
+ *
+ *     scene.textures.once(ADD_KEY + key, () => resolve(key));
+ *     scene.textures.addBase64(key, dataUrl);
+ *
+ * If that event never arrived — an undecodable PNG, a scene torn down mid-load,
+ * two registrations of the same key interleaving so the `remove()` below
+ * cancels a load already in flight — the promise never settled. Every caller
+ * awaits this in a sequential loop, so one stuck texture silently stopped the
+ * whole batch: the skin picker would open with its built-in entries and simply
+ * never show the custom skins, for ever, with nothing logged.
+ *
+ * That was diagnosed twice as something else before being caught properly. Once
+ * as a bad test fixture ("the seeded PNG was undecodable, so the dropdown stayed
+ * empty" — true, but the hang was the real defect), and once as a flaky test.
+ * It was reproduced on 2026-09-06 by running the skin specs four-way parallel
+ * on a four-core box: the failure screenshot shows the picker open, "Use
+ * default" and "Built-in art" present, and both saved skins missing.
+ *
+ * So: one stuck texture now costs one thumbnail and a console error, not the
+ * whole picker. Callers get `null` and skip that entry.
+ */
+function registerTexture(scene: Phaser.Scene, key: string, dataUrl: string): Promise<string | null> {
   if (loadedByKey.get(key) === dataUrl && scene.textures.exists(key)) {
     return Promise.resolve(key);
   }
   return new Promise((resolve) => {
+    const startedAt = Date.now();
+    let settled = false;
+    const settle = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
     if (scene.textures.exists(key)) scene.textures.remove(key);
+    const timer = setTimeout(() => {
+      // Loud, and specific about which texture and how long it waited — the
+      // information that was missing every previous time this happened.
+      console.error(
+        `Texture "${key}" never finished decoding after ${Date.now() - startedAt}ms; skipping it. ` +
+          `The image may be corrupt, or its scene may have been torn down mid-load.`,
+      );
+      settle(null);
+    }, TEXTURE_TIMEOUT_MS);
+
     scene.textures.once(Phaser.Textures.Events.ADD_KEY + key, () => {
+      clearTimeout(timer);
       loadedByKey.set(key, dataUrl);
-      resolve(key);
+      settle(key);
     });
     scene.textures.addBase64(key, dataUrl);
   });
@@ -103,7 +159,11 @@ export async function resolveSkinTextureKeys(
     const chosen = chosenSkin(skins, brushId, levelSkins);
     if (!chosen) continue;
     const key = await registerTexture(scene, activeSkinTextureKey(brushId, chosen.id), chosen.imageData);
-    result.set(brushId, key);
+    // A texture that would not decode leaves this brush out of the map, which
+    // the callers already read as "wear the built-in art" — the same outcome as
+    // never having chosen a skin. Better than a brush rendering as a missing
+    // texture, and far better than the whole level's skins hanging on one.
+    if (key) result.set(brushId, key);
   }
   return result;
 }
@@ -206,7 +266,11 @@ export async function resolveFrameTextureKeys(
     // Keyed by the frame that *supplied* the image, not the one being asked
     // for, so five poses falling back to one idle share a single texture
     // instead of registering the same PNG five times over.
-    keys.set(name, await registerTexture(scene, frameTextureKey(targetId, art.id, resolved.suppliedBy), resolved.dataUrl));
+    const key = await registerTexture(scene, frameTextureKey(targetId, art.id, resolved.suppliedBy), resolved.dataUrl);
+    // A frame that would not decode is simply absent, which is already how an
+    // unpainted frame behaves — the animation falls back the way it does for a
+    // skin that never had that pose.
+    if (key) keys.set(name, key);
   }
   return keys.size > 0 ? keys : null;
 }
@@ -256,7 +320,10 @@ export async function resolveSkinThumbnails(
   const thumbnails: SkinThumbnail[] = [];
   for (const item of entry.items) {
     const key = await registerTexture(scene, skinThumbTextureKey(brushId, item.id), item.imageData);
-    thumbnails.push({ id: item.id, name: displaySkinName(item, brushLabel), textureKey: key });
+    // One thumbnail that would not decode costs that one row. Before, it cost
+    // the entire picker: this loop awaited a promise that never settled, so the
+    // dropdown opened with only its built-in entries and stayed that way.
+    if (key) thumbnails.push({ id: item.id, name: displaySkinName(item, brushLabel), textureKey: key });
   }
   return thumbnails;
 }

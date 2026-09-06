@@ -348,6 +348,31 @@ export async function hangSkinsRead(page: Page): Promise<void> {
 }
 
 /**
+ * Makes the shared skins library read **slow** — answered normally, just late.
+ *
+ * Neither of the two failure modes above: this one succeeds, which is the
+ * point. Screens here paint immediately and fill in when the read lands, so the
+ * interesting window is the one where the read is still outstanding and the
+ * user has already moved on. It is a real window — the first browse build's
+ * `listPixelSkins()` is genuinely in flight while you tap "+ New Skin" — but it
+ * is normally a few milliseconds wide and no test can aim at it. Widening it is
+ * the only way to hold a screen still long enough to navigate away from it on
+ * purpose.
+ *
+ * Registered after installMockDrive so it shadows it for this one request and
+ * falls through for everything else, exactly like the two above.
+ */
+export async function delaySkinsRead(page: Page, ms: number): Promise<void> {
+  await page.route("https://www.googleapis.com/**", async (route) => {
+    // The listing query, matched the same way hangSkinsRead matches it: the
+    // file name survives URL-encoding literally. Delaying the lookup delays
+    // everything that depends on it, so the content download needs no handling.
+    if (route.request().url().includes("skins.json")) await new Promise((resolve) => setTimeout(resolve, ms));
+    await route.fallback();
+  });
+}
+
+/**
  * Makes the **silent** Google reconnect fail while the interactive
  * "Connect Google Drive" button still succeeds — a first-ever visitor, a
  * revoked consent, or a browser blocking the silent flow's storage access.

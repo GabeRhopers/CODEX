@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas , pixelCanvasBox } from "./support/coords";
 
 /**
  * A pixel skin is now stored only as its PNG — the editable cell grid it was
@@ -20,15 +20,7 @@ function overlaySelector(): string {
 }
 
 async function paintCell(page: Page, cellX: number, cellY: number): Promise<void> {
-  const box = await page.evaluate(
-    ({ g }) => {
-      const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === g && c.height === g);
-      if (!canvas) throw new Error("pixel canvas not found");
-      const r = canvas.getBoundingClientRect();
-      return { left: r.left, top: r.top, width: r.width, height: r.height };
-    },
-    { g: GRID },
-  );
+  const box = await pixelCanvasBox(page, GRID);
   const cellW = box.width / GRID;
   const cellH = box.height / GRID;
   await page.mouse.click(box.left + (cellX + 0.5) * cellW, box.top + (cellY + 0.5) * cellH);

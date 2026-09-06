@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, pixelCanvasBox } from "./support/coords";
 
 /**
  * The Grid overlay has to be visible against the art you are drawing, which is
@@ -48,11 +48,8 @@ async function clickSwatch(page: Page, hex: string): Promise<void> {
  * own screenshot through an offscreen canvas — no new dependency for one
  * measurement. */
 async function gridContrast(page: Page): Promise<number> {
-  const box = await page.evaluate(() => {
-    const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === 32)!;
-    const r = canvas.getBoundingClientRect();
-    return { x: r.left, y: r.top, width: r.width, height: r.height };
-  });
+  const b = await pixelCanvasBox(page, 32);
+  const box = { x: b.left, y: b.top, width: b.width, height: b.height };
   const png = (await page.screenshot({ clip: box })).toString("base64");
 
   return page.evaluate(async (png) => {
@@ -90,11 +87,8 @@ async function gridContrast(page: Page): Promise<number> {
 async function floodWith(page: Page, hex: string): Promise<void> {
   await clickSwatch(page, hex);
   await clickByText(page, "SkinEditor", "Fill");
-  const box = await page.evaluate(() => {
-    const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === 32)!;
-    const r = canvas.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  });
+  const b = await pixelCanvasBox(page, 32);
+  const box = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
   await page.mouse.click(box.x, box.y);
   await expect.poll(() =>
     page.evaluate(() => {

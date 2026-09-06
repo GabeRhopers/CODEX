@@ -5,6 +5,7 @@ import {
   gotoApp,
   selectPaletteCategory,
   startEditorWithLevel,
+  pixelCanvasBox,
   waitForSkinCanvas,
 } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
@@ -80,11 +81,12 @@ const paintedCount = (cells: (string | null)[]): number => cells.filter((c) => c
 // --- driving the editor -----------------------------------------------------
 
 async function paintCell(page: Page, x: number, y: number): Promise<void> {
-  const box = await page.evaluate((g) => {
-    const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === g && c.height === g)!;
-    const r = canvas.getBoundingClientRect();
-    return { left: r.left, top: r.top, width: r.width, height: r.height };
-  }, GRID);
+  // Waits rather than asserting. This function used to do its own
+  // `.find(...)!`, and the test at "two skins for the same brush get distinct
+  // default names" is the one in this file that never calls waitForSkinCanvas
+  // first — so under load the canvas was not there yet and the lie surfaced as
+  // a TypeError from inside a page.evaluate. See pixelCanvasBox.
+  const box = await pixelCanvasBox(page, GRID);
   await page.mouse.click(box.left + ((x + 0.5) * box.width) / GRID, box.top + ((y + 0.5) * box.height) / GRID);
 }
 

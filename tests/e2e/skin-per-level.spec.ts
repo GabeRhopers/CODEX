@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, selectPaletteCategory, startEditorWithLevel } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, selectPaletteCategory, startEditorWithLevel, pixelCanvasBox } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 
 /**
@@ -54,11 +54,7 @@ async function paintGhostSkin(page: Page): Promise<void> {
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
 
-  const box = await page.evaluate(() => {
-    const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === 32)!;
-    const r = canvas.getBoundingClientRect();
-    return { left: r.left, top: r.top, width: r.width, height: r.height };
-  });
+  const box = await pixelCanvasBox(page, 32);
   for (const [x, y] of [
     [8, 8],
     [9, 8],

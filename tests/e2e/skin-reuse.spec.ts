@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas , pixelCanvasBox } from "./support/coords";
 
 /**
  * Reusing art you already have: copying a skin as a starting point without
@@ -26,15 +26,7 @@ async function readCells(page: Page): Promise<(string | null)[]> {
 const paintedCount = (cells: (string | null)[]): number => cells.filter((cell) => cell !== null).length;
 
 async function paintCell(page: Page, gridSize: number, cellX: number, cellY: number): Promise<void> {
-  const box = await page.evaluate(
-    ({ g }) => {
-      const canvas = Array.from(document.querySelectorAll("canvas")).find((c) => c.width === g && c.height === g);
-      if (!canvas) throw new Error(`no ${g}x${g} pixel canvas`);
-      const r = canvas.getBoundingClientRect();
-      return { left: r.left, top: r.top, width: r.width, height: r.height };
-    },
-    { g: gridSize },
-  );
+  const box = await pixelCanvasBox(page, gridSize);
   await page.mouse.click(box.left + ((cellX + 0.5) * box.width) / gridSize, box.top + ((cellY + 0.5) * box.height) / gridSize);
 }
 
