@@ -1,3 +1,4 @@
+import { isSoundPreset, type SoundSpec } from "../audio/soundSynth";
 import { EntityType } from "../level/LevelSchema";
 import { BUILTIN_DECOR_TYPES, BUILTIN_ENEMY_TYPES, BUILTIN_ITEM_TYPES, builtinEnemyDef } from "./builtins";
 
@@ -79,6 +80,19 @@ export interface CustomEntityDef {
   /** The built-in whose behaviour this copies. Must belong to `category`. */
   basedOn: EntityType;
   params?: CustomEntityParams;
+  /**
+   * The noise it makes, as a preset and a seed rather than as audio.
+   *
+   * Same reasoning as the art above, arrived at from the other direction: art is
+   * absent because it already lives in the skins library, and sound is *present*
+   * because it costs two numbers. `soundSynth.renderSound` rebuilds the waveform
+   * from these, so a definition stays a few bytes, a published bundle carries no
+   * audio, and the same seed is the same sound on every device forever.
+   *
+   * Optional, and silence is a perfectly good answer — a thing based on a coin
+   * still makes the coin's own noise when it has none of its own.
+   */
+  sound?: SoundSpec;
   createdAt: string;
   updatedAt: string;
 }
@@ -135,10 +149,15 @@ export function newCustomEntityDef(id: CustomEntityId, category: CustomEntityCat
  * The name survives (you named the thing, not the category); `basedOn` cannot,
  * and `params` is dropped because `speedScale` means nothing outside enemies
  * and a stale one would be written straight back to storage.
+ *
+ * The sound survives too, for the name's reason rather than `params`': you chose
+ * a noise for the thing, and it stays meaningful wherever the thing ends up. A
+ * pickup jingle on an enemy is a strange choice, not an invalid one, and the
+ * author is entitled to it.
  */
 export function withCategory(def: CustomEntityDef, category: CustomEntityCategory): CustomEntityDef {
   if (def.category === category) return def;
-  return { ...newCustomEntityDef(def.id, category, def.name), createdAt: def.createdAt };
+  return { ...newCustomEntityDef(def.id, category, def.name), createdAt: def.createdAt, sound: def.sound };
 }
 
 /**
@@ -159,6 +178,16 @@ export function validationError(def: CustomEntityDef): string | null {
   const speed = def.params?.speedScale;
   if (speed !== undefined && (!Number.isFinite(speed) || speed < MIN_SPEED_SCALE || speed > MAX_SPEED_SCALE)) {
     return `Speed has to be between ${MIN_SPEED_SCALE} and ${MAX_SPEED_SCALE}.`;
+  }
+  // A sound is two numbers from storage, so both need checking here rather than
+  // at the point it plays: renderSound switches on the preset with no default
+  // branch, and a seed that is not a finite integer would come out of the PRNG's
+  // `>>> 0` as an arbitrary different sound rather than as an error.
+  if (def.sound) {
+    if (!isSoundPreset(def.sound.preset)) return `"${def.sound.preset}" is not a sound this version knows.`;
+    if (!Number.isInteger(def.sound.seed) || def.sound.seed < 0 || def.sound.seed >= 0x100000000) {
+      return "That sound's seed is out of range.";
+    }
   }
   return null;
 }

@@ -211,4 +211,48 @@ describe("withCategory", () => {
     const enemy = { ...newCustomEntityDef(makeCustomEntityId("x"), "enemies", "Zoom"), params: { speedScale: 2 } };
     expect(withCategory(enemy, "enemies")).toBe(enemy);
   });
+
+  it("keeps the sound, which belongs to the thing rather than to its family", () => {
+    // The opposite call from speedScale directly above, and worth stating: a
+    // pickup jingle on an enemy is a strange choice, not an invalid one, and
+    // silently deleting what someone rolled would be the worse surprise.
+    const noisy = { ...newCustomEntityDef(makeCustomEntityId("x"), "items", "Star Fruit"), sound: SOUND };
+    expect(withCategory(noisy, "enemies").sound).toEqual(SOUND);
+  });
+});
+
+const SOUND = { preset: "pickup", seed: 1234 } as const;
+
+describe("a thing's sound", () => {
+  it("accepts a real preset and an in-range seed", () => {
+    expect(validationError(def({ sound: SOUND }))).toBeNull();
+    // Both ends of the seed range the PRNG actually addresses.
+    expect(validationError(def({ sound: { preset: "hit", seed: 0 } }))).toBeNull();
+    expect(validationError(def({ sound: { preset: "thud", seed: 0xffffffff } }))).toBeNull();
+  });
+
+  it("is optional — silence is a valid answer", () => {
+    // A thing with no sound of its own still makes the noise of whatever it is
+    // based on, so this is a real state and not a half-filled form.
+    expect(def().sound).toBeUndefined();
+    expect(validationError(def())).toBeNull();
+  });
+
+  it("refuses a preset this build cannot render", () => {
+    // The storage boundary. renderSound switches on the preset with no default
+    // branch, so a definition written by a future version has to be rejected
+    // here rather than falling through to undefined samples.
+    const future = def({ sound: { preset: "explosion" as never, seed: 1 } });
+    expect(validationError(future)).toMatch(/not a sound this version knows/);
+  });
+
+  it("refuses a seed that would silently become a different sound", () => {
+    // Anything the PRNG's `>>> 0` would fold: a fraction, a negative, or a
+    // value past 2^32. None of these throw — they quietly render the wrong
+    // noise, which is why they are caught as validation rather than at play
+    // time.
+    for (const seed of [1.5, -1, 0x100000000, NaN, Infinity]) {
+      expect(validationError(def({ sound: { preset: "blip", seed } })), `seed ${seed}`).toMatch(/out of range/);
+    }
+  });
 });
