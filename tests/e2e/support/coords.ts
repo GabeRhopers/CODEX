@@ -234,18 +234,33 @@ async function waitForScenePoint<A>(
   let settled = true;
   let moved: string | null = null;
 
+  // Playwright types a page function as `(arg: Unboxed<A>) => R`, and with an
+  // unconstrained `A` it cannot prove `Unboxed<A>` is `A` — so the calls below
+  // do not typecheck as written, however obviously correct they are. Every
+  // caller passes a plain JSON-serialisable object, which is exactly the case
+  // where `Unboxed<A>` *is* `A`, so the widening is sound. Done once here, with
+  // this note, rather than at each of the three call sites.
+  const pageFn = predicate as (arg: unknown) => { x: number; y: number } | null;
+  const pageArg = arg as unknown;
+
   for (let attempt = 0; attempt < FIND_ATTEMPTS; attempt++) {
     let found: { x: number; y: number };
     try {
-      const handle = await page.waitForFunction(predicate, arg, { timeout: TARGET_TIMEOUT_MS });
-      found = await handle.jsonValue();
+      const handle = await page.waitForFunction(pageFn, pageArg, { timeout: TARGET_TIMEOUT_MS });
+      // `waitForFunction` resolves only once the predicate returns something
+      // truthy, so this is never null — but the handle's type says it can be,
+      // and asserting that away is the kind of small lie that this file has
+      // already been bitten by. A branch that cannot fire costs nothing.
+      const value = await handle.jsonValue();
+      if (!value) throw new Error("waitForFunction resolved with no point");
+      found = value;
     } catch {
       throw new Error(`${message}\n${await describeScene(page, sceneKey)}`);
     }
 
     settled = await waitForInputReady(page, sceneKey);
 
-    const still = await page.evaluate(predicate, arg);
+    const still = await page.evaluate(pageFn, pageArg);
     if (still && Math.abs(still.x - found.x) <= SAME_POINT_PX && Math.abs(still.y - found.y) <= SAME_POINT_PX) {
       return still;
     }

@@ -25,6 +25,17 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      # The unit tests gate the deploy from here (2026-09-07). Until this line
+      # existed they gated nothing: this workflow ran `npm run build` and
+      # Playwright, and `npm test` appeared nowhere, so all 511 vitest tests
+      # across 34 files could go red and still ship to the live link. Every
+      # "tests pass" in this repo's history means "they passed on the machine
+      # that wrote the commit", which is not the same claim.
+      #
+      # It belongs in `build` rather than in its own job because it is ~15s
+      # against that job's 30s — a separate runner would spend longer starting
+      # up than testing — and `deploy` already waits on `build`.
+      - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

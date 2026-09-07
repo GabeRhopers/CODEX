@@ -85,6 +85,9 @@ export class PublishScene extends Phaser.Scene {
    * make sense afterwards are dimmed until then rather than reading as things
    * you could already have done. */
   private exported = false;
+  /** An export is in flight. Distinct from `exported`, which means one has
+   * already finished — see the note in `exportBundle`. */
+  private exporting = false;
 
   constructor() {
     super("Publish");
@@ -195,15 +198,25 @@ export class PublishScene extends Phaser.Scene {
    * order to fix it.
    */
   private async exportBundle(): Promise<void> {
+    // Collecting a bundle reads every level, background and track the game
+    // uses, so on a slow connection the button stays live for seconds while
+    // nothing visibly happens — and the natural response to that is to press it
+    // again. Each press wrote its own file and rebuilt the screen underneath
+    // the other, so you got two downloads and whichever status line lost the
+    // race. One at a time.
+    if (this.exporting) return;
+    this.exporting = true;
     let bundle;
     try {
       bundle = await collectGameBundle(this.gameDoc);
     } catch {
+      this.exporting = false;
       this.status = "Could not read everything this game needs — check your connection.";
       this.statusTone = "bad";
       this.rebuild();
       return;
     }
+    this.exporting = false;
     downloadTextFile(bundleFileName(this.gameDoc.title), JSON.stringify(bundle));
     const problems = bundleProblems(bundle);
     this.exported = true;

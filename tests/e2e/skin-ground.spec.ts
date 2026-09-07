@@ -100,7 +100,7 @@ function grassLevel(): LevelData {
   const height = 12;
   const row = 8;
   const ground: number[][] = Array.from({ length: height }, (_, y) =>
-    Array.from({ length: width }, (_, x) => (y === row ? GROUND_GRASS : EMPTY)),
+    Array.from({ length: width }, () => (y === row ? GROUND_GRASS : EMPTY)),
   );
   return makeLevel({
     width,
@@ -217,9 +217,20 @@ test("the Skin Creator offers every block, and its grid still fits on screen", a
 
   const labels = await page.evaluate(() => {
     const scene = window.__debugGame!.scene.getScene("SkinEditor");
-    return (scene.children.list as { type: string; text?: string; y: number; height: number }[])
-      .filter((c) => c.type === "Text" && typeof c.text === "string")
-      .map((c) => ({ text: c.text!, bottom: c.y + c.height }));
+    // Through `unknown`, because Phaser types `children.list` as `GameObject[]`
+    // and the geometry this reads lives on the concrete subclasses — a direct
+    // cast claims an overlap that isn't there, which is what TypeScript was
+    // objecting to once this directory started being checked at all.
+    const children = scene.children.list as unknown as { type: string; text?: string; y: number; height: number }[];
+    // A loop rather than filter().map(), so the narrowing on `text` is one TS
+    // can actually follow and the `!` it used to need disappears.
+    const found: { text: string; bottom: number }[] = [];
+    for (const child of children) {
+      if (child.type === "Text" && typeof child.text === "string") {
+        found.push({ text: child.text, bottom: child.y + child.height });
+      }
+    }
+    return found;
   });
   const names = labels.map((l) => l.text);
   for (const block of ["Grass", "Desert", "Castle", "Snow", "Brick", "Castle Brick", "Bounce", "Castle Bounce", "Water", "Lava"]) {

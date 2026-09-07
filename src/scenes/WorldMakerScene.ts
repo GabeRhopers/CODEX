@@ -128,6 +128,9 @@ export class WorldMakerScene extends Phaser.Scene {
    * so reordering keeps the same node selected as its number changes. */
   private selectedId: string | null = null;
   private page = 0;
+  /** Bumped by every `refresh()`, so an older read cannot overwrite a newer
+   * one's screen — see the note there. */
+  private refreshId = 0;
   private dirty = false;
   private autosaveTimer?: Phaser.Time.TimerEvent;
   private readonly handlePageHide = (): void => {
@@ -232,7 +235,18 @@ export class WorldMakerScene extends Phaser.Scene {
   }
 
   private async refresh(): Promise<void> {
+    // Eight things call this — dropping a level on the map, removing one,
+    // reordering, paging, and so on — so two can easily be in flight at once,
+    // and they are not guaranteed to come back in the order they went out. The
+    // draws below replace rather than stack (each container does its own
+    // `removeAll`), so the symptom is not a doubled screen but a quietly stale
+    // one: add the last level and watch an older, slower read put it back in
+    // the "available" list as though the drop never happened.
+    //
+    // Last-writer-wins is the bug; newest-writer-wins is the fix.
+    const refresh = ++this.refreshId;
     const levels = await this.levelStorage.list();
+    if (refresh !== this.refreshId) return;
     const levelNames = new Map(levels.map((l) => [l.id, l.name || "Untitled Level"]));
     const available = levels.filter((l) => !this.world.levelIds.includes(l.id));
 

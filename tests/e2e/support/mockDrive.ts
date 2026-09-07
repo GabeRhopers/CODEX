@@ -363,11 +363,20 @@ export async function hangSkinsRead(page: Page): Promise<void> {
  * falls through for everything else, exactly like the two above.
  */
 export async function delaySkinsRead(page: Page, ms: number): Promise<void> {
+  await delayDriveRead(page, "skins.json", ms);
+}
+
+/**
+ * The general form: delay whichever Drive request has `urlContains` in it.
+ *
+ * The file name survives URL-encoding into the listing query literally — the
+ * same property `hangSkinsRead` relies on — so `"skins.json"` or `"world-"` is
+ * enough to pick one out. Delaying the *lookup* delays everything downstream of
+ * it, so the content download needs no handling of its own.
+ */
+export async function delayDriveRead(page: Page, urlContains: string, ms: number): Promise<void> {
   await page.route("https://www.googleapis.com/**", async (route) => {
-    // The listing query, matched the same way hangSkinsRead matches it: the
-    // file name survives URL-encoding literally. Delaying the lookup delays
-    // everything that depends on it, so the content download needs no handling.
-    if (route.request().url().includes("skins.json")) await new Promise((resolve) => setTimeout(resolve, ms));
+    if (route.request().url().includes(urlContains)) await new Promise((resolve) => setTimeout(resolve, ms));
     await route.fallback();
   });
 }

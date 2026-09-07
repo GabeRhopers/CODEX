@@ -72,6 +72,9 @@ export class WorldMapScene extends Phaser.Scene {
   private justCompletedIndex?: number;
   private gameRun?: GameRunContext;
   private levelNames = new Map<string, string>();
+  /** Bumped by every `build()`; see the note there for why an id comparison
+   * would not have been enough. */
+  private buildId = 0;
   private marker?: Phaser.GameObjects.Image;
   private statusText!: Phaser.GameObjects.Text;
   private titleText!: Phaser.GameObjects.Text;
@@ -122,7 +125,21 @@ export class WorldMapScene extends Phaser.Scene {
   }
 
   private async build(): Promise<void> {
+    // Which build of this screen is being drawn.
+    //
+    // Two sequential reads happen before anything is drawn, and what follows
+    // them adds a backdrop, a node per level and a path between them — so a
+    // chain that outlives its screen does not just set a stale label, it draws
+    // a second entire map over the top of the live one.
+    //
+    // The world id is not enough to tell the two apart, which is what makes
+    // this a counter and not the captured-key check used elsewhere: play a
+    // level and come back and you are on the *same* world, so the ids match
+    // while the screen is genuinely a different one. Same reasoning, and the
+    // same shape, as SkinEditorScene's `buildId`.
+    const build = ++this.buildId;
     const world = await this.worldStorage.load(this.worldId);
+    if (build !== this.buildId) return;
     if (!world) {
       this.statusText.setText("That world could not be loaded.");
       return;
@@ -130,6 +147,7 @@ export class WorldMapScene extends Phaser.Scene {
     this.titleText.setText(world.name || "Untitled World");
 
     const summaries = await this.levelStorage.list();
+    if (build !== this.buildId) return;
     this.levelNames = new Map(summaries.map((l) => [l.id, l.name || "Untitled Level"]));
 
     this.drawBackdrop(world);

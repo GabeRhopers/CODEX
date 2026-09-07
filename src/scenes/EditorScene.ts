@@ -192,8 +192,17 @@ export class EditorScene extends Phaser.Scene {
     // BootScene like every built-in one is — see backgroundLoader.ts. The
     // rest of create() doesn't wait on it; the image just pops in a frame
     // later (imperceptibly so for the already-instant built-in case).
-    void resolveBackgroundTextureKey(this, this.level).then((textureKey) => {
-      this.background = new StaticBackground(this, this.level.width * TILE_SIZE, textureKey);
+    // Captured, and checked on the way back. `scene.start("Editor", …)` reuses
+    // this same Scene instance and runs create() again, so an in-flight resolve
+    // from the *previous* level otherwise lands in the new one — building a
+    // background sized to the old level's width, on top of the new one's, with
+    // nothing to say where it came from. Every other resolveBackgroundTextureKey
+    // call in this file already guards this way (`if (this.area() !== area)`);
+    // this was the one that did not.
+    const level = this.level;
+    void resolveBackgroundTextureKey(this, level).then((textureKey) => {
+      if (this.level !== level) return;
+      this.background = new StaticBackground(this, level.width * TILE_SIZE, textureKey);
     });
     for (const brush of PALETTE) {
       if (brush.entityType) this.brushesByType.set(brush.entityType, brush);
@@ -1014,14 +1023,22 @@ export class EditorScene extends Phaser.Scene {
    * them can forget to pass `this.level.skins` and silently resolve against the
    * defaults instead. */
   private async reresolveSkins(): Promise<void> {
-    this.applySkinTextureKeys(await resolveSkinTextureKeys(this, this.level.skins));
+    // Two awaits, so two chances for the editor to move on underneath this —
+    // and what follows the second one rebuilds the ground layer and repaints
+    // the area, which is far too much to do to a level this call no longer
+    // belongs to. Captured once and checked after each await, matching how
+    // every other multi-await path in this file and PlayScene guards itself.
+    const level = this.level;
+    this.applySkinTextureKeys(await resolveSkinTextureKeys(this, level.skins));
+    if (this.level !== level) return;
 
     // Blocks don't have a swappable sprite the way entities do — their skin is
     // painted into the tileset texture itself (see groundTileset.ts), so the
     // only way to show a change is to rebuild the layer against the new
     // texture. Skipped entirely when the composed keys come out the same,
     // which is every re-resolve that touched only an entity skin.
-    const groundKeys = await composeGroundTilesets(this, this.level.skins);
+    const groundKeys = await composeGroundTilesets(this, level.skins);
+    if (this.level !== level) return;
     if (sameGroundTilesets(groundKeys, this.groundTilesetKeys)) return;
     this.groundTilesetKeys = groundKeys;
     this.createGroundLayer();
