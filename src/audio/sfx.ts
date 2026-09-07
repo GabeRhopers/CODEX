@@ -62,7 +62,19 @@ export function preloadSfx(scene: Phaser.Scene): void {
  * that crashes when you touch a coin is broken.
  */
 export function playSfx(scene: Phaser.Scene, name: SfxName): void {
-  const key = sfxKey(name);
+  playSoundKey(scene, sfxKey(name));
+}
+
+/**
+ * Plays whatever is under `key`, or nothing at all if it is not there.
+ *
+ * The same silent fallback as `playSfx`, for sounds whose key is not one of the
+ * seven above — an invented thing's own noise, decoded at run time (see
+ * `soundLoader.ts`). Those can legitimately be missing: a decode that failed, a
+ * browser with no Web Audio, a definition saved by a build that had sounds when
+ * this one does not. All of those should cost the noise and nothing else.
+ */
+export function playSoundKey(scene: Phaser.Scene, key: string): void {
   if (!scene.cache.audio.exists(key)) return;
   scene.sound.play(key);
 }

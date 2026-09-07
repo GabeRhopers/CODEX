@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_DECOR_TYPES, BUILTIN_ENEMY_DEFS, BUILTIN_ITEM_TYPES, builtinTextureKey } from "./builtins";
 import { CustomEntityDef, DEFAULT_SPEED_SCALE, makeCustomEntityId } from "./customEntity";
-import { collectAsFor, customBrushes, decorTypes, enemyDefs, findDef, itemTypes, textureKeyFor } from "./entityRegistry";
+import {
+  collectAsFor,
+  customBrushes,
+  decorTypes,
+  enemyDefs,
+  findDef,
+  itemTypes,
+  soundSpecFor,
+  textureKeyFor,
+} from "./entityRegistry";
 
 /**
  * The merge every consumer reads instead of the built-in constants.
@@ -163,5 +172,49 @@ describe("textureKeyFor", () => {
     // looked like, so drawing *something* would be an invention.
     expect(textureKeyFor([], makeCustomEntityId("deleted"))).toBeNull();
     expect(textureKeyFor([broken], broken.id)).toBeNull();
+  });
+});
+
+describe("soundSpecFor", () => {
+  const SOUND = { preset: "pickup", seed: 77 } as const;
+
+  it("gives an invented item or enemy its own sound", () => {
+    const fruit = def({ id: makeCustomEntityId("f"), category: "items", basedOn: "item-coin", sound: SOUND });
+    expect(soundSpecFor([fruit], fruit.id)).toEqual(SOUND);
+
+    const ghostling = def({
+      id: makeCustomEntityId("g"),
+      category: "enemies",
+      basedOn: "enemy-ghost",
+      sound: SOUND,
+    });
+    expect(soundSpecFor([ghostling], ghostling.id)).toEqual(SOUND);
+  });
+
+  it("gives nothing for decor, even when a sound was somehow stored on it", () => {
+    // Nothing in the game ever touches a decoration, so there is no moment at
+    // which this could play. Refusing it here means the Thing Maker can leave
+    // the control off that family without the two places disagreeing.
+    const decor = def({
+      id: makeCustomEntityId("d"),
+      category: "decor",
+      basedOn: BUILTIN_DECOR_TYPES[0],
+      sound: SOUND,
+    });
+    expect(soundSpecFor([decor], decor.id)).toBeUndefined();
+  });
+
+  it("gives nothing when the thing has no sound of its own", () => {
+    // The fallback contract: silence here is what makes the play sites use the
+    // built-in noise instead, so an invented coin without a sound still sounds
+    // like a coin rather than sounding like nothing.
+    const plain = def({ id: makeCustomEntityId("p") });
+    expect(soundSpecFor([plain], plain.id)).toBeUndefined();
+  });
+
+  it("gives nothing for a built-in type, a missing definition, or a broken one", () => {
+    expect(soundSpecFor([], "item-coin")).toBeUndefined();
+    expect(soundSpecFor([], makeCustomEntityId("deleted"))).toBeUndefined();
+    expect(soundSpecFor([{ ...broken, sound: SOUND }], broken.id)).toBeUndefined();
   });
 });

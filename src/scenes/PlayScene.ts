@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { VolumeControl } from "../audio/VolumeControl";
-import { playSfx } from "../audio/sfx";
+import { playSfx, playSoundKey, type SfxName } from "../audio/sfx";
+import { registerSound, soundKeyFor } from "../audio/soundLoader";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y, TILE_SIZE } from "../config/gameConfig";
 import { UP_BASKET_TINT_COLOR } from "../editor/Palette";
 import {
@@ -18,7 +19,7 @@ import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from
 import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { resolveLevelMusicKey } from "../gameplay/musicLoader";
-import { collectAsFor, decorTypes, enemyDefs, itemTypes, textureKeyFor } from "../entities/entityRegistry";
+import { collectAsFor, decorTypes, enemyDefs, itemTypes, soundSpecFor, textureKeyFor } from "../entities/entityRegistry";
 import { CustomEntityDef, isCustomEntityId, type PlaceableType } from "../entities/customEntity";
 import { loadCustomEntities } from "../entities/customEntityStorage";
 import type { GameRunContext } from "./WorldMapScene";
@@ -148,6 +149,10 @@ interface ActiveEnemy {
   sprite: Phaser.Physics.Arcade.Sprite;
   state: GhostState;
   stompable: boolean;
+  /** Which brush spawned it. Carried so a stomp can find the invented thing's
+   * own sound — the overlap handler is otherwise handed a bare sprite and has
+   * no way back to the definition. */
+  type: PlaceableType;
 }
 
 /** Present only when this level was launched from a World (WorldBrowserScene
@@ -632,6 +637,14 @@ export class PlayScene extends Phaser.Scene {
         if (this.runToken !== token) return; // restarted (or a new level started) meanwhile
         this.groundTilesetKeys = keys;
         this.customEntities = defs;
+        // Decoded once per run rather than on first use: a decode takes a frame
+        // or two, and starting it when the coin is already being collected
+        // means the first one of each is silent. Not awaited — a level must not
+        // wait on its noises, and anything that fails is simply quiet (see
+        // registerSound).
+        for (const def of defs) {
+          if (def.sound) void registerSound(this, soundKeyFor(def.id), def.sound);
+        }
         this.enterArea(this.checkpoint?.area ?? this.startingAreaKey());
       },
     );
@@ -921,8 +934,10 @@ export class PlayScene extends Phaser.Scene {
         // near an edge patrols back in, the same edge the player's own
         // setCollideWorldBounds above is held to.
         const state = createGhostState(sprite, areaLeftX, areaRightX, def.speedScale);
-        this.enemies.push({ sprite, state, stompable: def.stompable });
-        this.areaColliders.push(this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable)));
+        this.enemies.push({ sprite, state, stompable: def.stompable, type: def.type });
+        this.areaColliders.push(
+          this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable, def.type)),
+        );
       }
     }
 
@@ -1279,11 +1294,19 @@ export class PlayScene extends Phaser.Scene {
     body.setVelocityY(BOUNCE_VELOCITY_Y);
   }
 
-  private onPlayerEnemyOverlap(enemySprite: Phaser.Physics.Arcade.Sprite, stompable: boolean): void {
+  private onPlayerEnemyOverlap(
+    enemySprite: Phaser.Physics.Arcade.Sprite,
+    stompable: boolean,
+    type: PlaceableType,
+  ): void {
     if (this.outcome !== "playing") return;
     if (stompable && isStompFromAbove(this.player, enemySprite)) {
       this.enemies = this.enemies.filter((e) => e.sprite !== enemySprite);
       enemySprite.destroy();
+      // Built-in enemies make no sound when stomped and still do not — the seven
+      // shipped effects have never covered it. So this is the only noise a stomp
+      // makes, and only for a thing somebody gave one to.
+      this.playThingSound(type);
       applyStompBounce(this.player);
     } else {
       this.takeHit();
@@ -1346,6 +1369,27 @@ export class PlayScene extends Phaser.Scene {
    * (see Palette.ts), each collected independently. Guarded by
    * `icon.active` since a physics overlap can fire more than once in the
    * same frame pair. */
+  /**
+   * Plays an invented thing's own noise, and says whether it had one.
+   *
+   * The return value is what makes a thing's sound *replace* the built-in it
+   * borrows rather than layer on top of it: a hand-drawn coin should sound like
+   * itself, which is the entire complaint this feature answers. A thing with no
+   * sound of its own returns false and the built-in noise plays as before, so
+   * nothing goes quiet by accident.
+   */
+  private playThingSound(type: PlaceableType): boolean {
+    const spec = soundSpecFor(this.customEntities, type);
+    if (!spec) return false;
+    const key = soundKeyFor(isCustomEntityId(type) ? type : String(type));
+    // Registered at load; if that decode failed or has not landed yet,
+    // playSoundKey no-ops and we still report true — a thing that *has* a sound
+    // of its own should not fall back to the coin's just because this one play
+    // was too early. Silence is the honest outcome.
+    playSoundKey(this, key);
+    return true;
+  }
+
   private collectItem(type: PlaceableType, icon: Phaser.GameObjects.Image, zone: Phaser.GameObjects.Zone): void {
     if (!icon.active) return;
     // An invented item *is* the item it copies, as far as this method is
@@ -1356,6 +1400,13 @@ export class PlayScene extends Phaser.Scene {
     const effective = isCustomEntityId(type) ? collectAsFor(this.customEntities, type) : type;
     if (!effective) return;
     const now = this.time.now;
+    // An invented thing's own noise replaces the borrowed one entirely. `sfx`
+    // below is the built-in fallback, so the switch keeps naming the sound each
+    // pickup *means* without having to know whether one will actually play.
+    const own = this.playThingSound(type);
+    const sfx = (name: SfxName): void => {
+      if (!own) playSfx(this, name);
+    };
     // One sound per case rather than a single "picked something up" noise: a
     // coin and a heart are different events to the player, and the whole reason
     // for having sound is that you can tell what happened without looking at
@@ -1365,31 +1416,31 @@ export class PlayScene extends Phaser.Scene {
     switch (effective) {
       case "item-coin":
         collectCoin(this.stats);
-        playSfx(this, "coin");
+        sfx("coin");
         break;
       case "item-heart":
         collectHeart(this.stats);
-        playSfx(this, "heart");
+        sfx("heart");
         break;
       case "item-speed":
         collectSpeed(this.stats, now);
-        playSfx(this, "heart");
+        sfx("heart");
         break;
       case "item-feather":
         collectFeather(this.stats);
-        playSfx(this, "heart");
+        sfx("heart");
         break;
       case "item-thunder-hat":
         collectThunderHat(this.stats);
-        playSfx(this, "heart");
+        sfx("heart");
         break;
       case "item-shield":
         collectShield(this.stats, now);
-        playSfx(this, "heart");
+        sfx("heart");
         break;
       case "item-key":
         collectKey(this.stats);
-        playSfx(this, "key");
+        sfx("key");
         break;
       default:
         return;

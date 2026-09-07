@@ -1,3 +1,4 @@
+import type { SoundSpec } from "../audio/soundSynth";
 import { Brush, BrushCategory } from "../editor/Palette";
 import { EntityType } from "../level/LevelSchema";
 import {
@@ -102,6 +103,26 @@ export function collectAsFor(defs: readonly CustomEntityDef[], type: PlaceableTy
   if (!def) return undefined;
   const behaviour = resolveBehaviour(def);
   return behaviour?.kind === "item" ? behaviour.collectAs : undefined;
+}
+
+/**
+ * The noise this thing makes, if it has one of its own.
+ *
+ * Pure, and separate from the code that plays it, so "which sound should this
+ * be" is testable without a browser — the same split `characterState.ts` uses
+ * for "which pose should this be".
+ *
+ * Decor is excluded here rather than at the play sites, because there is no
+ * play site: nothing in the game ever touches a decoration, so a decoration
+ * with a sound would be a sound that can never be heard. Going through
+ * `resolveBehaviour` rather than reading `def.category` means an invalid
+ * definition is silent too, matching every other lookup in this file.
+ */
+export function soundSpecFor(defs: readonly CustomEntityDef[], type: PlaceableType): SoundSpec | undefined {
+  const def = findDef(defs, type);
+  if (!def?.sound) return undefined;
+  const kind = resolveBehaviour(def)?.kind;
+  return kind === "item" || kind === "enemy" ? def.sound : undefined;
 }
 
 /**

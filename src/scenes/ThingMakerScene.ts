@@ -17,6 +17,9 @@ import {
 import { loadCustomEntities, removeCustomEntity, saveCustomEntity } from "../entities/customEntityStorage";
 import { textureKeyFor } from "../entities/entityRegistry";
 import { PALETTE } from "../editor/Palette";
+import { playSoundKey } from "../audio/sfx";
+import { registerSound, soundKeyFor } from "../audio/soundLoader";
+import { rollSeed, SOUND_PRESETS, type SoundPreset, type SoundSpec } from "../audio/soundSynth";
 import { ConfirmButton } from "../ui/confirmButton";
 import { makePagerControls } from "../ui/PagerControls";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
@@ -58,6 +61,21 @@ const CATEGORIES: { id: CustomEntityCategory; label: string }[] = [
   { id: "enemies", label: "Enemy" },
   { id: "decor", label: "Decoration" },
 ];
+
+/**
+ * What each preset is called on screen.
+ *
+ * Named for the *event*, not the waveform — "what does this thing do?" is a
+ * question a child can answer, "what waveform is it?" is not. Kept here rather
+ * than in soundSynth.ts so the synthesiser stays free of anything user-facing.
+ */
+const SOUND_LABELS: Record<SoundPreset, string> = {
+  pickup: "Pickup",
+  power: "Power",
+  hit: "Hit",
+  blip: "Blip",
+  thud: "Thud",
+};
 
 /**
  * Speed as a few named choices rather than a free number.
@@ -375,6 +393,50 @@ export class ThingMakerScene extends Phaser.Scene {
       y += 56;
     }
 
+    // --- sound
+    //
+    // Items and enemies only. Decor is skipped because nothing in the game ever
+    // touches a decoration, so there is no moment at which its sound could
+    // play — offering the control anyway would be a button that does nothing.
+    // `soundSpecFor` refuses decor for the same reason, so the two cannot drift.
+    if (draft.category !== "decor") {
+      this.add.text(60, y, "Sound", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
+      const soundY = y;
+      const current = draft.sound;
+
+      const setSound = (sound: SoundSpec | undefined): void => {
+        if (!this.draft) return;
+        this.draft = { ...this.draft, sound };
+        this.saveError = undefined;
+        this.rebuild();
+        if (sound) void this.previewSound(sound);
+      };
+
+      this.makeButton(110, soundY, "None", () => setSound(undefined), () => !current);
+      SOUND_PRESETS.forEach((preset, i) => {
+        this.makeButton(
+          172 + i * 76,
+          soundY,
+          SOUND_LABELS[preset],
+          // Picking a kind with no seed yet rolls one, so a single tap is always
+          // enough to hear something — asking a child to press two buttons
+          // before anything happens is how a feature goes unused.
+          () => setSound({ preset, seed: current?.seed ?? rollSeed() }),
+          () => current?.preset === preset,
+        );
+      });
+      // Roll is how you get a *different* noise of the same kind: the seed is
+      // the only variation mechanism, deliberately, instead of a panel of
+      // sliders nobody wants on a game canvas.
+      this.makeButton(172 + SOUND_PRESETS.length * 76, soundY, "🎲 Roll", () => {
+        if (current) setSound({ preset: current.preset, seed: rollSeed() });
+      });
+      this.makeButton(172 + (SOUND_PRESETS.length + 1) * 76, soundY, "▶ Play", () => {
+        if (current) void this.previewSound(current);
+      });
+      y += 56;
+    }
+
     // --- preview
     this.add.text(GAME_WIDTH - 220, 78, "Looks like", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     const previewArt = this.artFor(draft);
@@ -419,6 +481,19 @@ export class ThingMakerScene extends Phaser.Scene {
 
   /** Hands off to the Skin Creator with this thing already selected, so drawing
    * it is one tap from making it rather than a hunt through a 40-tile grid. */
+  /**
+   * Decodes a sound and plays it once, so you can hear what you picked.
+   *
+   * Degrades to silence rather than to an error: `registerSound` returns null
+   * when the decode fails or the browser has no Web Audio, and `playSoundKey`
+   * no-ops on a key that is not in the cache. Neither is worth a message here —
+   * the button not making a noise says everything the message would.
+   */
+  private async previewSound(sound: SoundSpec): Promise<void> {
+    const key = await registerSound(this, soundKeyFor(`${this.draft?.id ?? "preview"}-preview`), sound);
+    if (key) playSoundKey(this, key);
+  }
+
   private drawSpriteFor(def: CustomEntityDef): void {
     this.scene.start("SkinEditor", { targetBrushId: def.id, returnTo: "ThingMaker" });
   }
