@@ -20,6 +20,7 @@ import { PALETTE } from "../editor/Palette";
 import { ConfirmButton } from "../ui/confirmButton";
 import { makePagerControls } from "../ui/PagerControls";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
+import { BUTTON_COLOR, BUTTON_HOVER_COLOR, MUTED_COLOR, SELECTED_COLOR, SELECTED_HOVER_COLOR } from "../ui/theme";
 
 /**
  * Where you invent a new item, enemy or decoration.
@@ -44,11 +45,6 @@ import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 
 type Mode = "browse" | "edit";
 
-const BUTTON_HEX = "#0f3460";
-const BUTTON_HOVER_HEX = "#3a5a9c";
-const SELECTED_HEX = "#8a6d1f";
-const SELECTED_HOVER_HEX = "#b8912c";
-const MUTED = "#a6a6c8";
 
 const ROW_START_Y = 92;
 const ROW_HEIGHT = 52;
@@ -145,7 +141,7 @@ export class ThingMakerScene extends Phaser.Scene {
 
   private addBackButton(onClick: () => void): void {
     this.add
-      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_HEX, padding: { x: 10, y: 6 } })
+      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_COLOR, padding: { x: 10, y: 6 } })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", onClick);
   }
@@ -157,8 +153,8 @@ export class ThingMakerScene extends Phaser.Scene {
     onClick: () => void,
     isActive?: () => boolean,
   ): Phaser.GameObjects.Text {
-    const idle = (): string => (isActive?.() ? SELECTED_HEX : BUTTON_HEX);
-    const hover = (): string => (isActive?.() ? SELECTED_HOVER_HEX : BUTTON_HOVER_HEX);
+    const idle = (): string => (isActive?.() ? SELECTED_COLOR : BUTTON_COLOR);
+    const hover = (): string => (isActive?.() ? SELECTED_HOVER_COLOR : BUTTON_HOVER_COLOR);
     const text = this.add
       .text(x, yMid, label, {
         fontSize: "12px",
@@ -189,7 +185,7 @@ export class ThingMakerScene extends Phaser.Scene {
     this.addBackButton(() => this.scene.start("Menu"));
     this.add.text(GAME_WIDTH / 2, 24, "Thing Maker", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
     this.add
-      .text(GAME_WIDTH / 2, 50, "Invent your own items, enemies and decorations.", { fontSize: "12px", color: MUTED })
+      .text(GAME_WIDTH / 2, 50, "Invent your own items, enemies and decorations.", { fontSize: "12px", color: MUTED_COLOR })
       .setOrigin(0.5, 0);
 
     this.makeButton(GAME_WIDTH - 150, 30, "+ New Thing", () => this.startNew());
@@ -200,7 +196,7 @@ export class ThingMakerScene extends Phaser.Scene {
           GAME_WIDTH / 2,
           GAME_HEIGHT / 2 - 20,
           "Nothing invented yet.\n\nA thing you make here borrows what it does from something\nthat already exists — a coin, a ghost, a bush — and wears\nwhatever sprite you draw for it.",
-          { fontSize: "13px", color: MUTED, align: "center", lineSpacing: 4 },
+          { fontSize: "13px", color: MUTED_COLOR, align: "center", lineSpacing: 4 },
         )
         .setOrigin(0.5, 0.5);
       return;
@@ -223,7 +219,7 @@ export class ThingMakerScene extends Phaser.Scene {
 
       this.add.text(84, mid - 10, def.name, { fontSize: "14px", color: "#ffffff" }).setOrigin(0, 0);
       this.add
-        .text(84, mid + 8, `Acts like a ${builtinLabel(def.basedOn)}`, { fontSize: "11px", color: MUTED })
+        .text(84, mid + 8, `Acts like a ${builtinLabel(def.basedOn)}`, { fontSize: "11px", color: MUTED_COLOR })
         .setOrigin(0, 0);
 
       this.makeButton(GAME_WIDTH - 380, mid, "Edit", () => this.startEdit(def));
@@ -288,7 +284,7 @@ export class ThingMakerScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
 
     // --- name
-    this.add.text(60, 78, "Name", { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(60, 78, "Name", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     const nameRect: GameRect = { x: 110, y: 64, width: 260, height: 28 };
     this.nameInput = new LevelNameInput(
       this,
@@ -305,7 +301,7 @@ export class ThingMakerScene extends Phaser.Scene {
     );
 
     // --- category
-    this.add.text(60, 124, "Is a", { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(60, 124, "Is a", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     CATEGORIES.forEach((category, i) => {
       this.makeButton(
         110 + i * 96,
@@ -334,7 +330,7 @@ export class ThingMakerScene extends Phaser.Scene {
     const ACTS_TOP = 190;
     const ACTS_PER_ROW = 7;
     const ACTS_ROW_H = 62;
-    this.add.text(60, ACTS_TOP - 12, "Acts like", { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(60, ACTS_TOP - 12, "Acts like", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     const options = clonableTypes(draft.category);
     options.forEach((type, i) => {
       const x = 110 + (i % ACTS_PER_ROW) * 78;
@@ -360,7 +356,7 @@ export class ThingMakerScene extends Phaser.Scene {
 
     // --- speed (enemies only)
     if (draft.category === "enemies") {
-      this.add.text(60, y, "Speed", { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+      this.add.text(60, y, "Speed", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
       const current = draft.params?.speedScale ?? DEFAULT_SPEED_SCALE;
       const speedY = y;
       SPEED_CHOICES.forEach((choice, i) => {
@@ -380,12 +376,12 @@ export class ThingMakerScene extends Phaser.Scene {
     }
 
     // --- preview
-    this.add.text(GAME_WIDTH - 220, 78, "Looks like", { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(GAME_WIDTH - 220, 78, "Looks like", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     const previewArt = this.artFor(draft);
     this.add.rectangle(GAME_WIDTH - 230, 96, 150, 110, 0x0f1830).setOrigin(0, 0);
     if (previewArt) fitWithinTile(this.add.image(GAME_WIDTH - 155, 142, previewArt), 56);
     this.add
-      .text(GAME_WIDTH - 155, 182, "until you draw it", { fontSize: "10px", color: MUTED })
+      .text(GAME_WIDTH - 155, 182, "until you draw it", { fontSize: "10px", color: MUTED_COLOR })
       .setOrigin(0.5, 0);
 
     // --- save

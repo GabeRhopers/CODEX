@@ -29,11 +29,9 @@ import { addCustomColor, CUSTOM_PALETTE_ID, loadCustomColors, saveCustomColors }
 import { resolveSkinThumbnails } from "../skins/skinLoader";
 import { defaultSkinName, displaySkinName, sanitizeSkinName } from "../skins/skinNames";
 import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin, setActiveSkin } from "../skins/skinStorage";
+import { BUTTON_COLOR, BUTTON_COLOR_NUM, BUTTON_HOVER_COLOR, ROW_BG, SELECTED_COLOR, SELECTED_HOVER_COLOR } from "../ui/theme";
 
-const BUTTON_COLOR = 0x0f3460;
 /** The Text buttons take CSS strings; the Rectangles take the number above. */
-const BUTTON_HEX = "#0f3460";
-const BUTTON_HOVER_HEX = "#3a5a9c";
 /**
  * Selected, and selected-while-hovered.
  *
@@ -50,8 +48,6 @@ const BUTTON_HOVER_HEX = "#3a5a9c";
  * (EditorUI's ERASER_ACTIVE_COLOR / ERASER_ACTIVE_HOVER_COLOR pair); this is
  * that pattern, not a new one.
  */
-const SELECTED_COLOR = "#8a6d1f";
-const SELECTED_HOVER_COLOR = "#b8912c";
 /** SELECTED_COLOR as a number, for Rectangle fills. */
 const SELECTED_FILL = 0x8a6d1f;
 /** The ring drawn around whichever member of an exclusive group is active, so
@@ -394,7 +390,7 @@ export class SkinEditorScene extends Phaser.Scene {
       .text(24, y, "← Back", {
         fontSize: "14px",
         color: "#ffffff",
-        backgroundColor: BUTTON_HEX,
+        backgroundColor: BUTTON_COLOR,
         padding: { x: 10, y: 6 },
       })
       .setInteractive({ useHandCursor: true })
@@ -417,8 +413,8 @@ export class SkinEditorScene extends Phaser.Scene {
     onClick: () => void,
     isActive?: () => boolean,
   ): Phaser.GameObjects.Text {
-    const idle = (): string => (isActive?.() ? SELECTED_COLOR : BUTTON_HEX);
-    const hover = (): string => (isActive?.() ? SELECTED_HOVER_COLOR : BUTTON_HOVER_HEX);
+    const idle = (): string => (isActive?.() ? SELECTED_COLOR : BUTTON_COLOR);
+    const hover = (): string => (isActive?.() ? SELECTED_HOVER_COLOR : BUTTON_HOVER_COLOR);
     const text = this.add
       .text(x, yMid, label, {
         fontSize: "12px",
@@ -453,7 +449,7 @@ export class SkinEditorScene extends Phaser.Scene {
   /** Repaints a stateful button to its resting look — call after the state it
    * reflects changes, since the button only re-reads `isActive` on hover. */
   private refreshButton(button: Phaser.GameObjects.Text, active: boolean): void {
-    button.setStyle({ backgroundColor: active ? SELECTED_COLOR : BUTTON_HEX });
+    button.setStyle({ backgroundColor: active ? SELECTED_COLOR : BUTTON_COLOR });
   }
 
   // --- mode: browse ------------------------------------------------------
@@ -880,7 +876,7 @@ export class SkinEditorScene extends Phaser.Scene {
     for (const p of paletteChoices) {
       const activePalette = p.id === palette.id;
       const bg = this.add
-        .rectangle(railX, railY, REFERENCE_WIDTH, 24, activePalette ? SELECTED_FILL : BUTTON_COLOR)
+        .rectangle(railX, railY, REFERENCE_WIDTH, 24, activePalette ? SELECTED_FILL : BUTTON_COLOR_NUM)
         .setOrigin(0, 0)
         .setInteractive({ useHandCursor: true });
       // The open palette gets the same ring the armed tool and the chosen
@@ -1273,13 +1269,13 @@ export class SkinEditorScene extends Phaser.Scene {
       this.defaultButton.setText("For every level?").setStyle({ backgroundColor: "#aa3333" });
       this.defaultArmTimer = this.time.delayedCall(ARM_TIMEOUT_MS, () => {
         this.defaultArmed = false;
-        this.defaultButton?.setText("Set as default").setStyle({ backgroundColor: BUTTON_HEX });
+        this.defaultButton?.setText("Set as default").setStyle({ backgroundColor: BUTTON_COLOR });
       });
       return;
     }
     this.defaultArmTimer?.remove(false);
     this.defaultArmed = false;
-    this.defaultButton.setText("Set as default").setStyle({ backgroundColor: BUTTON_HEX });
+    this.defaultButton.setText("Set as default").setStyle({ backgroundColor: BUTTON_COLOR });
     const { brush, existingId } = this.target;
     void setActiveSkin(brush.id, existingId)
       .then(() => this.statusText?.setText(`${brush.label}: default set for every level`).setColor("#4ade80"))
@@ -1305,7 +1301,7 @@ export class SkinEditorScene extends Phaser.Scene {
     if (this.clearArmed) {
       this.clearArmTimer?.remove(false);
       this.clearArmed = false;
-      this.clearButton.setText("Clear").setStyle({ backgroundColor: BUTTON_HEX });
+      this.clearButton.setText("Clear").setStyle({ backgroundColor: BUTTON_COLOR });
       this.pixelCanvas?.clearAll();
       return;
     }
@@ -1313,7 +1309,7 @@ export class SkinEditorScene extends Phaser.Scene {
     this.clearButton.setText("Clear?").setStyle({ backgroundColor: "#aa3333" });
     this.clearArmTimer = this.time.delayedCall(ARM_TIMEOUT_MS, () => {
       this.clearArmed = false;
-      this.clearButton?.setText("Clear").setStyle({ backgroundColor: BUTTON_HEX });
+      this.clearButton?.setText("Clear").setStyle({ backgroundColor: BUTTON_COLOR });
     });
   }
 
@@ -1481,7 +1477,7 @@ export class SkinEditorScene extends Phaser.Scene {
       const painted = hasPaintedCells(target.frameCells[name]);
       const active = name === target.activeFrame;
       const bg = this.add
-        .rectangle(x, y, buttonWidth, 26, active ? SELECTED_FILL : painted ? BUTTON_COLOR : 0x16213e)
+        .rectangle(x, y, buttonWidth, 26, active ? SELECTED_FILL : painted ? BUTTON_COLOR_NUM : ROW_BG)
         .setOrigin(0, 0)
         .setInteractive({ useHandCursor: true });
       // Same ring as the armed tool and the open palette — the frame you are

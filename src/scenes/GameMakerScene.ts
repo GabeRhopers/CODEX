@@ -20,6 +20,8 @@ import { ConfirmButton } from "../ui/confirmButton";
 import { makePagerControls } from "../ui/PagerControls";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { ellipsize } from "../ui/labels";
+import { BUTTON_COLOR, MUTED_COLOR } from "../ui/theme";
+import { makeTextButton } from "../ui/textButton";
 
 /**
  * Where a pile of worlds becomes a game.
@@ -41,9 +43,6 @@ import { ellipsize } from "../ui/labels";
  */
 
 const STATUS_COLORS = { good: "#8fd694", warn: "#ffc93c", bad: "#ff9d9d" } as const;
-const BUTTON_HEX = "#0f3460";
-const BUTTON_HOVER_HEX = "#3a5a9c";
-const MUTED = "#a6a6c8";
 const PANEL_FILL = 0x0f1830;
 
 const LIST_TOP = 132;
@@ -133,7 +132,7 @@ export class GameMakerScene extends Phaser.Scene {
     this.drawHeader();
     if (!this.loaded) {
       this.add
-        .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Loading your game…", { fontSize: "14px", color: MUTED })
+        .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Loading your game…", { fontSize: "14px", color: MUTED_COLOR })
         .setOrigin(0.5);
       return;
     }
@@ -147,20 +146,7 @@ export class GameMakerScene extends Phaser.Scene {
   // --- shared bits ---------------------------------------------------------
 
   private makeButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
-    const text = this.add
-      .text(x, yMid, label, {
-        fontSize: "12px",
-        color: "#ffffff",
-        backgroundColor: BUTTON_HEX,
-        // Tall enough to aim at on a phone held sideways — see ui/touchTarget.ts.
-        padding: { x: 10, y: 10 },
-      })
-      .setOrigin(0, 0.5)
-      .setInteractive({ useHandCursor: true });
-    text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: BUTTON_HOVER_HEX }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: BUTTON_HEX }));
-    return text;
+    return makeTextButton({ scene: this, x, y: yMid, label, onClick, paddingY: 10 });
   }
 
   private panel(x: number, y: number, width: number, height: number): void {
@@ -168,27 +154,27 @@ export class GameMakerScene extends Phaser.Scene {
   }
 
   private columnHeading(x: number, text: string): void {
-    this.add.text(x, LIST_TOP - 22, text, { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(x, LIST_TOP - 22, text, { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
   }
 
   // --- header + title ------------------------------------------------------
 
   private drawHeader(): void {
     this.add
-      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_HEX, padding: { x: 10, y: 6 } })
+      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_COLOR, padding: { x: 10, y: 6 } })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => this.scene.start("Menu"));
     this.add.text(GAME_WIDTH / 2, 20, "Game Maker", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
     this.add
       .text(GAME_WIDTH / 2, 46, "Your worlds, in the order they are played, and how it ends.", {
         fontSize: "12px",
-        color: MUTED,
+        color: MUTED_COLOR,
       })
       .setOrigin(0.5, 0);
   }
 
   private drawTitleField(): void {
-    this.add.text(24, 88, "Title", { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(24, 88, "Title", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     const rect: GameRect = { x: 70, y: 74, width: 300, height: 28 };
     this.inputs.push(
       new LevelNameInput(
@@ -217,7 +203,7 @@ export class GameMakerScene extends Phaser.Scene {
       this.add
         .text(AVAILABLE_X + 14, LIST_TOP + 18, this.worlds.length === 0 ? "No worlds yet.\nMake one in Worlds first." : "Every world is in your game.", {
           fontSize: "12px",
-          color: MUTED,
+          color: MUTED_COLOR,
           lineSpacing: 4,
         })
         .setOrigin(0, 0);
@@ -264,7 +250,7 @@ export class GameMakerScene extends Phaser.Scene {
       this.add
         .text(ORDER_X + 14, LIST_TOP + 18, "Nothing yet — add a world from the left.", {
           fontSize: "12px",
-          color: MUTED,
+          color: MUTED_COLOR,
         })
         .setOrigin(0, 0);
       return;
@@ -276,7 +262,7 @@ export class GameMakerScene extends Phaser.Scene {
       // Numbered, because the order *is* the feature — a bare list of names
       // does not say which one opens the game.
       this.add
-        .text(ORDER_X + 12, mid, `${index + 1}.`, { fontSize: "12px", color: MUTED })
+        .text(ORDER_X + 12, mid, `${index + 1}.`, { fontSize: "12px", color: MUTED_COLOR })
         .setOrigin(0, 0.5);
       this.add
         .text(ORDER_X + 34, mid, ellipsize(this.worldNames.get(worldId) ?? "(deleted world)", ORDER_NAME_CHARS), {
@@ -324,7 +310,7 @@ export class GameMakerScene extends Phaser.Scene {
     this.columnHeading(ENDING_X, "How it ends");
     this.panel(ENDING_X, LIST_TOP, ENDING_WIDTH, LIST_BOTTOM - LIST_TOP);
 
-    this.add.text(ENDING_X + 14, LIST_TOP + 24, "Headline", { fontSize: "11px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(ENDING_X + 14, LIST_TOP + 24, "Headline", { fontSize: "11px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     this.inputs.push(
       new LevelNameInput(
         this,
@@ -337,7 +323,7 @@ export class GameMakerScene extends Phaser.Scene {
       ),
     );
 
-    this.add.text(ENDING_X + 14, LIST_TOP + 90, "Message", { fontSize: "11px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(ENDING_X + 14, LIST_TOP + 90, "Message", { fontSize: "11px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     this.inputs.push(
       new LevelNameInput(
         this,
@@ -353,7 +339,7 @@ export class GameMakerScene extends Phaser.Scene {
     this.add
       .text(ENDING_X + 14, LIST_TOP + 150, "Shown once the last world is\nfinished. Leave them blank and\nthe defaults are used.", {
         fontSize: "11px",
-        color: MUTED,
+        color: MUTED_COLOR,
         lineSpacing: 4,
       })
       .setOrigin(0, 0);

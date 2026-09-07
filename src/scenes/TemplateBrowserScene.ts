@@ -5,6 +5,7 @@ import { LevelData } from "../level/LevelSchema";
 import { TEMPLATE_LEVELS } from "../level/templateLevels";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { makePagerControls } from "../ui/PagerControls";
+import { makeTextButton } from "../ui/textButton";
 
 const ROW_START_Y = 90;
 /** Same as the other two browsers. There are six bundled templates today, so
@@ -89,20 +90,7 @@ export class TemplateBrowserScene extends Phaser.Scene {
   }
 
   private makeSmallButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
-    const text = this.add
-      .text(x, yMid, label, {
-        fontSize: "12px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        // See LevelBrowserScene's makeSmallButton.
-        padding: { x: 10, y: 12 },
-      })
-      .setOrigin(0, 0.5)
-      .setInteractive({ useHandCursor: true });
-    text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: "#0f3460" }));
-    return text;
+    return makeTextButton({ scene: this, x, y: yMid, label, onClick });
   }
 
   private play(level: LevelData): void {

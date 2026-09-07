@@ -12,6 +12,8 @@ import {
 } from "../game/gameBundle";
 import { publishedGameLink } from "../game/publishedBundle";
 import { downloadTextFile } from "../ui/downloadFile";
+import { BUTTON_COLOR, MUTED_COLOR } from "../ui/theme";
+import { makeTextButton } from "../ui/textButton";
 
 /**
  * How a finished game becomes a link somebody else can open.
@@ -38,9 +40,6 @@ import { downloadTextFile } from "../ui/downloadFile";
  * for neither the folder nor the URL.
  */
 
-const BUTTON_HEX = "#0f3460";
-const BUTTON_HOVER_HEX = "#3a5a9c";
-const MUTED = "#a6a6c8";
 const PANEL_FILL = 0x0f1830;
 const STATUS_COLORS = { good: "#8fd694", warn: "#ffc93c", bad: "#ff9d9d" } as const;
 
@@ -119,43 +118,30 @@ export class PublishScene extends Phaser.Scene {
   // --- chrome --------------------------------------------------------------
 
   private makeButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
-    const text = this.add
-      .text(x, yMid, label, {
-        fontSize: "12px",
-        color: "#ffffff",
-        backgroundColor: BUTTON_HEX,
-        // Tall enough to aim at on a phone held sideways — see ui/touchTarget.ts.
-        padding: { x: 10, y: 10 },
-      })
-      .setOrigin(0, 0.5)
-      .setInteractive({ useHandCursor: true });
-    text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: BUTTON_HOVER_HEX }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: BUTTON_HEX }));
-    return text;
+    return makeTextButton({ scene: this, x, y: yMid, label, onClick, paddingY: 10 });
   }
 
   private stepNumber(y: number, n: number, done: boolean): void {
     this.add.circle(STEP_X, y, 13, done ? 0x2f6b46 : PANEL_FILL).setStrokeStyle(1, 0x3a5a9c);
     this.add
-      .text(STEP_X, y, done ? "✓" : String(n), { fontSize: "13px", color: done ? "#8fd694" : MUTED })
+      .text(STEP_X, y, done ? "✓" : String(n), { fontSize: "13px", color: done ? "#8fd694" : MUTED_COLOR })
       .setOrigin(0.5);
   }
 
   private stepHeading(y: number, text: string, dimmed: boolean): void {
-    this.add.text(STEP_TEXT_X, y, text, { fontSize: "16px", color: dimmed ? MUTED : "#ffffff" }).setOrigin(0, 0.5);
+    this.add.text(STEP_TEXT_X, y, text, { fontSize: "16px", color: dimmed ? MUTED_COLOR : "#ffffff" }).setOrigin(0, 0.5);
   }
 
   private drawHeader(): void {
     this.add
-      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_HEX, padding: { x: 10, y: 6 } })
+      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_COLOR, padding: { x: 10, y: 6 } })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => this.scene.start("GameMaker"));
     this.add.text(GAME_WIDTH / 2, 30, "Publish", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5);
     this.add
       .text(GAME_WIDTH / 2, 58, `"${this.gameDoc.title}" — three steps to a link you can send.`, {
         fontSize: "12px",
-        color: MUTED,
+        color: MUTED_COLOR,
       })
       .setOrigin(0.5);
   }
@@ -168,7 +154,7 @@ export class PublishScene extends Phaser.Scene {
     this.add
       .text(STEP_TEXT_X, STEP_ONE_Y + 22, "Everything the game needs — worlds, levels, art, music,\ninvented things — written into one file.", {
         fontSize: "12px",
-        color: MUTED,
+        color: MUTED_COLOR,
         lineSpacing: 4,
       })
       .setOrigin(0, 0);
@@ -238,7 +224,7 @@ export class PublishScene extends Phaser.Scene {
         STEP_TWO_Y + 22,
         `On GitHub, open public/${PUBLISHED_GAMES_DIR}/ and use Add file → Upload files.\n` +
           "Upload it exactly as it is — the name is what the link looks for:",
-        { fontSize: "12px", color: MUTED, lineSpacing: 4 },
+        { fontSize: "12px", color: MUTED_COLOR, lineSpacing: 4 },
       )
       .setOrigin(0, 0);
     this.add
@@ -252,7 +238,7 @@ export class PublishScene extends Phaser.Scene {
     this.add
       .text(STEP_TEXT_X, STEP_TWO_Y + 96, "The site rebuilds itself; a few minutes later the link below is live.", {
         fontSize: "12px",
-        color: MUTED,
+        color: MUTED_COLOR,
       })
       .setOrigin(0, 0);
   }
@@ -285,7 +271,7 @@ export class PublishScene extends Phaser.Scene {
         STEP_TEXT_X,
         GAME_HEIGHT - 24,
         this.linkStatus || "Whoever opens it plays the game — no sign-in, no editor, nothing to install.",
-        { fontSize: "11px", color: this.linkStatus ? STATUS_COLORS[this.linkTone] : MUTED },
+        { fontSize: "11px", color: this.linkStatus ? STATUS_COLORS[this.linkTone] : MUTED_COLOR },
       )
       .setOrigin(0, 0.5);
   }

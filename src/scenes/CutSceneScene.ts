@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { CutScene, CutScenePanel, playablePanels } from "../game/CutScene";
 import { loadLibraryImageTexture } from "../gameplay/backgroundLoader";
+import { BUTTON_COLOR, BUTTON_HOVER_COLOR } from "../ui/theme";
 
 /**
  * Playing a cut scene: a picture, some words, and a button you press.
@@ -28,8 +29,6 @@ interface CutSceneSceneData {
   next?: NextSceneInstruction;
 }
 
-const BUTTON_HEX = "#0f3460";
-const BUTTON_HOVER_HEX = "#3a5a9c";
 /** The words sit in a band across the bottom rather than over the middle of the
  * picture: a caption that lands on somebody's face is the usual way this looks
  * wrong, and a fixed band is also a fixed place for the eye to return to. */
@@ -166,14 +165,14 @@ export class CutSceneScene extends Phaser.Scene {
       .text(x, y, label, {
         fontSize: "13px",
         color: "#ffffff",
-        backgroundColor: BUTTON_HEX,
+        backgroundColor: BUTTON_COLOR,
         padding: { x: 14, y: 10 },
       })
       .setOrigin(0, 0.5)
       .setInteractive({ useHandCursor: true });
     text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: BUTTON_HOVER_HEX }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: BUTTON_HEX }));
+    text.on("pointerover", () => text.setStyle({ backgroundColor: BUTTON_HOVER_COLOR }));
+    text.on("pointerout", () => text.setStyle({ backgroundColor: BUTTON_COLOR }));
   }
 
   private advance(): void {

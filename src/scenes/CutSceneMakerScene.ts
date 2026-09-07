@@ -18,6 +18,8 @@ import { createEmptyGame, GameData } from "../game/GameSchema";
 import { saveGame } from "../game/gameStorage";
 import { loadActiveProfile } from "../profile/Profile";
 import { ConfirmButton } from "../ui/confirmButton";
+import { BUTTON_COLOR, MUTED_COLOR } from "../ui/theme";
+import { makeTextButton } from "../ui/textButton";
 
 /**
  * Writing a cut scene: the panels, and what each one shows.
@@ -39,9 +41,6 @@ import { ConfirmButton } from "../ui/confirmButton";
  * published game's opening would be blank.
  */
 
-const BUTTON_HEX = "#0f3460";
-const BUTTON_HOVER_HEX = "#3a5a9c";
-const MUTED = "#a6a6c8";
 const PANEL_FILL = 0x0f1830;
 const STATUS_COLORS = { good: "#8fd694", warn: "#ffc93c", bad: "#ff9d9d" } as const;
 
@@ -136,25 +135,12 @@ export class CutSceneMakerScene extends Phaser.Scene {
   // --- chrome --------------------------------------------------------------
 
   private makeButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
-    const text = this.add
-      .text(x, yMid, label, {
-        fontSize: "12px",
-        color: "#ffffff",
-        backgroundColor: BUTTON_HEX,
-        // Tall enough to aim at on a phone held sideways — see ui/touchTarget.ts.
-        padding: { x: 10, y: 10 },
-      })
-      .setOrigin(0, 0.5)
-      .setInteractive({ useHandCursor: true });
-    text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: BUTTON_HOVER_HEX }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: BUTTON_HEX }));
-    return text;
+    return makeTextButton({ scene: this, x, y: yMid, label, onClick, paddingY: 10 });
   }
 
   private drawHeader(): void {
     this.add
-      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_HEX, padding: { x: 10, y: 6 } })
+      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_COLOR, padding: { x: 10, y: 6 } })
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => void this.saveAndLeave());
     const which = this.slot === "opening" ? "Opening" : "Closing";
@@ -163,7 +149,7 @@ export class CutSceneMakerScene extends Phaser.Scene {
       this.slot === "opening"
         ? "Shown when someone presses Play, before the first world."
         : "Shown after the last world, just before the ending.";
-    this.add.text(GAME_WIDTH / 2, 46, when, { fontSize: "12px", color: MUTED }).setOrigin(0.5, 0);
+    this.add.text(GAME_WIDTH / 2, 46, when, { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0.5, 0);
   }
 
   /** The strip of panels, and the button that adds one. Chips rather than a
@@ -186,7 +172,7 @@ export class CutSceneMakerScene extends Phaser.Scene {
         this.rebuild();
       });
       this.add
-        .text(x + CHIP_SIZE / 2, CHIP_Y, String(i + 1), { fontSize: "12px", color: isSelected ? "#ffffff" : MUTED })
+        .text(x + CHIP_SIZE / 2, CHIP_Y, String(i + 1), { fontSize: "12px", color: isSelected ? "#ffffff" : MUTED_COLOR })
         .setOrigin(0.5);
       x += CHIP_SIZE + CHIP_GAP;
     }
@@ -204,7 +190,7 @@ export class CutSceneMakerScene extends Phaser.Scene {
         GAME_WIDTH / 2,
         PREVIEW.y + PREVIEW.height / 2,
         "No panels yet.\nAdd one, give it a picture or some words, and it plays before the game.",
-        { fontSize: "13px", color: MUTED, align: "center", lineSpacing: 6 },
+        { fontSize: "13px", color: MUTED_COLOR, align: "center", lineSpacing: 6 },
       )
       .setOrigin(0.5);
   }
@@ -230,7 +216,7 @@ export class CutSceneMakerScene extends Phaser.Scene {
       // A picture is chosen but its thumbnail is not resolved yet (the library
       // read happens when the picker first opens) or has been deleted since.
       this.add
-        .text(PREVIEW.x + PREVIEW.width / 2, PREVIEW.y + 40, "Picture chosen", { fontSize: "12px", color: MUTED })
+        .text(PREVIEW.x + PREVIEW.width / 2, PREVIEW.y + 40, "Picture chosen", { fontSize: "12px", color: MUTED_COLOR })
         .setOrigin(0.5);
     }
 
@@ -254,7 +240,7 @@ export class CutSceneMakerScene extends Phaser.Scene {
       this.add
         .text(PREVIEW.x + PREVIEW.width / 2, PREVIEW.y + PREVIEW.height / 2, "This panel is empty,\nso it will not play.", {
           fontSize: "12px",
-          color: MUTED,
+          color: MUTED_COLOR,
           align: "center",
           lineSpacing: 5,
         })
@@ -344,7 +330,7 @@ export class CutSceneMakerScene extends Phaser.Scene {
   }
 
   private drawWordsField(): void {
-    this.add.text(RIGHT_X, WORDS_LABEL_Y, "Words", { fontSize: "12px", color: MUTED }).setOrigin(0, 0.5);
+    this.add.text(RIGHT_X, WORDS_LABEL_Y, "Words", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
     this.wordsInput = new ParagraphInput(
       this,
       WORDS_RECT,

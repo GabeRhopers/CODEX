@@ -6,6 +6,7 @@ import { StorageAdapter } from "../persistence/StorageAdapter";
 import { ConfirmButton } from "../ui/confirmButton";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { makePagerControls } from "../ui/PagerControls";
+import { makeTextButton } from "../ui/textButton";
 
 const ROW_START_Y = 90;
 /** Raised from 44 (2026-08-29) to fit a button tall enough to be worth aiming at
@@ -140,22 +141,7 @@ export class LevelBrowserScene extends Phaser.Scene {
   }
 
   private makeSmallButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
-    const text = this.add
-      .text(x, yMid, label, {
-        fontSize: "12px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        // y-padding raised from 6: on a phone held sideways this button met a
-        // thumb as ~19 CSS px. Padding rather than a wider hit area, so the
-        // button looks as big as it actually is.
-        padding: { x: 10, y: 12 },
-      })
-      .setOrigin(0, 0.5)
-      .setInteractive({ useHandCursor: true });
-    text.on("pointerdown", onClick);
-    text.on("pointerover", () => text.setStyle({ backgroundColor: "#3a5a9c" }));
-    text.on("pointerout", () => text.setStyle({ backgroundColor: "#0f3460" }));
-    return text;
+    return makeTextButton({ scene: this, x, y: yMid, label, onClick });
   }
 
   private async editLevel(id: string): Promise<void> {

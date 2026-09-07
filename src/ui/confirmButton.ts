@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { ARMED_COLOR, ARMED_HOVER_COLOR, BUTTON_COLOR, BUTTON_HOVER_COLOR } from "./theme";
 
 /**
  * A destructive button that needs two taps.
@@ -26,10 +27,14 @@ import Phaser from "phaser";
  * Matches EditorUI's CLEAR_ARM_TIMEOUT_MS. */
 export const CONFIRM_ARM_TIMEOUT_MS = 3000;
 
-export const CONFIRM_IDLE_COLOR = "#0f3460";
-export const CONFIRM_HOVER_COLOR = "#3a5a9c";
-export const CONFIRM_ARMED_COLOR = "#aa3333";
-export const CONFIRM_ARMED_HOVER_COLOR = "#d14f4f";
+// Re-exported from `theme.ts` rather than spelled out again here. These four
+// names predate that file and are what the rest of the codebase imports, so
+// they stay; what has gone is the second copy of the values, which was a
+// silent chance for this button to drift away from every other one.
+export const CONFIRM_IDLE_COLOR = BUTTON_COLOR;
+export const CONFIRM_HOVER_COLOR = BUTTON_HOVER_COLOR;
+export const CONFIRM_ARMED_COLOR = ARMED_COLOR;
+export const CONFIRM_ARMED_HOVER_COLOR = ARMED_HOVER_COLOR;
 
 export interface ConfirmButtonOptions {
   scene: Phaser.Scene;
