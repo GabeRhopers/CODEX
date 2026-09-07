@@ -18,8 +18,9 @@ import { createEmptyGame, GameData } from "../game/GameSchema";
 import { saveGame } from "../game/gameStorage";
 import { loadActiveProfile } from "../profile/Profile";
 import { ConfirmButton } from "../ui/confirmButton";
-import { BUTTON_COLOR, MUTED_COLOR } from "../ui/theme";
+import { MUTED_COLOR } from "../ui/theme";
 import { makeTextButton } from "../ui/textButton";
+import { drawScreenHeader } from "../ui/screenHeader";
 
 /**
  * Writing a cut scene: the panels, and what each one shows.
@@ -139,17 +140,16 @@ export class CutSceneMakerScene extends Phaser.Scene {
   }
 
   private drawHeader(): void {
-    this.add
-      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_COLOR, padding: { x: 10, y: 6 } })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => void this.saveAndLeave());
     const which = this.slot === "opening" ? "Opening" : "Closing";
-    this.add.text(GAME_WIDTH / 2, 20, `${which} cut scene`, { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
-    const when =
-      this.slot === "opening"
-        ? "Shown when someone presses Play, before the first world."
-        : "Shown after the last world, just before the ending.";
-    this.add.text(GAME_WIDTH / 2, 46, when, { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0.5, 0);
+    drawScreenHeader({
+      scene: this,
+      title: `${which} cut scene`,
+      subtitle:
+        this.slot === "opening"
+          ? "Shown when someone presses Play, before the first world."
+          : "Shown after the last world, just before the ending.",
+      onBack: () => void this.saveAndLeave(),
+    });
   }
 
   /** The strip of panels, and the button that adds one. Chips rather than a

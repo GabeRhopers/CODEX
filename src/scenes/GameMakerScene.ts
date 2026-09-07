@@ -20,8 +20,9 @@ import { ConfirmButton } from "../ui/confirmButton";
 import { makePagerControls } from "../ui/PagerControls";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { ellipsize } from "../ui/labels";
-import { BUTTON_COLOR, MUTED_COLOR } from "../ui/theme";
+import { MUTED_COLOR } from "../ui/theme";
 import { makeTextButton } from "../ui/textButton";
+import { drawScreenHeader } from "../ui/screenHeader";
 
 /**
  * Where a pile of worlds becomes a game.
@@ -160,17 +161,12 @@ export class GameMakerScene extends Phaser.Scene {
   // --- header + title ------------------------------------------------------
 
   private drawHeader(): void {
-    this.add
-      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_COLOR, padding: { x: 10, y: 6 } })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("Menu"));
-    this.add.text(GAME_WIDTH / 2, 20, "Game Maker", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
-    this.add
-      .text(GAME_WIDTH / 2, 46, "Your worlds, in the order they are played, and how it ends.", {
-        fontSize: "12px",
-        color: MUTED_COLOR,
-      })
-      .setOrigin(0.5, 0);
+    drawScreenHeader({
+      scene: this,
+      title: "Game Maker",
+      subtitle: "Your worlds, in the order they are played, and how it ends.",
+      onBack: () => this.scene.start("Menu"),
+    });
   }
 
   private drawTitleField(): void {

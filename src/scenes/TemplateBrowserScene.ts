@@ -6,6 +6,7 @@ import { TEMPLATE_LEVELS } from "../level/templateLevels";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { makePagerControls } from "../ui/PagerControls";
 import { makeTextButton } from "../ui/textButton";
+import { drawScreenHeader } from "../ui/screenHeader";
 
 const ROW_START_Y = 90;
 /** Same as the other two browsers. There are six bundled templates today, so
@@ -31,23 +32,12 @@ export class TemplateBrowserScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.add
-      .text(24, 20, "← Back", {
-        fontSize: "14px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 10, y: 12 },
-      })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("Menu"));
-
-    this.add.text(GAME_WIDTH / 2, 24, "Templates", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
-    this.add
-      .text(GAME_WIDTH / 2, 50, "Pre-built levels — play one, or use it as a starting point in the editor.", {
-        fontSize: "12px",
-        color: "#a6a6c8",
-      })
-      .setOrigin(0.5, 0);
+    drawScreenHeader({
+      scene: this,
+      title: "Templates",
+      subtitle: "Pre-built levels — play one, or use it as a starting point in the editor.",
+      onBack: () => this.scene.start("Menu"),
+    });
 
     this.listContainer = this.add.container(0, 0);
     this.renderPage();

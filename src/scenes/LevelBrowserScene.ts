@@ -7,6 +7,7 @@ import { ConfirmButton } from "../ui/confirmButton";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { makePagerControls } from "../ui/PagerControls";
 import { makeTextButton } from "../ui/textButton";
+import { drawScreenHeader } from "../ui/screenHeader";
 
 const ROW_START_Y = 90;
 /** Raised from 44 (2026-08-29) to fit a button tall enough to be worth aiming at
@@ -37,28 +38,12 @@ export class LevelBrowserScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.add
-      .text(24, 20, "← Back", {
-        fontSize: "14px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 10, y: 12 },
-      })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("Menu"));
-
-    this.add
-      .text(GAME_WIDTH - 24, 20, "New Level", {
-        fontSize: "14px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 10, y: 12 },
-      })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("Editor"));
-
-    this.add.text(GAME_WIDTH / 2, 24, "My Levels", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
+    drawScreenHeader({
+      scene: this,
+      title: "My Levels",
+      onBack: () => this.scene.start("Menu"),
+      action: { label: "New Level", onClick: () => this.scene.start("Editor") },
+    });
 
     this.statusText = this.add
       .text(GAME_WIDTH / 2, ROW_START_Y - 22, "", { fontSize: "11px", color: "#a6a6c8" })

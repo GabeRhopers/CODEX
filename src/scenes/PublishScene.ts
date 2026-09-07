@@ -12,8 +12,9 @@ import {
 } from "../game/gameBundle";
 import { publishedGameLink } from "../game/publishedBundle";
 import { downloadTextFile } from "../ui/downloadFile";
-import { BUTTON_COLOR, MUTED_COLOR } from "../ui/theme";
+import { MUTED_COLOR } from "../ui/theme";
 import { makeTextButton } from "../ui/textButton";
+import { drawScreenHeader } from "../ui/screenHeader";
 
 /**
  * How a finished game becomes a link somebody else can open.
@@ -133,17 +134,12 @@ export class PublishScene extends Phaser.Scene {
   }
 
   private drawHeader(): void {
-    this.add
-      .text(24, 20, "← Back", { fontSize: "14px", color: "#ffffff", backgroundColor: BUTTON_COLOR, padding: { x: 10, y: 6 } })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("GameMaker"));
-    this.add.text(GAME_WIDTH / 2, 30, "Publish", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5);
-    this.add
-      .text(GAME_WIDTH / 2, 58, `"${this.gameDoc.title}" — three steps to a link you can send.`, {
-        fontSize: "12px",
-        color: MUTED_COLOR,
-      })
-      .setOrigin(0.5);
+    drawScreenHeader({
+      scene: this,
+      title: "Publish",
+      subtitle: `"${this.gameDoc.title}" — three steps to a link you can send.`,
+      onBack: () => this.scene.start("GameMaker"),
+    });
   }
 
   // --- step 1: the file ----------------------------------------------------

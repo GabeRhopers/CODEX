@@ -7,6 +7,7 @@ import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { makePagerControls } from "../ui/PagerControls";
 import { WorldSummary } from "../world/WorldSchema";
 import { makeTextButton } from "../ui/textButton";
+import { drawScreenHeader } from "../ui/screenHeader";
 
 const ROW_START_Y = 90;
 /** Same reasoning as LevelBrowserScene's — see that file. */
@@ -32,28 +33,12 @@ export class WorldBrowserScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.add
-      .text(24, 20, "← Back", {
-        fontSize: "14px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 10, y: 12 },
-      })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("Menu"));
-
-    this.add
-      .text(GAME_WIDTH - 24, 20, "New World", {
-        fontSize: "14px",
-        color: "#ffffff",
-        backgroundColor: "#0f3460",
-        padding: { x: 10, y: 12 },
-      })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("WorldMaker"));
-
-    this.add.text(GAME_WIDTH / 2, 24, "My Worlds", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
+    drawScreenHeader({
+      scene: this,
+      title: "My Worlds",
+      onBack: () => this.scene.start("Menu"),
+      action: { label: "New World", onClick: () => this.scene.start("WorldMaker") },
+    });
 
     // Back after Play moved to the map, which took the old one with it — a
     // failed delete needs somewhere to say so.
