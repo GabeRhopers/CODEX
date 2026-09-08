@@ -24,8 +24,13 @@ import Phaser from "phaser";
  */
 
 /** Every sound the game can make. Kept as a tuple so the name type is derived
- * from the list rather than repeated beside it. */
-export const SFX_NAMES = ["jump", "coin", "heart", "key", "chest", "hurt", "goal"] as const;
+ * from the list rather than repeated beside it.
+ *
+ * `stomp` joined on 2026-09-08. Defeating an enemy had never made a sound —
+ * playSfx was simply never called on it — which was easy to miss precisely
+ * because nothing looked wrong. It only became conspicuous once an *invented*
+ * enemy could carry a noise of its own and built-in ones still could not. */
+export const SFX_NAMES = ["jump", "coin", "heart", "key", "chest", "hurt", "stomp", "goal"] as const;
 
 export type SfxName = (typeof SFX_NAMES)[number];
 

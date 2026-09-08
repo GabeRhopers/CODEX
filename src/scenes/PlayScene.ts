@@ -1303,10 +1303,9 @@ export class PlayScene extends Phaser.Scene {
     if (stompable && isStompFromAbove(this.player, enemySprite)) {
       this.enemies = this.enemies.filter((e) => e.sprite !== enemySprite);
       enemySprite.destroy();
-      // Built-in enemies make no sound when stomped and still do not — the seven
-      // shipped effects have never covered it. So this is the only noise a stomp
-      // makes, and only for a thing somebody gave one to.
-      this.playThingSound(type);
+      // An invented enemy's own noise replaces the built-in one, exactly as it
+      // does for a collected item — same rule, same one-line shape.
+      if (!this.playThingSound(type)) playSfx(this, "stomp");
       applyStompBounce(this.player);
     } else {
       this.takeHit();

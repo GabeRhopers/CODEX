@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_ENDING_HEADLINE,
+  DEFAULT_ENDING_MESSAGE,
+  GameData,
   addWorld,
   createEmptyGame,
-  GameData,
   isGameComplete,
   moveWorld,
   nextWorldId,
+  parseGame,
   removeWorld,
   validationError,
 } from "./GameSchema";
@@ -143,5 +146,65 @@ describe("nextWorldId", () => {
     expect(nextWorldId(game(), 1)).toBe("w3");
     expect(nextWorldId(game(), 2)).toBeNull();
     expect(nextWorldId(game(), 99)).toBeNull();
+  });
+});
+
+describe("parseGame", () => {
+  const good = () => ({
+    id: "g1",
+    title: "Grampa's Quest",
+    worldIds: ["w1", "w2"],
+    ending: { headline: "Done", message: "Well played" },
+    createdAt: "2026-09-01T00:00:00.000Z",
+    updatedAt: "2026-09-02T00:00:00.000Z",
+  });
+
+  it("keeps a well-formed document exactly as it is", () => {
+    expect(parseGame(good())).toEqual(good());
+  });
+
+  it("refuses anything that is not a game-shaped object", () => {
+    // Every one of these is something `JSON.parse` will happily return and the
+    // old `as GameData` cast would have handed straight to a scene.
+    for (const raw of [null, undefined, 42, "a string", [], [good()], {}]) {
+      expect(parseGame(raw), JSON.stringify(raw)).toBeNull();
+    }
+  });
+
+  it("refuses a document whose fields are the wrong type", () => {
+    expect(parseGame({ ...good(), title: 123 })).toBeNull();
+    expect(parseGame({ ...good(), worldIds: "w1" })).toBeNull();
+    expect(parseGame({ ...good(), worldIds: ["w1", 2] })).toBeNull();
+    expect(parseGame({ ...good(), id: null })).toBeNull();
+  });
+
+  it("is what stands between storage and validationError, which assumes a shape", () => {
+    // The whole reason this function exists. `validationError` takes an
+    // already-typed GameData and asks business questions of it — the first
+    // thing it does is `game.title.trim()`. Handed a document with no title it
+    // does not return a reason, it throws, from inside whichever scene was
+    // loading. Parsing first is what makes it safe to ask.
+    const shapeless = { id: "g1" } as unknown as GameData;
+    expect(() => validationError(shapeless)).toThrow();
+    expect(parseGame(shapeless)).toBeNull();
+  });
+
+  it("fills a missing or broken ending rather than rejecting the game", () => {
+    // An ending is the one part with a sensible default already in the file, and
+    // losing a game because its two closing lines went missing would be a poor
+    // trade. Same instinct as the optional cut scenes below.
+    const noEnding = parseGame({ ...good(), ending: undefined });
+    expect(noEnding?.ending).toEqual({ headline: DEFAULT_ENDING_HEADLINE, message: DEFAULT_ENDING_MESSAGE });
+    const brokenEnding = parseGame({ ...good(), ending: { headline: 7 } });
+    expect(brokenEnding?.ending).toEqual({ headline: DEFAULT_ENDING_HEADLINE, message: DEFAULT_ENDING_MESSAGE });
+  });
+
+  it("drops a malformed cut scene but keeps the game", () => {
+    // GameData already documents that opening/closing are absent on every game
+    // written before cut scenes existed, so absence is normal and rejection
+    // would be wrong.
+    const parsed = parseGame({ ...good(), opening: "not a cut scene" });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.opening).toBeUndefined();
   });
 });

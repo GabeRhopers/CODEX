@@ -195,6 +195,28 @@ def goal() -> np.ndarray:
     return _normalise(np.concatenate(parts))
 
 
+def stomp() -> np.ndarray:
+    """A short low thump: the enemy squashed underfoot.
+
+    Stomping had no sound at all until 2026-09-08 — `playSfx` was never called
+    on it — which left one of the two or three biggest events in the game
+    silent. It is also the most *repeated* of these: a level can have a dozen
+    enemies, so this is deliberately the shortest thing here (90ms) and the
+    dullest in pitch. A bright noise at this rate becomes a woodpecker.
+
+    A falling sine with a little noise in the attack, which is what "something
+    soft hit something hard" sounds like — no harmonics, because the sweetness
+    belongs to the pickups and being defeated should not be a chime.
+    """
+    t = _t(0.09)
+    sweep = np.linspace(200.0, 70.0, len(t))
+    rng = np.random.default_rng(20260908)  # seeded, so the file is reproducible
+    # The noise is windowed to the first few milliseconds — the impact — rather
+    # than running under the whole tail, which would read as static.
+    thump = rng.uniform(-1.0, 1.0, len(t)) * _decay(t, 0.012, attack=0.002)
+    return _normalise((_sine(sweep, t) + 0.35 * thump) * _decay(t, 0.05, attack=0.002))
+
+
 SOUNDS = {
     "jump": jump,
     "coin": coin,
@@ -202,6 +224,7 @@ SOUNDS = {
     "key": key,
     "chest": chest,
     "hurt": hurt,
+    "stomp": stomp,
     "goal": goal,
 }
 

@@ -2,7 +2,7 @@ import { getAccessToken } from "../drive/googleAuth";
 import { createFile, ensureAppFolder, findFileByName, getFileContent, listFiles, trashFile, updateFileContent } from "../drive/driveClient";
 import { loadActiveProfile } from "../profile/Profile";
 import { WorldStorageAdapter } from "./WorldStorageAdapter";
-import { WorldData, WorldSummary } from "../world/WorldSchema";
+import { parseWorld, WorldData, WorldSummary } from "../world/WorldSchema";
 
 function fileName(id: string): string {
   return `world-${id}.json`;
@@ -62,7 +62,16 @@ export class GoogleDriveWorldStorageAdapter implements WorldStorageAdapter {
     const existing = await findFileByName(token, folderId, fileName(id));
     if (!existing) return null;
     const content = await getFileContent(token, existing.id);
-    return JSON.parse(content) as WorldData;
+    try {
+      // Null reads as "no such world", which every caller already handles —
+      // a world can be deleted from another device mid-session. Before this,
+      // a truncated or hand-edited file threw straight out of load() and took
+      // WorldMapScene's create() with it.
+      return parseWorld(JSON.parse(content));
+    } catch {
+      console.error(`world ${id} could not be parsed; treating as absent`);
+      return null;
+    }
   }
 
   async remove(id: string): Promise<void> {

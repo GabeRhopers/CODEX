@@ -1,4 +1,4 @@
-import { WorldData, WorldSummary } from "../world/WorldSchema";
+import { parseWorld, parseWorldSummary, WorldData, WorldSummary } from "../world/WorldSchema";
 import { WorldStorageAdapter } from "./WorldStorageAdapter";
 
 const INDEX_KEY = "rhopers:world-index";
@@ -8,7 +8,11 @@ function readIndex(): WorldSummary[] {
   const raw = localStorage.getItem(INDEX_KEY);
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as WorldSummary[];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Filtered, not rejected: one unreadable row should cost its own row rather
+    // than hiding every world the person has made.
+    return parsed.map(parseWorldSummary).filter((row): row is WorldSummary => row !== null);
   } catch {
     return [];
   }
@@ -33,7 +37,12 @@ export class LocalWorldStorageAdapter implements WorldStorageAdapter {
   async load(id: string): Promise<WorldData | null> {
     const raw = localStorage.getItem(worldKey(id));
     if (!raw) return null;
-    return JSON.parse(raw) as WorldData;
+    try {
+      return parseWorld(JSON.parse(raw));
+    } catch {
+      console.error(`world ${id} could not be parsed; treating as absent`);
+      return null;
+    }
   }
 
   async remove(id: string): Promise<void> {

@@ -43,6 +43,62 @@ export interface WorldSummary {
   updatedAt: string;
 }
 
+/**
+ * Turns whatever came back out of storage into a `WorldData`, or `null`.
+ *
+ * Every world is read as JSON somebody else wrote — a file on Drive, a
+ * localStorage entry, hand-edited or truncated by a failed write — and until
+ * now both adapters did `JSON.parse(content) as WorldData` and handed the
+ * result to `WorldMapScene`, which builds an entire screen out of it. A
+ * `levelIds` that was not an array took the map down with a TypeError; a
+ * document that failed to parse at all threw straight out of `load`.
+ *
+ * The required fields are the ones the map cannot draw anything without. The
+ * optional two are dropped rather than rejected, because `WorldData`'s own
+ * docstring makes absence normal for both: a world saved before the map existed
+ * has neither, and must still open.
+ *
+ * **Deliberately shallow on `layout`.** `resolveLayout` already relocates
+ * out-of-range, duplicate and non-numeric cells — that is documented there and
+ * tested — so re-checking them here would be a second opinion that could drift
+ * from the first. This only rules out a layout that is not an object at all.
+ * Same for `background`: which ids exist is the backgrounds module's business,
+ * and it already falls back.
+ */
+export function parseWorld(raw: unknown): WorldData | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const doc = raw as Record<string, unknown>;
+
+  for (const field of ["id", "name", "createdAt", "updatedAt"] as const) {
+    if (typeof doc[field] !== "string") return null;
+  }
+  if (!Array.isArray(doc.levelIds) || doc.levelIds.some((id) => typeof id !== "string")) return null;
+
+  const layout = doc.layout;
+  const usableLayout = !!layout && typeof layout === "object" && !Array.isArray(layout);
+
+  return {
+    id: doc.id as string,
+    name: doc.name as string,
+    levelIds: doc.levelIds as string[],
+    ...(usableLayout ? { layout: layout as WorldLayout } : {}),
+    ...(typeof doc.background === "string" ? { background: doc.background as BuiltinStaticBackgroundId } : {}),
+    createdAt: doc.createdAt as string,
+    updatedAt: doc.updatedAt as string,
+  };
+}
+
+/** One row of the worlds list. Same stance as `parseWorld`: a row that is not
+ * shaped like a summary is dropped, so one bad entry costs its own row rather
+ * than the whole list. */
+export function parseWorldSummary(raw: unknown): WorldSummary | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.name !== "string" || typeof row.updatedAt !== "string") return null;
+  if (typeof row.levelCount !== "number" || !Number.isFinite(row.levelCount)) return null;
+  return { id: row.id, name: row.name, levelCount: row.levelCount, updatedAt: row.updatedAt };
+}
+
 export function createEmptyWorld(name = "Untitled World"): WorldData {
   const now = new Date().toISOString();
   return { id: "", name, levelIds: [], createdAt: now, updatedAt: now };

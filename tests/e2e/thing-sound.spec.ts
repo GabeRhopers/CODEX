@@ -122,3 +122,33 @@ test("an invented item with no sound of its own still sounds like what it copies
 
   await expect.poll(() => playedSounds(page), { timeout: 10_000 }).toContain(COIN_SFX);
 });
+
+test("every named sound effect actually loaded", async ({ page }) => {
+  // Cheap, and it guards the mistake this feature could most easily make: a
+  // name added to SFX_NAMES without the matching file being generated. Nothing
+  // would look broken — preloadSfx would fail that one load, playSfx would find
+  // no key and silently do nothing, and the game would just be quiet in one
+  // place nobody was listening for.
+  //
+  // Deliberately not a test that stomps an enemy. Doing that means jumping onto
+  // a patrolling target, which is precisely the timing-sensitive shape this
+  // suite has spent a week removing; the decision it would check — an invented
+  // enemy's noise replaces the built-in one — is one line, and the identical
+  // line on the item path is covered above.
+  await gotoApp(page);
+
+  const { names, missing } = await page.evaluate(async () => {
+    const game = window.__debugGame!;
+    const mod = (await import("/src/audio/sfx.ts")) as { SFX_NAMES: readonly string[]; sfxKey(n: string): string };
+    return {
+      names: [...mod.SFX_NAMES],
+      missing: mod.SFX_NAMES.filter((name) => !game.cache.audio.exists(mod.sfxKey(name))),
+    };
+  });
+
+  // Without this the check below would pass on an empty list, which is the one
+  // way a guard like this quietly stops guarding anything.
+  expect(names.length, "no sound effects are declared at all").toBeGreaterThan(5);
+  expect(names, "the stomp sound is missing from the set").toContain("stomp");
+  expect(missing, "these sound effects are named but never loaded").toEqual([]);
+});

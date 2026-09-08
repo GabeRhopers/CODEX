@@ -80,6 +80,66 @@ export function createEmptyGame(id: string): GameData {
 }
 
 /**
+ * Turns whatever came back out of storage into a `GameData`, or `null`.
+ *
+ * **This is not `validationError`, and the difference is the point.** That
+ * function takes an *already-typed* `GameData` and asks business questions of
+ * it — has it a title, has it worlds, is a world in it twice. The first thing it
+ * does is `game.title.trim()`. Hand it a document with no title and it does not
+ * return a reason, it throws, from inside whichever scene was loading.
+ *
+ * Everything that reads a game reads it as JSON someone else wrote: a file on
+ * Drive, edited by hand, truncated by a failed write, or produced by a build
+ * that has since moved on. So shape has to be established *before* rules can be
+ * asked about, and that is this. Anything unrecognisable becomes `null`, which
+ * every caller already has a path for, because a game can be deleted elsewhere.
+ *
+ * Modelled on `worldProgress.sanitize`, the same job for a smaller document.
+ */
+export function parseGame(raw: unknown): GameData | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const doc = raw as Record<string, unknown>;
+
+  const strings = ["id", "title", "createdAt", "updatedAt"] as const;
+  for (const field of strings) {
+    if (typeof doc[field] !== "string") return null;
+  }
+  if (!Array.isArray(doc.worldIds) || doc.worldIds.some((id) => typeof id !== "string")) return null;
+
+  return {
+    id: doc.id as string,
+    title: doc.title as string,
+    worldIds: doc.worldIds as string[],
+    // Defaulted rather than rejected: the file already carries a sensible
+    // ending for a game nobody edited, and losing a whole game because its two
+    // closing lines went missing would be a poor trade.
+    ending: parseEnding(doc.ending),
+    // Dropped rather than rejected, for the reason GameData itself documents —
+    // these are absent on every game written before cut scenes existed, so
+    // absence is normal and a malformed one is closer to absent than to fatal.
+    ...(isCutSceneish(doc.opening) ? { opening: doc.opening as CutScene } : {}),
+    ...(isCutSceneish(doc.closing) ? { closing: doc.closing as CutScene } : {}),
+    createdAt: doc.createdAt as string,
+    updatedAt: doc.updatedAt as string,
+  };
+}
+
+function parseEnding(raw: unknown): GameEnding {
+  const fallback = { headline: DEFAULT_ENDING_HEADLINE, message: DEFAULT_ENDING_MESSAGE };
+  if (!raw || typeof raw !== "object") return fallback;
+  const ending = raw as Record<string, unknown>;
+  if (typeof ending.headline !== "string" || typeof ending.message !== "string") return fallback;
+  return { headline: ending.headline, message: ending.message };
+}
+
+/** Shallow: a cut scene's own panels are the CutScene module's business, and
+ * the scene that shows them already tolerates an empty one. This only rules out
+ * the values that are obviously not one at all. */
+function isCutSceneish(raw: unknown): boolean {
+  return !!raw && typeof raw === "object" && !Array.isArray(raw);
+}
+
+/**
  * Why a game cannot be saved, or `null` when it can.
  *
  * A reason string rather than a thrown error, for the same purpose

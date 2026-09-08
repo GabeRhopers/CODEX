@@ -1,7 +1,7 @@
 import { createFile, ensureAppFolder, findFileByName, getFileContent, listFiles, updateFileContent } from "../drive/driveClient";
 import { getAccessToken } from "../drive/googleAuth";
 import { loadActiveProfile } from "../profile/Profile";
-import { GameData } from "./GameSchema";
+import { GameData, parseGame } from "./GameSchema";
 import { activeBundle } from "./contentSource";
 
 /**
@@ -50,7 +50,11 @@ export async function loadGame(): Promise<GameData | null> {
   if (mine.length === 0) return null;
   const content = await getFileContent(token, mine[0].id);
   try {
-    return JSON.parse(content) as GameData;
+    // parseGame, not a cast: this already survived a file that would not parse,
+    // but not one that parsed into the wrong shape — and validationError, which
+    // every caller reaches for next, throws rather than complains when handed
+    // one of those.
+    return parseGame(JSON.parse(content));
   } catch {
     // A corrupted document reads as "no game yet" rather than taking the screen
     // down — the same stance customEntityStorage takes on an unparseable file.
