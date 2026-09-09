@@ -5,6 +5,148 @@ from scratch on Phaser 3 (MIT). See
 `docs/spellbound-editor-implementation-plan.md` for the full architecture,
 data model, and milestone plan.
 
+## What's in here
+
+A log of what was built and why, newest work appended into the section it
+belongs to. Entries are dated where they were written that way. This index is
+grouped by subject rather than by the order things happened, so an entry can
+appear under more than one heading if it belongs to both.
+
+**Start here**
+
+- [Getting started](#getting-started)
+- [Controls](#controls)
+- [Mobile / touch](#mobile-touch)
+- [Status](#status)
+- [Project layout](#project-layout)
+- [Licence and credits](#licence-and-credits)
+
+**Art and content**
+
+- [Player character](#player-character)
+- [Ghost-pillow enemy](#ghost-pillow-enemy)
+- [Goal art](#goal-art)
+- [Ground tiles merge with their neighbors](#ground-tiles-merge-with-their-neighbors)
+- [Outlined edges (2026-08-27)](#outlined-edges-2026-08-27)
+- [Templates & ground skins](#templates-ground-skins)
+- [New blocks & enemies (first slice of the M2 content list)](#new-blocks-enemies-first-slice-of-the-m2-content-list)
+- [Second content pass](#second-content-pass)
+- [Real art: Kenney's "Pixel Platformer" (CC0)](#real-art-kenneys-pixel-platformer-cc0)
+- [Tiles/markers/UI still procedural](#tilesmarkersui-still-procedural)
+- [Static background (current)](#static-background-current)
+- [Custom uploaded backgrounds](#custom-uploaded-backgrounds)
+- [The DOM overlay trick](#the-dom-overlay-trick)
+- [Parallax background & background scenes (dormant — see above)](#parallax-background-background-scenes-dormant-see-above)
+- [Character situations (2026-08-20)](#character-situations-2026-08-20)
+- [Templates (2026-08-27)](#templates-2026-08-27)
+- [Rebrand: "Spellbound Level Editor" → Rhopers Game Maker (2026-08-16)](#rebrand-spellbound-level-editor-rhopers-game-maker-2026-08-16)
+
+**Playing: mechanics and feel**
+
+- [Items & hit-points](#items-hit-points)
+- [Enemy hitboxes & sizes (2026-08-16)](#enemy-hitboxes-sizes-2026-08-16)
+- [Water is swimmable, not a hazard (2026-08-16)](#water-is-swimmable-not-a-hazard-2026-08-16)
+- [Player/enemy world bounds (2026-08-16)](#playerenemy-world-bounds-2026-08-16)
+- [Jump feel retune (2026-08-19)](#jump-feel-retune-2026-08-19)
+- [Power-ups: Chicken Slipper and PJ Thunder Hat (2026-08-19)](#power-ups-chicken-slipper-and-pj-thunder-hat-2026-08-19)
+- [Checkpoints (2026-08-17)](#checkpoints-2026-08-17)
+- [Sub/Up areas (2026-08-17)](#subup-areas-2026-08-17)
+- [Sub/Up feedback + basket tint (2026-08-17)](#subup-feedback-basket-tint-2026-08-17)
+- [Mandatory basket pairing (2026-08-18)](#mandatory-basket-pairing-2026-08-18)
+- [Basket teleports could bounce you back and forth (2026-08-22)](#basket-teleports-could-bounce-you-back-and-forth-2026-08-22)
+
+**The editor**
+
+- [Categorized palette](#categorized-palette)
+- [Level name](#level-name)
+- [Multiple instances & the universal Eraser](#multiple-instances-the-universal-eraser)
+- [Editor layout: header/footer/dropdown (2026-08-14 side panels, revised 2026-08-16)](#editor-layout-headerfooterdropdown-2026-08-14-side-panels-revised-2026-08-16)
+- [Selection you can actually see (2026-08-26)](#selection-you-can-actually-see-2026-08-26)
+- [The grid was invisible on light art (2026-08-23)](#the-grid-was-invisible-on-light-art-2026-08-23)
+- [Cross-device layout: the double-centering bug (2026-08-16)](#cross-device-layout-the-double-centering-bug-2026-08-16)
+- [Cross-device layout, part 2: the stale-canvas-size bug (2026-08-16)](#cross-device-layout-part-2-the-stale-canvas-size-bug-2026-08-16)
+- [Layout and reach (2026-08-29)](#layout-and-reach-2026-08-29)
+- [Home page UI/UX pass (2026-08-21)](#home-page-uiux-pass-2026-08-21)
+- [Text legibility pass (2026-08-17)](#text-legibility-pass-2026-08-17)
+- [Save-state readout moved to the footer (2026-08-17)](#save-state-readout-moved-to-the-footer-2026-08-17)
+- [Test Play gets a console shell (2026-08-26)](#test-play-gets-a-console-shell-2026-08-26)
+- [A shape rather than a frame (2026-08-26)](#a-shape-rather-than-a-frame-2026-08-26)
+- [Start moves up, and the trim catches up (2026-08-26)](#start-moves-up-and-the-trim-catches-up-2026-08-26)
+
+**The Skin Creator**
+
+- [Skin Creator (2026-08-17)](#skin-creator-2026-08-17)
+- [Skin Creator tools (2026-08-17)](#skin-creator-tools-2026-08-17)
+- [Hand tool (2026-08-17)](#hand-tool-2026-08-17)
+- [An Erase tool, not just an erase gesture (2026-08-23)](#an-erase-tool-not-just-an-erase-gesture-2026-08-23)
+- [Zoom is a window now, not a bigger canvas (2026-08-23)](#zoom-is-a-window-now-not-a-bigger-canvas-2026-08-23)
+- [Custom skins](#custom-skins)
+- [Blocks are reskinnable too, as of 2026-08-27](#blocks-are-reskinnable-too-as-of-2026-08-27)
+- [Skins get names (2026-08-26)](#skins-get-names-2026-08-26)
+- [A level owns its skins, and a default only moves when you say so (2026-08-23)](#a-level-owns-its-skins-and-a-default-only-moves-when-you-say-so-2026-08-23)
+- [Reuse existing art: Copy as a base, and trace over a reference (2026-08-23)](#reuse-existing-art-copy-as-a-base-and-trace-over-a-reference-2026-08-23)
+- [Multi-frame sprite editor: a paintable character and animated enemies (2026-08-22)](#multi-frame-sprite-editor-a-paintable-character-and-animated-enemies-2026-08-22)
+- [The palette gets shades, and a place for your own colours (2026-08-26)](#the-palette-gets-shades-and-a-place-for-your-own-colours-2026-08-26)
+- [The drawing got the middle of the screen (2026-09-05)](#the-drawing-got-the-middle-of-the-screen-2026-09-05)
+- [The background didn't match the pixels you painted (2026-09-05)](#the-background-didnt-match-the-pixels-you-painted-2026-09-05)
+- [Skin storage: one cache and one copy (2026-08-21)](#skin-storage-one-cache-and-one-copy-2026-08-21)
+- [Skin/background/music libraries (2026-08-16)](#skinbackgroundmusic-libraries-2026-08-16)
+- [A real bug found in testing: picking a color silently cancelled Fill](#a-real-bug-found-in-testing-picking-a-color-silently-cancelled-fill)
+
+**Storage, profiles and saving**
+
+- [Google Drive storage & profiles](#google-drive-storage-profiles)
+- [Autosave & save-state tracking](#autosave-save-state-tracking)
+- [Storage failures](#storage-failures)
+- [The Profile gate (2026-08-28)](#the-profile-gate-2026-08-28)
+- [A failed save can't lose your work — now proven (2026-08-27)](#a-failed-save-cant-lose-your-work-now-proven-2026-08-27)
+- [Deleting a level was one click, permanently (2026-08-27)](#deleting-a-level-was-one-click-permanently-2026-08-27)
+- [The save/reopen flake, finally named (2026-08-26)](#the-savereopen-flake-finally-named-2026-08-26)
+
+**Worlds, games and invented things**
+
+- [Worlds become a world map (2026-08-26)](#worlds-become-a-world-map-2026-08-26)
+- [The World Maker, repaired (2026-08-28)](#the-world-maker-repaired-2026-08-28)
+- [World Maker, made legible — and two regressions of my own (2026-08-29)](#world-maker-made-legible-and-two-regressions-of-my-own-2026-08-29)
+- [A game: a title, worlds in order, and an ending (2026-09-02)](#a-game-a-title-worlds-in-order-and-an-ending-2026-09-02)
+- [Custom entities, part 1: the rules (2026-08-29)](#custom-entities-part-1-the-rules-2026-08-29)
+- [Custom entities, part 2: placeable and playable (2026-08-31)](#custom-entities-part-2-placeable-and-playable-2026-08-31)
+- [The Thing Maker (2026-09-01)](#the-thing-maker-2026-09-01)
+
+**Cut scenes**
+
+- [Cut scenes](#cut-scenes)
+- [Cut scenes (2026-09-02)](#cut-scenes-2026-09-02)
+
+**Publishing**
+
+- [Publishing a game](#publishing-a-game)
+- [Publishing (2026-09-02)](#publishing-2026-09-02)
+- [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
+- [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
+- [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
+
+**Sound and music**
+
+- [Music](#music)
+- [Music upload (2026-08-28)](#music-upload-2026-08-28)
+
+**Testing and CI**
+
+- [Committed Playwright e2e suite (2026-08-20)](#committed-playwright-e2e-suite-2026-08-20)
+- [The intermittent e2e failures, diagnosed (2026-08-31)](#the-intermittent-e2e-failures-diagnosed-2026-08-31)
+- [`tests/e2e/layout-invariants.spec.ts` is the guard that was missing](#testse2elayout-invariantsspects-is-the-guard-that-was-missing)
+- [A mutation caught a real bug, and a test that was lying about itself](#a-mutation-caught-a-real-bug-and-a-test-that-was-lying-about-itself)
+
+**Where a new note goes.** Add it to the section it is about, with a date, as
+a `###` heading — then add one line to the index above. If it does not
+obviously belong to any section, that is a sign the sections need revisiting
+rather than a reason to append it to the end of whichever one is last.
+
+Anything the prose refers to by name — `see "Goal art"` — has to be a real
+heading. `src/docs.test.ts` checks every one of those on each run; they used
+to rot silently, and about one in six pointed at nothing.
+
 ## Licence and credits
 
 This project is MIT — see `LICENSE`, which also carries the third-party
@@ -149,7 +291,9 @@ npm run test:e2e  # run the browser e2e suite (Playwright — see tests/e2e/)
 npm run typecheck # type-check only, no build
 ```
 
-Open the dev server URL in a browser. Controls:
+Open the dev server URL in a browser.
+
+### Controls
 
 - **Home page** (opens on load): a 2x2 card grid — **New Level** starts a
   fresh empty editor; **Templates** opens the template browser; **My
@@ -452,7 +596,9 @@ noted:
 
 ## Art
 
-**Player character:** a real hand-drawn wizard sprite sheet the user
+### Player character
+
+a real hand-drawn wizard sprite sheet the user
 supplied (idle, walk1, walk2, jump, cast — all originally facing right).
 Cropped into individual frames, background keyed to transparent, and
 normalized to a common 48px display height so animation-frame swaps never
@@ -463,7 +609,9 @@ rather than needing mirrored art. The physics collision body is a fixed
 size, re-centered under whichever frame is showing, so hitbox behavior
 never changes with the animation.
 
-**Ghost-pillow enemy:** original art drawn to match the wizard's style —
+### Ghost-pillow enemy
+
+original art drawn to match the wizard's style —
 rounded shapes, thick navy ink outlines, flat pastel fills with a little
 shading, no external references. Built with Pillow (the build sandbox
 can reach PyPI even though it can't reach asset sites): clean vector
@@ -475,7 +623,9 @@ consistent hand-drawn family. See `public/assets/entities/ghost-pillow.png`
 and `src/gameplay/EnemyBehaviors.ts` (patrol + bob + the stomp-from-above
 rule, unit-tested in `EnemyBehaviors.test.ts`).
 
-**Goal art.** The goal marker was originally a hand-drawn "dream-cloud
+### Goal art
+
+The goal marker was originally a hand-drawn "dream-cloud
 portal" in that same wizard-family style. As of 2026-08-14 it's a
 project-owner-supplied image instead — a caged sheep
 (`public/assets/entities/caged-sheep.png`, texture key `goal-portal`,
@@ -504,7 +654,9 @@ fill was needed — just crop to content and the same premultiplied-alpha
 LANCZOS downscale to 48px tall (37x48 this time, since the new art reads
 narrower than the old one at the same height).
 
-**Ground tiles merge with their neighbors.** Ground tiles have no border,
+### Ground tiles merge with their neighbors
+
+Ground tiles have no border,
 and which of two dirt/grass frames a cell renders as (grass-capped
 "exposed to air" vs. plain "buried under another ground tile") is derived
 purely from its neighbor above at render time — never stored. A whole
@@ -534,7 +686,9 @@ the prep script crops that border away before upscaling, for ground tiles
 only; Brick keeps its border on purpose (see below) since it's meant to
 read as a distinct block, not merging terrain.
 
-**Outlined edges (2026-08-27).** Cropping the border was right for the
+### Outlined edges (2026-08-27)
+
+Cropping the border was right for the
 *interior* and left the *silhouette* with nothing: grass's `top` frame is a
 green cap over bare dirt and its `fill` frame is bare dirt on all four
 sides, so a platform simply stopped. `src/level/groundEdges.ts` puts an
@@ -584,7 +738,9 @@ cells), obvious with an overlay. Both scenes now set ground to `-2` and the
 overlay to `-1` explicitly; the background is at `-100` and everything else
 at 0 or above, so nothing else moved.
 
-**Templates & ground skins.** Ground/Brick/Bounce/hazard blocks each come
+### Templates & ground skins
+
+Ground/Brick/Bounce/hazard blocks each come
 in a "skin" — grass, desert, castle, or snow — but a skin is a property
 of the individual *block*, not the level: `LevelData` has no `theme`
 field at all, and every skin's blocks are always available in the
@@ -625,7 +781,9 @@ with an actual playthrough, not just the math, per this project's usual
 practice of manually re-verifying anything touching physics/rendering
 (see the plan doc §10).
 
-**New blocks & enemies (first slice of the M2 content list).** Two blocks
+### New blocks & enemies (first slice of the M2 content list)
+
+Two blocks
 and two enemies, picked because they slot into the existing architecture
 with zero new gameplay rules (see the plan doc's M2 candidate list for
 the full 20-item list and why the rest need more, like a scoring or
@@ -651,7 +809,9 @@ hit-points concept the game doesn't have yet):
   any contact costs the player regardless of direction — same
   `isStompFromAbove` check, just gated per enemy type.
 
-**Categorized palette.** The palette used to be a single row of every
+### Categorized palette
+
+The palette used to be a single row of every
 brush at once — fine at 9 icons, unworkable once Items brought the count
 to 14 and climbing (now past 30 with the second content pass's Decor
 category). `src/editor/Palette.ts` now tags every brush with a
@@ -674,7 +834,9 @@ texture, visibility) was correct. (As of the side-panel layout pass, the
 icon grid is 2 columns instead of 1 row — see "Editor layout: header/
 footer/dropdown" below — but the Container-depth mechanics are unchanged.)
 
-**Autosave & save-state tracking.** As of 2026-08-14, Save is no longer
+### Autosave & save-state tracking
+
+As of 2026-08-14, Save is no longer
 the only thing standing between an edit and losing it. `EditorScene`
 tracks a `dirty` flag, flipped true by every paint drag, entity
 move, undo, and redo (`markDirty()`, called from those exact spots —
@@ -776,6 +938,8 @@ empty, completely untouched level (or an empty World with zero levels)
 still never gets an id or a storage entry — nothing marks it dirty in
 the first place, so there's nothing for autosave to act on.
 
+#### Storage failures
+
 Storage failures (network unreachable, an expired Drive session needing
 reconnect, a Drive API error) are caught rather than becoming a silent
 unhandled promise rejection — `persistLevel`/`persistWorld` wrap the write in
@@ -787,7 +951,9 @@ Save click tries again naturally). `dirty` staying `true` on failure is
 exactly what the Menu/← Back leave-flush fix above now keys off of to
 know a save didn't actually go through.
 
-**Google Drive storage & profiles.** As of 2026-08-16, persistence moved
+### Google Drive storage & profiles
+
+As of 2026-08-16, persistence moved
 off `localStorage` onto Google Drive — the trigger was `localStorage`'s
 own ~5-10MB per-origin quota (see "Custom uploaded backgrounds" and
 "Music" above) getting routinely exceeded once a handful of levels each
@@ -879,7 +1045,9 @@ formation and `GoogleDriveStorageAdapter`'s save/list/load logic before
 shipping) before this fix; a single "Rhopers Game Maker" folder gets
 created after it.
 
-**Custom skins.** As of 2026-08-16, any Marker/Enemy/Item/Decor brush can
+### Custom skins
+
+As of 2026-08-16, any Marker/Enemy/Item/Decor brush can
 be reskinned with a user-uploaded image — click the brush in the palette
 (the selection doubles as "which type," so there's no separate type
 picker), then the **Skin** trigger below the icon grid — in the left
@@ -899,7 +1067,9 @@ Skins apply everywhere that brush is used — the palette icon, every
 already-placed instance in the current level, and actual gameplay — not
 just future placements.
 
-**Blocks are reskinnable too, as of 2026-08-27.** They were the one
+### Blocks are reskinnable too, as of 2026-08-27
+
+They were the one
 category the whole skin system never reached, and the reason was real:
 block rendering goes through Phaser's tilemap, drawing from one shared,
 GID-indexed spritesheet per ground skin (`groundAutotile.ts`) rather than
@@ -1004,7 +1174,9 @@ Playwright testing used to verify skins, not in production; fixed by
 actually checking `isConnected()` and skipping straight to Menu when
 true.
 
-**Enemy hitboxes & sizes (2026-08-16).** Prompted by a user report to
+### Enemy hitboxes & sizes (2026-08-16)
+
+Prompted by a user report to
 review hitboxes and add a way to resize enemies — both landed together
 since sizing an enemy and sizing its collision box turned out to be the
 same underlying problem.
@@ -1092,7 +1264,9 @@ that point on if it happened not to throw. Fixed by resetting
 `spritesByBrushId` in `init()`, alongside every other per-run field
 already reset there.
 
-**Water is swimmable, not a hazard (2026-08-16).** Prompted by a user
+### Water is swimmable, not a hazard (2026-08-16)
+
+Prompted by a user
 report: Water used to behave exactly like Lava (an instant hit on
 contact, via the shared `HAZARD_FRAMES` set — see "Water" under "Second
 content pass" above) and looked the same at every depth, unlike Ground
@@ -1188,7 +1362,9 @@ Re-verified visually the same way as above — a stacked column of Water
 tiles now reads as one continuous, uniformly-toned pool from the crest
 down, with no visible seam between the surface and fill frames.
 
-**Player/enemy world bounds (2026-08-16).** Prompted by a user report: the
+### Player/enemy world bounds (2026-08-16)
+
+Prompted by a user report: the
 player could walk straight past a level's left or right edge, off the end
 of `StaticBackground`'s masked viewport (see its own docstring — the
 background image only ever renders across exactly `level.width * TILE_SIZE`
@@ -1226,7 +1402,9 @@ it rather than drifting into the empty space beyond the background, and an
 enemy placed one tile from an edge patrolled a shortened, still-fully-
 visible leg instead of crossing it.
 
-**Items & hit-points.** Seven collectible brushes, all in the palette's
+### Items & hit-points
+
+Seven collectible brushes, all in the palette's
 Items tab, all ordinary general-purpose brushes usable in any level (not
 hardcoded into specific templates) exactly like a Ground tile or a Ghost:
 - **Coin** — +1 to the score shown in Play mode's top-right HUD.
@@ -1261,7 +1439,9 @@ hazard/enemy touch, but doesn't fit falling the way it fits an on-screen
 hit, so `PlayScene.update`'s fall check is unchanged from before Items
 existed.
 
-**Static background (current).** Every level shows one fixed,
+### Static background (current)
+
+Every level shows one fixed,
 non-scrolling background image — no parallax, per the project owner's
 "nothing special" framing when this replaced the multi-scene parallax
 picker (see below). `src/gameplay/StaticBackground.ts` renders it: one
@@ -1303,7 +1483,9 @@ that whole bug class rather than patching it further: every panel button,
 background picker included, is now a fixed width, so a longer label never
 pushes into whatever comes next.
 
-**Custom uploaded backgrounds.** As of 2026-08-14, the built-in pool isn't
+### Custom uploaded backgrounds
+
+As of 2026-08-14, the built-in pool isn't
 the only option — **Upload BG** lets you use your own image, stored
 per-level rather than shipped as a build asset. Two pieces make that
 work:
@@ -1343,6 +1525,8 @@ work:
   remove-then-recreate path, and that ordering guarantees nothing
   references the old texture by the time it's removed.
 
+#### The DOM overlay trick
+
 Opening the actual file picker turned out to need its own real DOM
 element rather than a Phaser button: browsers only open a native
 file-dialog from a call that's a direct, synchronous consequence of a
@@ -1371,7 +1555,9 @@ to that same screen region would sit right on top of PlayScene's own
 on-screen touch controls (same canvas, same coordinate space) and
 silently swallow taps meant for them.
 
-**Music.** As of 2026-08-14, the home page has background music, and any
+### Music
+
+As of 2026-08-14, the home page has background music, and any
 level can have its own uploaded soundtrack — both controlled by the same
 mute-toggle + draggable-volume-slider widget, `src/audio/VolumeControl.ts`.
 
@@ -1422,7 +1608,9 @@ mute-toggle + draggable-volume-slider widget, `src/audio/VolumeControl.ts`.
   sliders, so a muted player can't drag to 100% and hear nothing with no
   visual explanation why.
 
-**Level name.** As of 2026-08-14, a level's name can actually be changed —
+### Level name
+
+As of 2026-08-14, a level's name can actually be changed —
 until this pass, `createEmptyLevel` always named a new level "Untitled
 Level" and nothing in the app could ever change it afterward (not the
 editor, not My Levels, not World Maker's level picker), so anyone with
@@ -1467,7 +1655,9 @@ confirmed empirically rather than assumed:
   canvas handler — and therefore before whatever button was clicked —
   gets a chance to run.
 
-**Multiple instances & the universal Eraser.** As of 2026-08-15, Enemies/Items/
+### Multiple instances & the universal Eraser
+
+As of 2026-08-15, Enemies/Items/
 Decor are no longer capped at one placed instance per type — until this
 pass, `EntityPlacer` stored `Map<EntityType, Image>`, literally one marker
 per *type* for the whole level, so placing a second Ghost just moved the
@@ -1518,8 +1708,9 @@ singleton lookup, unchanged. All 6 templates predate this pass and already
 had unique `(x, y)` per entity, so the new stricter invariant doesn't
 affect them.
 
-**Editor layout: header/footer/dropdown (2026-08-14 side panels, revised
-2026-08-16).** As of 2026-08-14 the editor's menus moved off one crowded
+### Editor layout: header/footer/dropdown (2026-08-14 side panels, revised 2026-08-16)
+
+As of 2026-08-14 the editor's menus moved off one crowded
 toolbar row into two opaque, docked vertical panels flanking the grid — a
 left "Tools" panel (5 stacked category tabs + a 2-column palette grid) and
 a right "Actions" panel (every button, stacked). As of 2026-08-16 that was
@@ -1593,7 +1784,9 @@ exact values were tuned empirically against real rendered screenshots
 than derived from a formula — comfortable for the default 20x12 grid and
 every category's icon count, not the extreme case.
 
-**Cross-device layout: the double-centering bug (2026-08-16).** A real,
+### Cross-device layout: the double-centering bug (2026-08-16)
+
+A real,
 shipped bug, reported as "sometimes I see a huge gap at the top" and
 "things aren't clickable down below" — reproduced and root-caused with a
 Playwright sweep across ~10 viewport sizes (phones portrait/landscape,
@@ -1654,7 +1847,9 @@ screen sizes" pass:
   still receives every pointer event underneath it either way, so this
   doesn't change how taps/drags reach the game itself.
 
-**Cross-device layout, part 2: the stale-canvas-size bug (2026-08-16).** A
+### Cross-device layout, part 2: the stale-canvas-size bug (2026-08-16)
+
+A
 second, distinct report on the same general area — "sometimes too big,
 sometimes too small," this time with two screenshots of the same phone
 a minute apart, one showing the game badly oversized (cropped off the left
@@ -1697,7 +1892,9 @@ The multi-scene parallax system below is still **dormant, not deleted**
 the original `backgrounds.ts` and its `BACKGROUND_SCENES` pool, all 5
 scenes' PNGs) stays exactly as it was, untouched and unused.
 
-**Parallax background & background scenes (dormant — see above).** Every level renders two
+### Parallax background & background scenes (dormant — see above)
+
+Every level renders two
 background layers behind it — a slow far layer and a faster near layer —
 for a sense of depth as the player moves. This project's levels are still
 single-screen (no camera panning/scrolling — that's deferred to plan doc
@@ -1794,7 +1991,9 @@ whole canvas, not one small tile repeated) and neither do the four
 painted scenes (authored at full size from the start, no tiling
 involved), which is why those five are what remain.
 
-**Second content pass.** A deliberate push to use a meaningfully larger
+### Second content pass
+
+A deliberate push to use a meaningfully larger
 share of the Kenney pack (it has 231 tiles across its three sheets; the
 first few passes above used 15 of them, ~6.5%) with a curated, coherent
 set rather than padding for its own sake — every pick below earns its
@@ -1858,7 +2057,9 @@ Decor types appears in it (Tree, Cactus, Sprout, Mushroom don't fit this
 particular level's cave/snow framing) — they're still fully usable from
 the palette in any level regardless of what any one template shows.
 
-**Real art: Kenney's "Pixel Platformer" (CC0).** The plan doc always
+### Real art: Kenney's "Pixel Platformer" (CC0)
+
+The plan doc always
 recommended Kenney's CC0 packs for this, but the build sandbox's network
 proxy can't *fetch* them (only npm/github.com are reachable) — so
 everything above shipped as procedural placeholder art instead, generated
@@ -1932,7 +2133,9 @@ painted art from `scripts/generate-painted-backgrounds.py`, not derived
 from this pack. See prepare-kenney-assets.py's docstring for the exact
 source tile indices and how to regenerate with different ones.
 
-**Tiles/markers/UI still procedural:** Castle's ground/brick/bounce/lava
+### Tiles/markers/UI still procedural
+
+Castle's ground/brick/bounce/lava
 (see above) and pure UI chrome with no asset-pack equivalent — the eraser
 icon, the spawn marker, the hover highlight, and the palette selection
 outline — are still generated at runtime in
@@ -1956,7 +2159,8 @@ palette and the in-grid placement markers scale any texture down to fit
 one tile via `src/editor/spriteFit.ts`, preserving aspect ratio. Gameplay
 objects in `PlayScene` are unaffected and render at full native size.
 
-**Rebrand: "Spellbound Level Editor" → Rhopers Game Maker (2026-08-16).**
+### Rebrand: "Spellbound Level Editor" → Rhopers Game Maker (2026-08-16)
+
 Prompted by a user report that old references to the previous name (and,
 in the git branch name, an even earlier "Mario Maker"-flavored working
 title) were still showing up. Every user-facing string was updated — the
@@ -2007,7 +2211,9 @@ development instructions, the latter would break any existing link to it
 for no user-facing benefit; the document's own title/prose inside it were
 still updated.
 
-**Skin/background/music libraries (2026-08-16).** Prompted by a user
+### Skin/background/music libraries (2026-08-16)
+
+Prompted by a user
 request to make custom skins "properly work across all users" with "a
 sub menu with a little image of each [one] saved for selection," and to
 give backgrounds and music uploads that exact same workflow. Custom
@@ -2105,7 +2311,9 @@ explicit clear rather than a silent fallback, since there's no built-in
 to land on) the next time that level is opened, matching `removeCustomSkin`'s
 own "revert to default, don't guess a replacement" behavior.
 
-**Checkpoints (2026-08-17).** A new Markers-tab entity (`checkpoint`,
+### Checkpoints (2026-08-17)
+
+A new Markers-tab entity (`checkpoint`,
 texture key `checkpoint-bell` — a project-owner-supplied bell sprite,
 processed the same alpha-preserving crop-and-downscale as the 2026-08-17
 Goal art swap above, no flood fill needed) that gives a level mid-run
@@ -2155,7 +2363,9 @@ lands back at Spawn). This is a deliberate scope choice, not a missing
 feature: checkpoints make retrying a hard section less punishing within
 one sitting, they're not a persistent level-completion save.
 
-**Sub/Up areas (2026-08-17).** A level can grow up to two extra grids
+### Sub/Up areas (2026-08-17)
+
+A level can grow up to two extra grids
 beyond its original one — one **Sub** area and one **Up** area, each with
 the exact same block/marker/enemy/item/decor palette and its own
 independent Background/Music choice as Main (see the Area switcher bullet
@@ -2270,7 +2480,9 @@ basket-up from a different level, the editor's Area switcher creating/
 switching/two-tap-deleting a Sub area, and a plain level with no Sub/Up
 areas at all still playing and winning exactly as before.
 
-**Sub/Up feedback + basket tint (2026-08-17).** A follow-up investigation
+### Sub/Up feedback + basket tint (2026-08-17)
+
+A follow-up investigation
 into a report that Sub/Up areas were "not working properly," plus a
 request to make Basket (Up) visually distinct from Basket (Down) since
 both rendered with the exact same `magic-basket` texture everywhere — the
@@ -2304,7 +2516,9 @@ never teleports; a correctly-paired level round-trips in both the
 Sub and Up directions with the new gold tint visibly rendering in Test
 Play (not just the editor).
 
-**Mandatory basket pairing (2026-08-18).** The runtime toast above is a
+### Mandatory basket pairing (2026-08-18)
+
+The runtime toast above is a
 safety net, not enforcement — it only fires once a player actually walks
 onto an unpaired basket mid-playtest, by which point the broken level has
 already shipped. `testPlay()` already blocked Space/Test Play on a missing
@@ -2331,7 +2545,9 @@ correctly paired level (proceeds), and a plain level with no Sub/Up areas
 at all (completely unaffected, confirming the new check is additive and
 doesn't touch the existing Spawn/Goal gate).
 
-**Jump feel retune (2026-08-19).** A report that the player's jump "looks
+### Jump feel retune (2026-08-19)
+
+A report that the player's jump "looks
 too high" turned out to be well-supported, not a misread: `JUMP_VELOCITY
 = -450` against the original `GRAVITY_Y = 900` gave an ordinary hop a
 ~3.5-tile apex and a full 1-second hang time — over 2.3× the player's own
@@ -2388,7 +2604,9 @@ changes nothing about which templates are completable — confirmed by
 comparison against the original build, not assumed from a passing test
 run.
 
-**Power-ups: Chicken Slipper and PJ Thunder Hat (2026-08-19).** Two new
+### Power-ups: Chicken Slipper and PJ Thunder Hat (2026-08-19)
+
+Two new
 Items-tab pickups, designed end-to-end before writing any code — the
 ambiguous product decisions (does the shock defeat every enemy including
 the un-killable Spike Crawler, permanent equip vs. limited ammo, a visible
@@ -2443,7 +2661,9 @@ does not spawn a second bolt), bolts travelling in the correct direction
 after turning around, and — the one previously-impossible interaction —
 a Spike Crawler destroyed by the shock despite being un-stompable.
 
-**Committed Playwright e2e suite (2026-08-20).** Every feature this
+### Committed Playwright e2e suite (2026-08-20)
+
+Every feature this
 project has shipped was verified in a real browser, but until now that
 meant a hand-written Playwright script re-derived from scratch each
 session — nothing accumulated as a regression net, and CI only ever ran
@@ -2469,7 +2689,9 @@ delete** (3 e2e), **Templates** (45 unit + 4 e2e), the **Profile gate** (11 unit
 + 7 e2e), **background upload** (6 e2e) and **music upload** (4 unit + 9 e2e) —
 all described below.
 
-**Templates (2026-08-27).** The six bundled levels are the first thing a new
+### Templates (2026-08-27)
+
+The six bundled levels are the first thing a new
 player opens — MenuScene's empty state points anyone with nothing saved straight
 at "Browse Templates" — and they were also the least defended data in the
 project. `levelFromRows` builds each one from hand-edited ASCII art, taking the
@@ -2483,7 +2705,9 @@ bounds, the spawn standing in open air on something solid, current schema/tile
 size, and that `cloneLevel` really deep-copies. All six passed on the first run —
 worth recording, since the point was that nothing had ever checked.
 
-**Background upload (2026-08-28).** The largest untested *feature* rather than
+### Background upload (2026-08-28)
+
+The largest untested *feature* rather than
 screen: three modules and a whole rework nobody had ever run.
 `customBackgroundUpload.ts` downscales to 1600px and re-encodes as JPEG because
 the image used to live inline in the level's own saved JSON;
@@ -2513,7 +2737,9 @@ One thing left alone deliberately: on a Drive failure the editor reports
 handler. The test asserts on `"Couldn't"` rather than the whole string so the
 wording is free to improve without breaking it.
 
-**Custom entities, part 1: the rules (2026-08-29).** First step of the road to a
+### Custom entities, part 1: the rules (2026-08-29)
+
+First step of the road to a
 game that can actually be finished in this tool. The editor can reskin any brush
 but cannot *add* one, so a game made here is bounded by 28 built-in entity types
 (`LevelSchema.ts`'s `EntityType`). This is the groundwork for lifting that —
@@ -2529,7 +2755,9 @@ them.
 `src/entities/customEntity.ts` is the rule set, pure and Phaser-free. Two
 decisions carry the design:
 
-**Behaviour is borrowed, never described.** A custom entity names the built-in it
+### Behaviour is borrowed, never described
+
+A custom entity names the built-in it
 copies and inherits everything that comes with it. An item resolves to
 `{ kind: "item", collectAs: "item-coin" }` — the built-in *type*, not an effect
 name — which the caller hands straight back to the existing collect path, so the
@@ -2537,7 +2765,9 @@ one place that knows what a coin does stays one place. An enemy reads `stompable
 off the built-in's own def, so a custom enemy based on the spike keeps "hurts
 however you touch it" rather than restating it and drifting.
 
-**An invalid definition resolves to `null`, never throws.** That is what will let
+### An invalid definition resolves to `null`, never throws
+
+That is what will let
 a level survive referencing a custom type deleted afterwards — the caller renders
 it inert, exactly as `backgroundLoader`/`musicLoader` already fall back for a
 missing asset. A level must never fail to open because a custom type went away.
@@ -2552,7 +2782,9 @@ Nothing is wired yet: no storage, no palette entry, no way to make one. The
 `PlayScene` table move is the only behavioural surface touched, and its proof is
 that the existing e2e suite passes unchanged.
 
-**A game: a title, worlds in order, and an ending (2026-09-02).** Everything
+### A game: a title, worlds in order, and an ending (2026-09-02)
+
+Everything
 needed to *make* content existed — levels, worlds, skins, invented entities —
 but not the thing that turns a pile of worlds into something you can hand to
 someone. Anyone opening this project landed on an editor menu, not on a game.
@@ -2566,33 +2798,42 @@ Skins and invented things stay shared because they are the shop everyone builds
 from; a game is the thing *one person is making*, so Mike's and Gabriel's must
 not be the same document.
 
-**The symmetry that kept it small.** `PlayScene` already chains *levels inside a
+### The symmetry that kept it small
+
+`PlayScene` already chains *levels inside a
 world* — bank the win, offer the next, return to the map when the world is done.
 So a game chains *worlds inside a game* exactly one layer up, in
 `WorldMapScene`, which already knew when a world was complete. Finishing a world
 inside a game offers **Next world →**, and on the last one **Finish →**, which
 shows the ending.
 
-**Progress is derived, not stored again.** A game is finished when its last world
+### Progress is derived, not stored again
+
+A game is finished when its last world
 is, and `world/worldProgress.ts` already tracks that per world. So there is no
 game-progress record that could disagree with the world-progress record —
 `isGameComplete` takes the per-world answers and asks whether all of them are
 yes.
 
-**I was wrong that PlayScene would not need touching.** The plan said the whole
+### I was wrong that PlayScene would not need touching
+
+The plan said the whole
 change sat one layer up. It nearly did — but `PlayScene` restarts the map on the
 way back from a level, so the game context was dropped the moment you played
 anything, and the run silently stopped being part of a game. Three lines: it
 rides along in `WorldPlayContext` and comes back out. Better to change the design
 than to preserve a sentence in a plan.
 
-**Two collisions with `Phaser.Scene`, both caught by the compiler.** `Scene`
+### Two collisions with `Phaser.Scene`, both caught by the compiler
+
+`Scene`
 already owns `game` (the `Phaser.Game` instance) and `load` (the
 `LoaderPlugin`) — so a scene field named either shadows something the framework
 depends on. Renamed to `gameRun` / `gameDoc` and `readAll`. The `game` one would
 have been genuinely nasty at runtime rather than merely wrong.
 
-**Two layout problems the screenshots caught and no assertion would have.**
+### Two layout problems the screenshots caught and no assertion would have
+
 `Remove` overflowed the ordered column by 4px, and in the screen's worst case —
 an available list that needs a pager *and* a save that was refused — the pager
 and the reason would have sat within a few pixels of each other. Four things can
@@ -2618,7 +2859,9 @@ new textarea overlay — worth doing when cut scenes arrive, not for a headline 
 a sign-off. There is no "you are on world 3" resume, and no export: this makes
 the object a later step can ship, it does not ship it.
 
-**A published game: no editor, no sign-in (2026-09-02).** The second of the
+### A published game: no editor, no sign-in (2026-09-02)
+
+The second of the
 three shipping parts. A bundle existed but nothing could play it; now the same
 app boots as either the editor or somebody's game, and the whole difference is
 whether a readable `game.json` sits beside index.html. That is why publishing
@@ -2636,7 +2879,8 @@ throw** rather than no-op: a published game never saves, so reaching one means a
 code path assumed an editor that is not there, and a silent no-op would hide
 that until someone noticed their progress vanishing.
 
-**A mutation caught a real bug, and a test that was lying about itself.**
+### A mutation caught a real bug, and a test that was lying about itself
+
 Removing the bundle branch from `getLevelStorage` left the suite green. Two
 causes, both worth writing down. First, the product: Phaser constructs every
 scene when the Game is created — *before* the boot decides what this page is —
@@ -2672,15 +2916,21 @@ presses Play, before the first world; **Closing…** plays after the last world,
 just before the ending. Each is a few panels, and a panel is a picture and some
 words — either alone is enough.
 
-**Skip is always on screen.** A family game gets replayed, and a story you
+### Skip is always on screen
+
+A family game gets replayed, and a story you
 cannot get past turns into an obstacle the second time through.
 
-**Cut scenes (2026-09-02).** The one content feature named in the original goal
+### Cut scenes (2026-09-02)
+
+The one content feature named in the original goal
 and not yet built. Deliberately after publishing rather than before it: every
 content feature added ahead of the bundle is one more thing the bundle has to
 learn to carry, and it had now been carried once.
 
-**A picture is a background-library id.** Not a new asset store — the pool
+### A picture is a background-library id
+
+Not a new asset store — the pool
 behind *Upload BG* already downscales to 1600px, re-encodes as JPEG, is shared
 across profiles, and travels in a bundle by reference, and `AssetPickerMenu` is
 already the dropdown that picks from it. So cut scenes added no upload path, no
@@ -2689,13 +2939,17 @@ collector, and **that shipped in the same commit**. It had to: a picture
 collected only from levels would have been plainly there while authoring and
 silently gone on the link.
 
-**`hasContent`, not `panels.length`.** Someone who presses *Add panel* three
+### `hasContent`, not `panels.length`
+
+Someone who presses *Add panel* three
 times and types nothing has not made a cut scene, and answering the seam with a
 count would hand them three blank screens to click through before their own game
 started. The maker says so too — an empty panel's chip is outlined rather than
 filled, and its preview reads "This panel is empty, so it will not play."
 
-**`ParagraphInput` is a sibling of `LevelNameInput`, not a copy of it.** That
+### `ParagraphInput` is a sibling of `LevelNameInput`, not a copy of it
+
+That
 class's docstring records three fixes found the hard way — keydown
 `stopPropagation` (or a space in your caption launches Test Play), a
 capture-phase `document` blur (or clicking Save commits the *previous* value),
@@ -2729,34 +2983,44 @@ Maker walks through them and prints the exact file name and link for your game:
 
 Whoever opens it plays the game — no sign-in, no editor, nothing to install.
 
-**Why a query parameter rather than a deployment per game.** The site is built
+### Why a query parameter rather than a deployment per game
+
+The site is built
 by CI onto one GitHub Pages deployment, and a deployment is something only CI
 can make; a file in a folder is something a person can upload from a phone. So
 one deployed site hosts any number of games, each with its own link. Vite copies
 `public/` into `dist/` verbatim, which is why this needs no build script and no
 second CI job — the file simply ships with the next deploy.
 
-**Publishing (2026-09-02).** The third of the three shipping parts, and the one
+### Publishing (2026-09-02)
+
+The third of the three shipping parts, and the one
 that makes a link real. `?game=<slug>` names a file under `games/`;
 `publishedBundle.ts` owns both halves of that convention — the link the Publish
 screen prints and the parse the boot performs — so they cannot drift apart. The
 same module still answers a bare `game.json` beside index.html, which is a whole
 site that is one game.
 
-**The slug is the file name is the link.** `bundleFileName` dropped its
+### The slug is the file name is the link
+
+`bundleFileName` dropped its
 decorative `.rhopers-game` infix for plain `<slug>.json`: the name reads slightly
 worse in a Downloads folder and is load-bearing everywhere else, because the file
 you download is the file you upload and nothing is renamed by hand between the
 two. `gameSlug` emits exactly the alphabet `requestedGameSlug` accepts, and a
 unit test walks awkward titles through both to keep that true.
 
-**`?game=` is matched, not trimmed.** The slug is interpolated into a fetched
+### `?game=` is matched, not trimmed
+
+The slug is interpolated into a fetched
 path and `new URL("games/../../x", base)` resolves happily, so the pattern
 `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` is a guard: no dots and no slashes means no
 path left to traverse. An e2e test watches every request the page makes and
 asserts a crafted link never reaches for the path it names.
 
-**Three boot outcomes, not two.** `fetchPublishedBundle` reports `editor`,
+### Three boot outcomes, not two
+
+`fetchPublishedBundle` reports `editor`,
 `game`, or `missing`. The third is the point: someone following a stale link gets
 told the game is not there, rather than being dropped into the editor's sign-in —
 which explains nothing and asks for something they have no reason to give. A
@@ -2769,7 +3033,9 @@ there with it. The first spacing tried put step 2's path chip through step 3's
 heading — caught by reading the screenshot back, which no assertion would have
 done.
 
-**Exporting a game to one file (2026-09-02).** The editor could build a whole
+### Exporting a game to one file (2026-09-02)
+
+The editor could build a whole
 game, but nobody else could play it — and the reason is not deployment. Every
 level, world, skin, invented thing, uploaded background and track lives in *the
 author's* Google Drive and is read at runtime through *the author's* OAuth token.
@@ -2782,7 +3048,9 @@ and it was wrong: this is the one genuinely risky unknown left, and every conten
 feature added before it is one more thing the bundle would have to learn to
 carry.
 
-**Heavy assets are collected by reach; light ones travel whole.** Backgrounds and
+### Heavy assets are collected by reach; light ones travel whole
+
+Backgrounds and
 music are named per area by id, so the walk is exact — and it matters, because
 `musicUpload.ts` caps a track at 4MB and carrying spares is the difference
 between a few MB on a link and tens of them. Skins and invented things go in
@@ -2802,12 +3070,16 @@ that feeds it, kept separate so "which assets does a game need" stays testable
 without a browser. Levels are de-duplicated on the way in, since two worlds
 sharing one level should not carry it twice.
 
-**Problems are reported, not blocking.** A missing background falls back and a
+### Problems are reported, not blocking
+
+A missing background falls back and a
 missing track plays silence, but a missing *level* ends a world early — so the
 export names what is wrong and still writes the file. Refusing would leave you
 unable to inspect the very thing you need to see in order to fix it.
 
-**Two things the screenshots caught.** The report is the one piece of that screen
+### Two things the screenshots caught
+
+The report is the one piece of that screen
 whose length nothing controls — it says whatever is missing — so an unwrapped
 line simply left the canvas; it now wraps, and `describeProblems` trims to the
 two that fit with a "(+N more)" count. And it was rendering **green** while
@@ -2828,7 +3100,9 @@ one suspect rather than two. Bundle size is *reported* rather than solved — if
 real game lands at tens of MB, that number is what would justify compressing or
 splitting assets later.
 
-**The Thing Maker (2026-09-01).** Custom entities have worked end to end since
+### The Thing Maker (2026-09-01)
+
+Custom entities have worked end to end since
 the step before this — stored, placed, played — but the only way to *make* one
 was `window.__debugCustomEntities`, a dev-only hook that does not exist in a
 production build. The feature had no front door. This is it: a screen where you
@@ -2841,7 +3115,9 @@ because the two are a pair — one invents what a thing *does*, the other what i
 for a fifth card (a third card row costs 102px and would push the resume bar
 past the footer), and `buildFooter` already had a free column.
 
-**The screen owns almost no rules.** What a thing may copy is `clonableTypes`,
+### The screen owns almost no rules
+
+What a thing may copy is `clonableTypes`,
 whether a definition is usable is `validationError`, what it then does is
 `resolveBehaviour` — all pure, all in `entities/customEntity.ts`, all tested
 without Phaser. The scene picks values and shows reasons. Two small rules did
@@ -2856,14 +3132,18 @@ thing just made, rather than dropping you into the target grid to hunt for it.
 That needed `init(data)` on `SkinEditorScene`, and a shared `openCanvasFor` so
 arriving from the grid and arriving from the handoff land in identical state.
 
-**The target grid had to page first.** At `ROW_START_Y=90` and `cellH=64`, a
+### The target grid had to page first
+
+At `ROW_START_Y=90` and `cellH=64`, a
 sixth row's labels end at y=470 on a 468-tall canvas — so the grid holds exactly
 **40 targets, and 38 already existed**. Two free slots is not headroom, so the
 very first invented thing would have been drawn off the bottom. It now pages with
 the shared `ui/pager.ts` + `ui/PagerControls.ts` (this screen is full width, so
 unlike the editor's 190px palette panel the standard pager row fits as-is).
 
-**Two layout bugs the screenshots caught and no assertion would have.** The
+### Two layout bugs the screenshots caught and no assertion would have
+
+The
 "Acts like" grid at ten per row ran to x=882 with the preview panel starting at
 830 — a collision only Decor (ten built-ins) could trigger, and I had only
 rendered Items and Enemies. It wraps at seven now. And everything below that grid
@@ -2890,12 +3170,16 @@ the library, orphaned under the custom id: the same trade `removeCustomEntity`
 already documents, where deleting never reaches into data someone else may be
 using.
 
-**The intermittent e2e failures, diagnosed (2026-08-31).** Three specs had each
+### The intermittent e2e failures, diagnosed (2026-08-31)
+
+Three specs had each
 been failing about once per full run and passing in isolation, and the note here
 for two days was "real debt, not fixed". A run that failed three at once finally
 gave enough signal to name them — there were **two** causes, not one flake.
 
-**Seeded levels came back in an unstable order.** Both list adapters sort by
+### Seeded levels came back in an unstable order
+
+Both list adapters sort by
 `updatedAt`, newest first, and `makeLevel` stamps `new Date()` per call — so nine
 levels built in one `map()` usually share a millisecond, and a stable sort keeps
 seed order. Occasionally the loop straddles a millisecond, the order reverses, and
@@ -2905,7 +3189,9 @@ reproduces the failure byte-for-byte (`clickByText: no Text "Level 01" found in
 scene "WorldMaker"`). `seedLevels`/`seedWorlds` now stamp explicitly descending, so
 display order always equals the order the names were given in.
 
-**Two polls were satisfied by an empty list.** `expect.poll(...).not.toContain(x)`
+### Two polls were satisfied by an empty list
+
+`expect.poll(...).not.toContain(x)`
 and `expect(names.length).toBeLessThan(9)` are both true of `[]` — which is exactly
 what a browser shows for a moment while it re-reads storage after a delete or a
 page change. The poll returned on that transient and the next line asserted against
@@ -2916,14 +3202,18 @@ Neither was a product defect; both were the harness lying. The mutation check is
 the same one the fix came from — flipping the seed stamps back to ascending fails
 the World Maker layout test deterministically.
 
-**Custom entities, part 2: placeable and playable (2026-08-31).** Part 1 defined
+### Custom entities, part 2: placeable and playable (2026-08-31)
+
+Part 1 defined
 what a custom entity *is* and wired none of it. This makes one real: stored in
 the shared library, offered in the palette, placed in a level, and playing its
 borrowed behaviour. There is still no authoring screen — that is the next step —
 so definitions go in through a dev-only hook, which is enough to prove the
 runtime before a screen is built on top of it.
 
-**Art needed no new plumbing, and one field went away.** Part 1 gave a definition
+### Art needed no new plumbing, and one field went away
+
+Part 1 gave a definition
 a `skinId`. Dropped. The skins library is already keyed by *brush id* — an
 arbitrary string — and `resolveSkinTextureKeys` returns a `brushId -> textureKey`
 map by iterating whatever keys it holds. So a custom entity's sprite is simply
@@ -2941,7 +3231,9 @@ is one `custom-entities.json` in the Drive app folder, cached with the same
 in-flight dedupe `loadCustomSkins` uses — `PlayScene` resolves this on every area
 build, so an uncached read would re-download the library on every basket teleport.
 
-**A deleted definition means "not drawn", not "drawn as something else".** The
+### A deleted definition means "not drawn", not "drawn as something else"
+
+The
 plan said a missing definition would render inert as a plain image; that turned
 out to be dishonest, because a deleted definition leaves no record of what it
 looked like, so any image would be an invention. What actually happens is what
@@ -2949,7 +3241,9 @@ looked like, so any image would be an invention. What actually happens is what
 stays in the level's data and simply is not drawn. Deleting a type never silently
 edits levels that used it, and the level still opens.
 
-**The palette was full, which the plan had not noticed.** The icon grid holds
+### The palette was full, which the plan had not noticed
+
+The icon grid holds
 exactly five rows, and Blocks and Decor already fill all five — so the very first
 invented decor type would have been drawn past the panel, unreachable. Adding
 brushes without paging the grid would have shipped a defect on day one.
@@ -2975,7 +3269,8 @@ that grid is itself close to overflowing at 38 targets and needs its own paging,
 which belongs with the authoring screen where drawing the sprite is the point.
 Until then a custom entity wears its base's art, which is what the fallback is for.
 
-**World Maker, made legible — and two regressions of my own (2026-08-29).**
+### World Maker, made legible — and two regressions of my own (2026-08-29)
+
 A screenshot from a phone in landscape: the maker's level rows had the bottom
 half of every letter cut off, "Save World" sat on top of the save-state readout,
 and picking a map backdrop changed nothing you could see.
@@ -2998,7 +3293,9 @@ them read as buttons and take whatever height their content needs. That removes
 the whole class of bug rather than re-tuning one magic number against a padding
 value.
 
-**The backdrop now actually draws.** `buildBackdropButton` only ever set
+### The backdrop now actually draws
+
+`buildBackdropButton` only ever set
 `world.background` and relabelled the button; the image was rendered by
 `WorldMapScene` alone, so in the maker "Pirate Cove" was a word and the map
 stayed an empty grid — reported, fairly, as "there's no background, nothing
@@ -3017,7 +3314,9 @@ guideline instead of the pixel-short cap recorded below. Labels are truncated
 with an ellipsis by a small pure `src/ui/labels.ts` — wrapping a bottom-row name
 runs it into the toolbar, and cutting them is what actually stops the collisions.
 
-**`tests/e2e/layout-invariants.spec.ts` is the guard that was missing.** It walks
+### `tests/e2e/layout-invariants.spec.ts` is the guard that was missing
+
+It walks
 every scene's display list and asserts three geometric facts: no Text is squeezed
 into a fixed height smaller than its own content; no interactive object is drawn
 outside the 1050x468 canvas; and no interactive Text overlaps another Text. All
@@ -3034,7 +3333,9 @@ this was called fixed. Two problems only that pass could see — the backdrop
 drowning the route, and labels with no contrast against it — were fixed on the
 strength of it.
 
-**Layout and reach (2026-08-29).** Prompted by asking whether mobile support was
+### Layout and reach (2026-08-29)
+
+Prompted by asking whether mobile support was
 worth building "at this phase". Researching it corrected the premise: mobile was
 never unsupported. Scale.FIT + CENTER_BOTH, `activePointers: 3`, `100dvh`,
 `viewport-fit=cover`, tuned `touch-action`, the `visualViewport` hook, the
@@ -3089,10 +3390,14 @@ screen wastes ~80% of the height, and only a real portrait layout fixes that —
 there is no layout system here, every scene is absolute pixel math. The app
 already suggests rotating.
 
-**The World Maker, repaired (2026-08-28).** Reported as "not working properly
+### The World Maker, repaired (2026-08-28)
+
+Reported as "not working properly
 and UI is terrible". Both halves were true, and specific.
 
-**Nodes moved on their own.** `drawMap` resolved a layout for drawing but stored
+### Nodes moved on their own
+
+`drawMap` resolved a layout for drawing but stored
 only cells someone had *deliberately* dragged, so every other node was
 re-derived from scratch on each redraw. Three levels auto-arrange to
 `(0,2) (4,2) (7,2)`; dropping the third onto the first's cell sent the *first*
@@ -3107,7 +3412,9 @@ nothing moves that the player did not move. The occupancy check moved to the
 "onto a cell someone else holds" finally does — it previously only knew about
 pinned nodes and would silently bump an auto-placed one.
 
-**Removing a level was a coin flip.** Drag and remove shared one pointer,
+### Removing a level was a coin flip
+
+Drag and remove shared one pointer,
 separated by a `dragged` flag, against Phaser's `dragDistanceThreshold` of `0`
 — so a pixel of wobble swallowed the click, and a perfectly still click deleted
 the node outright with no confirmation. `ui/confirmButton.ts` exists precisely
@@ -3117,14 +3424,18 @@ via the existing `ConfirmButton`) or reorders. `dragend` also reads the node's
 own centre rather than `pointer.x/y`, so grabbing a node off-centre no longer
 drops it a cell away.
 
-**Ten saved levels broke the list.** Rows ran from y=90 at 34px on a 468px
+### Ten saved levels broke the list
+
+Rows ran from y=90 at 34px on a 468px
 canvas, so row 10 landed on top of the "Map backdrop" button and row 12 was off
 the bottom edge — with no scrolling anywhere in the app, the tenth level could
 not be seen, let alone added, even though `MAX_NODES` is 40. The list now pages,
 with the page size derived from the space that actually exists rather than
 written down twice.
 
-**Every world was called "Untitled World."** `createEmptyWorld` set that name
+### Every world was called "Untitled World."
+
+`createEmptyWorld` set that name
 and nothing ever changed it — there was no name field. There is now, reusing
 `LevelNameInput`, which had already been parameterised with `fallback` and
 `placeholder` (2026-08-26) so a second screen could adopt it without
@@ -3153,7 +3464,9 @@ cell, so the spec waits for the snap rather than racing it.
 Still true elsewhere and deliberately not widened into: `LevelBrowserScene` and
 `WorldBrowserScene` have the same row-overflow ceiling and no scrolling either.
 
-**Music upload (2026-08-28).** The last item on the list, and the only one that
+### Music upload (2026-08-28)
+
+The last item on the list, and the only one that
 turned up a live bug rather than just uncovered ground.
 
 The feature itself is backgrounds' twin with one deliberate difference: audio
@@ -3172,7 +3485,9 @@ still pointing at it — backgrounds can fall back to Meadow, music has no defau
 to land on, so a dangling `customMusicId` would leave the trigger naming a track
 that no longer exists anywhere.
 
-**The bug.** `musicLoader.ts`'s `loadCustomAudio` documented a fallback to
+### The bug
+
+`musicLoader.ts`'s `loadCustomAudio` documented a fallback to
 silence "rather than leaving the caller's promise unresolved", implemented by
 listening for `Phaser.Loader.Events.FILE_LOAD_ERROR`. Traced through Phaser's
 source, that listener **cannot fire for the only input this path ever gets**:
@@ -3206,7 +3521,9 @@ level so the clearing is actually observable. Same wording caveat as backgrounds
 applies here too — a *store* failure reports "Couldn't load that file", so the
 test pins the substring, not the sentence.
 
-**The Profile gate (2026-08-28).** Two separate gaps, and the second is the one
+### The Profile gate (2026-08-28)
+
+Two separate gaps, and the second is the one
 that mattered. First, the gate was *never walked*: `gotoApp` seeds
 `rhopers:profile` through `addInitScript` before the page loads, so all 22 specs
 booted straight past `ProfileGateScene` and nothing had exercised the picker,
@@ -3321,7 +3638,9 @@ ever touching production behavior — a structural fix for the "must
 remember to revert it" risk the ad hoc version carried, not just a
 one-off instance of following the convention correctly.
 
-**Character situations (2026-08-20).** The character now shows a different
+### Character situations (2026-08-20)
+
+The character now shows a different
 pose for winning, losing, casting, swimming, getting hurt, and picking up a
 power-up — built entirely on the five sprites he already had
 (`public/assets/wizard/`), with no new art.
@@ -3392,7 +3711,9 @@ software WebGL, so the game loop runs behind wall-clock under load and a
 screenshot showed "You Lose" already on screen. That one is environmental,
 and the honest fix was headroom, not a workaround.
 
-**Skin storage: one cache and one copy (2026-08-21).** Two problems the
+### Skin storage: one cache and one copy (2026-08-21)
+
+Two problems the
 character work measured but deliberately left alone, fixed together now that
 they were the next thing in the way.
 
@@ -3443,7 +3764,9 @@ The round trip is pinned by a new e2e test that paints a scatter of cells
 reopens, and asserts every cell came back identical — through the real editor
 and the real storage layer, not a synthetic canvas.
 
-**Home page UI/UX pass (2026-08-21).** Screenshotted the live page in both
+### Home page UI/UX pass (2026-08-21)
+
+Screenshotted the live page in both
 the first-run and returning-user states before changing anything, which turned
 up two outright bugs next to the layout problems.
 
@@ -3537,7 +3860,9 @@ one clock, so a real press is always strictly later than anything handled and a
 replay never is. Verified at both timings — 7 presses, exactly 7 moves, whether
 sent back to back or spaced out.
 
-**The grid was invisible on light art (2026-08-23).** Noticed while
+### The grid was invisible on light art (2026-08-23)
+
+Noticed while
 screenshotting the zoom rework and nearly waved through as a matter of taste. It
 was not. The lines were `rgba(255,255,255,0.18)`; measuring the rendered result
 against painted bands gave line-to-neighbour contrast out of 255:
@@ -3572,7 +3897,9 @@ Verified to fail on both (1.28 and 0.00) before being accepted. Playwright hands
 back a PNG and Node has no decoder, so the page decodes its own screenshot
 through an offscreen canvas rather than adding a dependency for one measurement.
 
-**Test Play gets a console shell (2026-08-26).** The on-screen controls were
+### Test Play gets a console shell (2026-08-26)
+
+The on-screen controls were
 four translucent circles floating *over* the playfield — the bottom corners of
 the level, permanently half-obscured by the things you press to play it.
 
@@ -3607,7 +3934,9 @@ overlaps the screen rect** — that last one is what keeps the framing free,
 because a control creeping back over the playfield is exactly the regression
 this replaced.
 
-**A shape rather than a frame (2026-08-26).** The first version filled both
+### A shape rather than a frame (2026-08-26)
+
+The first version filled both
 bands edge to edge with rectangles, which read as a picture frame around the
 level rather than an object holding it: there was no silhouette, because every
 pixel of the canvas was body. The fix is depth, not geometry. The body is now
@@ -3627,7 +3956,9 @@ is exported from `HandheldShell` and used by *both* control clusters as well as
 by the trim, so the D-pad and the diamond can't drift apart and the shell always
 knows what its lower details have to clear.
 
-**Start moves up, and the trim catches up (2026-08-26).** Start shipped below
+### Start moves up, and the trim catches up (2026-08-26)
+
+Start shipped below
 the face buttons, which put its top edge **7px** from the lower jump button —
 to a thumb that is one control, not two. It now sits at the top of the right
 band (`SCREEN_RECT.y + 64`), which buys **87px** of clearance from the face
@@ -3666,7 +3997,9 @@ engage unless `outcome === "playing"`, so a PAUSED card can never end up sitting
 on the win or lose screen, and Start can never un-pause the physics that `onWin`
 deliberately froze. **P** does the same thing from the keyboard.
 
-**A failed save can't lose your work — now proven (2026-08-27).** The Priority
+### A failed save can't lose your work — now proven (2026-08-27)
+
+The Priority
 Matrix's last unverified **Tier 1** row. The handling was already right, but
 nothing exercised it, and the guarantee rests on a single line in
 `EditorScene.leaveToMenu`: it re-checks `dirty` *after* awaiting the save and
@@ -3682,7 +4015,8 @@ the data a recovery test needs. Three e2e now cover failure, the refusal to
 leave, and recovery once storage comes back. The leave-guard was mutation-checked
 — delete that line and the test fails.
 
-**Deleting a level was one click, permanently (2026-08-27).**
+### Deleting a level was one click, permanently (2026-08-27)
+
 `LevelBrowserScene.deleteLevel` called `storage.remove` straight from a
 `pointerdown` on a button sitting **next to Edit**, with no confirmation and no
 undo — while every other destructive action in the app was already two-tap. It
@@ -3703,7 +4037,9 @@ of seven reads of the browse list that didn't poll. The rows render from an asyn
 empty — reported as a bare `[]`. That is a second, distinct signature of the
 long-running save/reopen flake; the decode-hang one was bounded the day before.
 
-**The save/reopen flake, finally named (2026-08-26).** Three specs
+### The save/reopen flake, finally named (2026-08-26)
+
+Three specs
 (`skin-roundtrip`, `skin-reuse`, `skin-names`) had been failing on CI on and off
 for days without ever being root-caused. The `waitForSkinCanvas` diagnostic
 added earlier for exactly this purpose is what cracked it: every failure
@@ -3723,7 +4059,9 @@ that already knows how to write "Couldn't open that skin" to the browse-mode
 status line, and leaves the list usable so it can be retried, instead of Edit
 looking like a dead button with nothing in the console.
 
-**Worlds become a world map (2026-08-26).** Worlds was a list — `WorldData`
+### Worlds become a world map (2026-08-26)
+
+Worlds was a list — `WorldData`
 was `{id, name, levelIds[]}`, the maker was two text columns, and playing one
 chained levels back to back on **N**. Its own docstring said the quiet part:
 *"No branching paths, no visual world map, no per-level unlocking — those are
@@ -3766,7 +4104,8 @@ and 5 e2e covering the round trip: build and reopen, a layout-less world still
 opening and playing, the lock gate, progress surviving a trip out to the browser,
 and a world whose level was deleted elsewhere still opening.
 
-**The palette gets shades, and a place for your own colours (2026-08-26).**
+### The palette gets shades, and a place for your own colours (2026-08-26)
+
 Three changes that turned out to be one problem.
 
 *A colour outside the palette was thrown away.* The swatch row reset
@@ -3807,7 +4146,9 @@ palette indices, so art painted in those greens keeps them exactly, and
 happens to prove, since it round-trips `paletteId: "gameboy"` as an opaque
 string.
 
-**Selection you can actually see (2026-08-26).** The Sprite editor used one
+### Selection you can actually see (2026-08-26)
+
+The Sprite editor used one
 colour, `#3a5a9c`, for *both* "you are pointing at this" and "this is the armed
 tool" — and `makeSmallButton`'s `pointerout` reset every button to the
 unselected colour unconditionally. Two bugs from one collision: an armed tool
@@ -3831,7 +4172,9 @@ fill was only ever set by the hover handlers, so opening the dropdown showed
 **no** category as open until you hovered one and left. All four now share one
 `SELECTED_COLOR`.
 
-**Grouping.** The Sprite editor's controls sat in two stacks ~1200px apart: a
+### Grouping
+
+The Sprite editor's controls sat in two stacks ~1200px apart: a
 labelled "View" column on the left, and an unlabelled pile on the right holding
 Mirror (a drawing mode), Clear (destructive), the reference controls (tracing)
 and Set as default (publishing) — four jobs with nothing saying so. Both rails
@@ -3844,7 +4187,9 @@ a rule. Its *resting* colour stays the normal navy on purpose — the two-tap ar
 is what signals danger, and tinting the rest state red too would blunt the
 difference between "this is destructive" and "the next tap does it".
 
-**Icons, and where they didn't fit.** Glyph prefixes went on Undo/Redo in both
+### Icons, and where they didn't fit
+
+Glyph prefixes went on Undo/Redo in both
 editors and the zoom buttons, and Skin Creator on the home page picked up the
 card family's accent stripe, icon and chevron (it is a destination like the four
 cards, and was the only one that didn't look like one; it does not *become* a
@@ -3863,7 +4208,9 @@ leaving `toolLeft` at `Infinity` — which clears every swatch by a comfortable
 infinity, and passed. It now asserts it found all five first, so it fails loudly
 on drift rather than silently succeeding.
 
-**Skins get names (2026-08-26).** Skins were the only asset library without
+### Skins get names (2026-08-26)
+
+Skins were the only asset library without
 one. `BackgroundAsset` and `MusicAsset` have carried `name` since they were
 built and their pickers show it; a skin had `{id, imageData, uploadedBy,
 updatedAt}` and nothing else. So the level editor labelled every skin `Skin 1`,
@@ -3909,8 +4256,9 @@ quietly forks a second skin is the likeliest silent failure), blank-name
 fallback, two skins for one brush, Copy, picking by name in a level, and a
 pre-name skin still opening under its brush label and migrating itself on save.
 
-**A level owns its skins, and a default only moves when you say so
-(2026-08-23).** A review of the whole skin path turned up three things, and the
+### A level owns its skins, and a default only moves when you say so (2026-08-23)
+
+A review of the whole skin path turned up three things, and the
 third was doing real damage quietly.
 
 *One:* of 37 palette brushes the 27 entity ones are skinnable and every one
@@ -3966,7 +4314,9 @@ it already degrades when a skin is deleted. And `sprite-frames.spec.ts` had to
 learn to press Set as default: it paints a skin and asserts the runtime wears
 it, which is no longer something that happens by itself.
 
-**An Erase tool, not just an erase gesture (2026-08-23).** Erasing already
+### An Erase tool, not just an erase gesture (2026-08-23)
+
+Erasing already
 worked two ways, and neither was a tool. Right-click (`e.buttons & 2` in
 `actAt`) is momentary and **does not exist on a touchscreen** — a finger has no
 right button, no middle button and no wheel, which is the same gap that made Pan
@@ -3997,7 +4347,9 @@ of centred row for **20px** of clearance. The swatches are still 24px targets;
 only the air between them shrank. `skin-erase.spec.ts` asserts the gap rather
 than trusting it, which is what stops a sixth tool sliding underneath.
 
-**Zoom is a window now, not a bigger canvas (2026-08-23).** Zoom +/− grew the
+### Zoom is a window now, not a bigger canvas (2026-08-23)
+
+Zoom +/− grew the
 canvas itself, clamped to `[200, 320]` px in 40px steps. That is a **1.6x range
 in three clicks**, and on the 48-cell character grid it spans 4.2 to 6.7 screen
 pixels per cell — neither end enough to place one pixel with confidence, which
@@ -4048,8 +4400,9 @@ wrong for a reason that took a bug report to see (below). Grid lines stop drawin
 The left column gained Fit and a `x2` readout — without it, three clicks of
 Zoom + and three of Zoom - are indistinguishable from having done nothing.
 
-**Reuse existing art: Copy as a base, and trace over a reference
-(2026-08-23).** Two ways to start from art that already exists instead of an
+### Reuse existing art: Copy as a base, and trace over a reference (2026-08-23)
+
+Two ways to start from art that already exists instead of an
 empty grid.
 
 **Copy** sits beside Edit on every browse row. It opens the same decoded
@@ -4092,7 +4445,9 @@ again. And the first version listed every skinnable brush: the screenshot
 showed ~30 entries running off the bottom of the canvas with their labels
 colliding, so the list became the animated cast plus whatever you're editing.
 
-**The drawing got the middle of the screen (2026-09-05).** Asked for from use:
+### The drawing got the middle of the screen (2026-09-05)
+
+Asked for from use:
 *"we need more room in the middle to do the drawings, maybe have a short one line
 at the footer for save undo etc and everything else on the sides."*
 
@@ -4134,7 +4489,9 @@ arguing for a layout that is gone, and `skin-erase.spec.ts`'s guard on that
 clearance became a canvas-mode `assertLayoutSound` — the general form of the same
 check, and the only one this mode had.
 
-**The background didn't match the pixels you painted (2026-09-05).** Reported
+### The background didn't match the pixels you painted (2026-09-05)
+
+Reported
 from use, in those words. The checkerboard was a fixed 16px tile — two 8px
 squares — at every zoom, while a cell at fit zoom on the 32 canvas is
 **12.19px**. The reasoning above ("it answers *is this transparent*, a question
@@ -4171,8 +4528,9 @@ fit zoom. Measuring first would have cost one browser run. `skin-grid-alignment.
 keeps a 0.5px guard on that drift anyway, alongside the test that actually
 failed.
 
-**Multi-frame sprite editor: a paintable character and animated enemies
-(2026-08-22).** The Skin Creator can now paint *several* frames per skin —
+### Multi-frame sprite editor: a paintable character and animated enemies (2026-08-22)
+
+The Skin Creator can now paint *several* frames per skin —
 five poses for the player character, a loop of up to four for each enemy —
 which is the half of the original sprite-editor request that the 2026-08-20
 character-situations work deliberately left for later.
@@ -4230,7 +4588,9 @@ canvas. And the frame list sits in the empty band *beside* the canvas, not
 above it: tried there first, and it rendered straight through the colour
 swatches, which the screenshot caught immediately.
 
-**Basket teleports could bounce you back and forth (2026-08-22).** A
+### Basket teleports could bounce you back and forth (2026-08-22)
+
+A
 teleport lands the player standing exactly on the destination area's own
 basket, and the only thing stopping that pad firing again was
 `TELEPORT_COOLDOWN_MS` — 500ms. That guard turned out to be measured on a
@@ -4277,7 +4637,9 @@ spec. The player was never told to walk. Worth the reminder that a scripted
 edit can quietly delete a line, and that a test failing for the reason you
 assume is itself an assumption.
 
-**Skin Creator (2026-08-17).** A standalone pixel-art painter, reachable
+### Skin Creator (2026-08-17)
+
+A standalone pixel-art painter, reachable
 from a chip in the Menu's footer row (a bare text link until the
 2026-08-21 home-page pass) rather than a fifth
 card or a mode nested inside the level Editor — it's a much lighter
@@ -4371,7 +4733,9 @@ again → Back round trip, confirming exactly one browse-list entry (an
 overwrite, not a duplicate) after the second save; and Delete correctly
 returning the browse list to its empty state.
 
-**Skin Creator tools (2026-08-17).** A follow-up pass adding six things a
+### Skin Creator tools (2026-08-17)
+
+A follow-up pass adding six things a
 review of the v1 canvas flagged as missing, all in `PixelCanvasOverlay`
 (the data/interaction layer) and `SkinEditorScene` (the buttons wiring
 each into the UI):
@@ -4438,7 +4802,8 @@ each into the UI):
   predictable than the two sides disagreeing about where their own fill
   boundary is if the drawing isn't already symmetric.
 
-**A real bug found in testing: picking a color silently cancelled Fill.**
+### A real bug found in testing: picking a color silently cancelled Fill
+
 The swatch click handler auto-reverted the active tool to Paint on every
 color pick — copied from the eyedropper's own "resume painting after a
 pick" convenience without noticing the two cases aren't the same. For
@@ -4469,7 +4834,9 @@ Grid overlay on over existing artwork, and zooming in twice — canvas
 visibly larger, grid still aligned, painted design and undo history both
 completely intact.
 
-**Hand tool (2026-08-17).** A new header toggle, right of Eraser, for
+### Hand tool (2026-08-17)
+
+A new header toggle, right of Eraser, for
 moving an already-placed entity without erasing and re-placing it — press
 down on an occupied tile to grab whatever's there, drag (the marker
 sprite follows the raw pointer position, not snapped to a tile, for a
@@ -4558,7 +4925,9 @@ Ctrl+Shift+Z correctly reverting/reapplying the move, and dragging it
 onto a tile a second block already occupied (blocked, snapped back to
 its pre-drag tile, no duplication).
 
-**Save-state readout moved to the footer (2026-08-17).** Freeing up room
+### Save-state readout moved to the footer (2026-08-17)
+
+Freeing up room
 in the header for the Hand tool button (see above) was the immediate
 reason, but the footer is also just a better fit for a persistent,
 read-only stat — its own doc-comment now spells out why: unlike the other
@@ -4572,7 +4941,9 @@ unaffected — that scene has no footer band to move it into, so it stays
 in its original header-style corner (top-right, below its own Save World
 button).
 
-**Text legibility pass (2026-08-17).** A step-by-step audit of why the
+### Text legibility pass (2026-08-17)
+
+A step-by-step audit of why the
 UI's text felt hard to read turned up three compounding causes, only one
 of which was about font size:
 
