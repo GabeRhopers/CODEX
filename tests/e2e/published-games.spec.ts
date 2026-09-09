@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundleProblems, gameSlug, type GameBundle } from "../../src/game/gameBundle";
+import { GRID_COLS, GRID_ROWS } from "../../src/config/gameConfig";
 import { EMPTY_TILE } from "../../src/level/LevelSchema";
 
 /**
@@ -72,14 +73,35 @@ test("every published game is complete and reachable at its own link", () => {
         ).toBe(true);
       }
 
-      // **This is the one that would have caught the first demo.** All three of
-      // its levels were 20 tiles — 640px against a 1050px canvas — so the whole
-      // level was visible from the spawn point, including the void past its
-      // right-hand edge, and nothing scrolled. They were also a single row of
-      // ground with nothing under it, which no file check can call wrong on its
-      // own (a floating platform is a legitimate thing to build); the width is
-      // the proxy that fails on a level nobody walked through before shipping.
-      expect(level.width, `${where} is only ${level.width} tiles — it fits on one screen`).toBeGreaterThan(33);
+      // **This assertion used to say the opposite, and the opposite was wrong.**
+      //
+      // It demanded `width > 33`, on the reasoning that a 20-tile level "fits on
+      // one screen" and therefore showed the void past its own right-hand edge.
+      // The first half was right and the conclusion was backwards: this game has
+      // no scrolling camera. `PlayScene` never calls `startFollow` and never
+      // moves `scrollX` — see ParallaxBackground's docstring, which says in as
+      // many words that camera-follow is deferred, and HandheldShell's, which
+      // depends on it ("every level the app can produce is exactly GRID_COLS
+      // wide"). The console's screen *is* the viewport, permanently.
+      //
+      // So the old guard required exactly the shape the renderer cannot show,
+      // and the hand-written demo obeyed it: three levels 40, 44 and 48 tiles
+      // wide with their goals at tiles 37, 40 and 42. Walking the game on
+      // 2026-09-09 found the player invisible from tile 20 onward — teleported
+      // to the goal he triggered "Level Complete!" without the view ever moving.
+      // The one link this project has shipped was played blind for two thirds of
+      // every level, and no test said a word, because the test is what asked
+      // for it.
+      //
+      // What is actually true: a published level must fit the screen it is
+      // rendered on. Nothing here can check "somebody walked this" — the ground
+      // under the spawn and the goal above is as close as a file gets.
+      expect(level.width, `${where} is ${level.width} tiles — wider than the screen ever shows`).toBeLessThanOrEqual(
+        GRID_COLS,
+      );
+      expect(level.height, `${where} is ${level.height} tiles tall — taller than the screen ever shows`).toBeLessThanOrEqual(
+        GRID_ROWS,
+      );
     }
   }
 });

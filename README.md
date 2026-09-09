@@ -123,6 +123,7 @@ appear under more than one heading if it belongs to both.
 - [Publishing a game](#publishing-a-game)
 - [Publishing (2026-09-02)](#publishing-2026-09-02)
 - [The demo finally uses the tool, and the console stopped leaking](#the-demo-finally-uses-the-tool-and-the-console-stopped-leaking-2026-09-09)
+- [Somebody made a game with the tool, and two of the findings were bad](#somebody-made-a-game-with-the-tool-and-two-of-the-findings-were-bad-2026-09-09)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5106,6 +5107,107 @@ background-*library* id — an uploaded image travelling in the bundle — so
 pictures mean embedding image data, which is a different job. The picture-less
 panels centre their words and read fine, which is what that treatment was built
 for.
+
+### Somebody made a game with the tool, and two of the findings were bad (2026-09-09)
+
+Every spec in this suite proves one screen, and several seed their starting
+state through the debug hook precisely so they can be about one thing. That is
+the right call for each of them, and it left one question unasked: can somebody
+sit down in front of this and come out the other end with a game? Nobody had
+ever done it. The one game that shipped was written by hand as JSON.
+
+`tests/e2e/author-a-game.spec.ts` is a scripted user who does it — invent a
+thing, draw it, paint two levels, chain a world, assemble a game with an
+opening, publish — through the real screens with the same helpers every other
+spec uses. It counts gestures, because how much of a tool is spent on what is
+the thing you can no longer see once you know it.
+
+**It worked, first run.** 125 gestures, 84 seconds:
+
+| Stage | Gestures | Share |
+|---|---|---|
+| Thing Maker | 7 | 6% |
+| Skin Creator | 27 | 22% |
+| Level 1 | 35 | 28% |
+| Level 2 | 34 | 27% |
+| World Maker | 8 | 6% |
+| Game Maker | 5 | 4% |
+| Cut scene | 7 | 6% |
+| Publish | 2 | 2% |
+
+Nothing needed a workaround, and the shape of that table is reassuring rather
+than surprising: more than half of it is the two screens where the actual
+*making* happens, and the four screens of ceremony between a finished level and
+a link cost 22 gestures between them. The game it made ships as
+`grumble-bug-goes-walking`.
+
+**A thing you draw a sprite for does not wear it.** The Thing Maker's preview
+says "until you draw it" and "Save & draw sprite →" hands you straight to the
+canvas. Paint a green bug, save, place it, play — and a white ghost pillow walks
+across the meadow. The art saves, it travels in the published file, it is simply
+never what renders: a `custom:` brush's library default stays `null`, so
+`resolveSkinId` falls through to the built-in it copies.
+
+Nothing about that is discoverable, and it is the single failure that makes the
+whole invent-a-thing feature look broken. Fixed in `skinStorage.adoptsFirstSkin`
+by narrowing the 2026-08-23 rule rather than breaking it: a brush takes its
+*first* art as its default when it is a `custom:` brush, has no items yet, and
+has no default set. All three conditions are load-bearing — the first keeps
+every built-in's look where it is, which is what that rule exists for; the
+second makes a second sprite an addition to a library rather than a silent
+replacement; the third never undoes an explicit "Set as default". Under them
+there is no level anywhere whose appearance this can change, other than by
+finally showing the art that was drawn for it. See "A level owns its skins".
+
+**The shipped link was broken, and a test was the reason.** This game has no
+scrolling camera. `PlayScene` never calls `startFollow` and `scrollX` never
+leaves 0 — `ParallaxBackground` says so in its own docstring ("real
+camera-follow scrolling is still deferred"), and `HandheldShell` depends on it
+("every level the app can produce is exactly `GRID_COLS` wide"). The console's
+screen *is* the viewport, permanently, and 20 columns is both the widest level
+the editor can make and the widest the game can show. Those two facts agree.
+
+The odd one out was `published-games.spec.ts`, which asserted `width > 33`. Its
+reasoning was that a 20-tile level "fits on one screen" and shows the void past
+its own edge — true of a game that scrolls, backwards for this one. So the guard
+required exactly the shape the renderer cannot display, and the hand-written
+demo obeyed it: three levels 40, 44 and 48 tiles wide, goals at tiles 37, 40 and
+42. Walking it found the player invisible from tile 20 on; teleported to the
+goal he triggered "Level Complete!" without the view ever moving. **The one link
+this project has shipped was played blind for two thirds of every level**, and
+no test said a word, because the test is what asked for it.
+
+The three demo levels are recomposed at 20x12 — same story, same sheep, same
+key-and-chest in the Sheep Pen, same invented Grumpy Pillow — and the guard now
+asserts the opposite, that a published level fits the screen it is rendered on.
+Every staircase still steps 8 → 6 → 4, which is the reachability rule the
+originals obeyed and nothing wrote down: a jump clears two rows at
+`GRAVITY_Y = 1100` / `JUMP_VELOCITY = -450`, so those are the only rows a
+staircase can use.
+
+Camera-follow is still the right feature and is still deferred. It is smaller
+than it looks — the shell, the HUD and the touch controls already draw at
+`setScrollFactor(0)`, so what is missing is a bounded `scrollX` clamped to
+`SCREEN_RECT` rather than to the camera's own width. It is not smaller than the
+decision to reopen a closed version, which is why it is written here instead.
+
+**`playthrough.spec.ts` had never seen level two.** It returned to the map with
+`scene.start("WorldMap", { worldId: undefined })`, which draws "That world could
+not be loaded" on top of the still-running level, so the node lookup found
+nothing and the loop broke. Every run of it since it was written screenshotted
+level one and stopped. It now goes back the way the game offers — Esc — plays
+with the jump button rather than only holding Right (the player is about a tile
+and a half tall, so a platform on the row above the ground is a wall at head
+height, not a ceiling), reports per level whether the goal was actually reached,
+and runs once per file in `public/games/` instead of naming one slug.
+
+`demoBundle.test.ts` reads that directory too, for the same reason: it checked
+the Grampa file by name, and the moment a second game was published it would
+have been covered by nothing while still looking green.
+
+**What a script cannot tell you.** It reports that a step failed, that a control
+could not be reached, that a stage cost sixty gestures. It cannot report that a
+screen was confusing. That half still needs a person.
 
 
 ## Project layout

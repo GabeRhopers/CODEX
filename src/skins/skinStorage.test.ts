@@ -289,3 +289,49 @@ describe("cache invalidation on write", () => {
     expect(after["enemy-ghost"].activeId).toBe("skin-1");
   });
 });
+
+describe("an invented thing's first sprite", () => {
+  const THING = "custom:0f0f0f0f-1111-2222-3333-444444444444";
+  const pixels = { paletteId: "pico8" };
+
+  it("becomes what the thing looks like, without a second step", async () => {
+    // The Thing Maker's own preview says "until you draw it", and
+    // "Save & draw sprite →" hands you straight to the canvas. Drawing it and
+    // then finding the game still showing the ghost it was based on is the one
+    // failure that makes the whole invent-a-thing feature look broken — and it
+    // is silent: the art is saved, it travels in the published file, it is
+    // simply never the thing that renders.
+    await savePixelSkin(THING, undefined, "data:image/png;base64,BUG", pixels, "Mike", undefined, "Grumble Bug");
+
+    const entry = lastWrittenFile()[THING];
+    expect(entry.items).toHaveLength(1);
+    expect(entry.activeId).toBe(entry.items[0].id);
+  });
+
+  it("is not displaced by the second sprite drawn for the same thing", async () => {
+    // The narrow rule is "a brush with no art takes the first art drawn for
+    // it", not "the newest wins". Drawing an alternative must still be an
+    // addition to the library, exactly as it is for every built-in brush.
+    await savePixelSkin(THING, undefined, "data:image/png;base64,ONE", pixels, "Mike", undefined, "First");
+    const first = lastWrittenFile()[THING].items[0].id;
+
+    await savePixelSkin(THING, undefined, "data:image/png;base64,TWO", pixels, "Mike", undefined, "Second");
+    const entry = lastWrittenFile()[THING];
+    expect(entry.items).toHaveLength(2);
+    expect(entry.activeId).toBe(first);
+  });
+
+  it("leaves a built-in brush's default exactly where it was", async () => {
+    // The rule this narrows. Painting a Ghost skin must not restyle every
+    // level that has ever placed a ghost — that is the 2026-08-23 bug, and it
+    // stays fixed.
+    await savePixelSkin("enemy-ghost", undefined, "data:image/png;base64,GH", pixels, "Mike");
+    expect(lastWrittenFile()["enemy-ghost"].activeId).toBe("skin-1");
+  });
+
+  it("applies to an uploaded sprite too, since it is the same decision", async () => {
+    await addCustomSkin(THING, "data:image/png;base64,BUG", "Mike", "Grumble Bug");
+    const entry = lastWrittenFile()[THING];
+    expect(entry.activeId).toBe(entry.items[0].id);
+  });
+});

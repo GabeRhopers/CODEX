@@ -2,6 +2,7 @@ import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFile
 import { getAccessToken } from "../drive/googleAuth";
 import { CustomSkinsFile, PixelSkinData, SkinAsset, SkinLibraryEntry } from "./CustomSkins";
 import { activeBundle } from "../game/contentSource";
+import { isCustomEntityId } from "../entities/customEntity";
 
 const SKINS_FILE_NAME = "skins.json";
 
@@ -169,6 +170,38 @@ function entryFor(skins: CustomSkinsFile, brushId: string): SkinLibraryEntry {
 }
 
 /**
+ * Whether a brush's **first** piece of art should become its default with
+ * nothing asked.
+ *
+ * The rule this narrows is the 2026-08-23 one directly below: adding art to a
+ * library is not a decision about how anything should look, because every level
+ * that already places a Ghost is wearing something, and a new skin arriving
+ * must not restyle them.
+ *
+ * An invented thing has no such history. Its brush was created minutes ago, it
+ * has never had art of its own, and what it currently renders as is the
+ * built-in it copies — which the Thing Maker's own preview labels *"until you
+ * draw it"*. So the app promises, in as many words, that drawing a sprite will
+ * change how the thing looks, and then a `custom:` brush whose default is null
+ * quietly keeps showing the borrowed ghost. Nothing about that is discoverable:
+ * the art saves, it travels in the published file, it is simply never what
+ * renders. Walking the whole creation path on 2026-09-09 is what surfaced it —
+ * a hand-drawn green bug that played as a white pillow.
+ *
+ * Three conditions, all necessary:
+ *   - a `custom:` brush, so no built-in's look can move;
+ *   - **no items yet**, so this really is the first art and a second sprite is
+ *     an addition to a library rather than a silent replacement;
+ *   - no default already set, so an explicit "Set as default" is never undone.
+ *
+ * With those, there is no level anywhere that this can change the appearance
+ * of, other than by finally showing the art that was drawn for it.
+ */
+function adoptsFirstSkin(brushId: string, entry: SkinLibraryEntry): boolean {
+  return isCustomEntityId(brushId) && entry.items.length === 0 && !entry.activeId;
+}
+
+/**
  * Adds a newly-uploaded skin to the brush's library and **leaves the default
  * alone** — the returned id is how the caller applies it where it wants (the
  * editor puts it on the level being edited; see LevelData.skins).
@@ -176,8 +209,9 @@ function entryFor(skins: CustomSkinsFile, brushId: string): SkinLibraryEntry {
  * It used to set `activeId` here, so an upload became the look of that brush in
  * every level the moment it finished. That is the behaviour the 2026-08-23 pass
  * removed: adding art to a library is not a decision about how anything should
- * look, and there was no way to add a skin without making that decision. Only
- * setActiveSkin moves a default now.
+ * look, and there was no way to add a skin without making that decision.
+ * `adoptsFirstSkin` above is the one exception, and setActiveSkin is still the
+ * only thing that can move a default that already exists.
  */
 export async function addCustomSkin(
   brushId: string,
@@ -192,7 +226,7 @@ export async function addCustomSkin(
   const entry = entryFor(skins, brushId);
   const id = crypto.randomUUID();
   const asset: SkinAsset = { id, name, imageData, uploadedBy, updatedAt: new Date().toISOString() };
-  skins[brushId] = { ...entry, items: [...entry.items, asset] };
+  skins[brushId] = { ...entry, activeId: adoptsFirstSkin(brushId, entry) ? id : entry.activeId, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;
 }
@@ -308,7 +342,7 @@ export async function savePixelSkin(
 
   const id = crypto.randomUUID();
   const asset: SkinAsset = { id, name, imageData, uploadedBy, updatedAt: now, pixelData: persisted, frames: persistedFrames };
-  skins[brushId] = { ...entry, items: [...entry.items, asset] };
+  skins[brushId] = { ...entry, activeId: adoptsFirstSkin(brushId, entry) ? id : entry.activeId, items: [...entry.items, asset] };
   await writeCustomSkins(skins);
   return id;
 }
