@@ -55,6 +55,25 @@ const DETAIL_COLOR = 0x4a4e68;
 
 /** Below StaticBackground's -100, so the level paints over the middle. */
 const BODY_DEPTH = -200;
+/**
+ * The shell repainted *over* the level, everywhere except the screen.
+ *
+ * `drawBody` sits under everything, which is right for the screen itself — the
+ * level is supposed to paint over it. It was wrong for the two side bands. A
+ * level is up to 60 tiles wide and its tilemap and sprites render across the
+ * whole canvas, not just `SCREEN_RECT`, so anything past the screen's right
+ * edge spilled out over the shell and under the face buttons. It looked correct
+ * on the left only by accident: at a level's start there is nothing to the left
+ * of column 0 to spill.
+ *
+ * Masking here rather than clipping the camera. Giving the main camera a
+ * viewport of `SCREEN_RECT` is the architecturally right answer, but the HUD,
+ * the volume slider and these controls all draw into the same camera at
+ * scroll-factor 0 and would be clipped and repositioned with it — a second
+ * camera and a re-check of every fixed element, which is a bigger change than
+ * this screen is worth today.
+ */
+const MASK_DEPTH = 10;
 /** Above the level, below the HUD (30) and controls (40). */
 const TRIM_DEPTH = 20;
 
@@ -173,6 +192,44 @@ export class HandheldShell {
     // painted onto it.
     g.fillStyle(SURROUND_COLOR, 1);
     g.fillRoundedRect(SCREEN_RECT.x - 32, SCREEN_RECT.y - 28, SCREEN_RECT.width + 64, SCREEN_RECT.height + 56, 18);
+
+    this.drawScreenMask(scene);
+  }
+
+  /**
+   * The same silhouette again, above the level, with the screen left out — so
+   * the level is visually clipped to the glass. See MASK_DEPTH for why this is
+   * a repaint rather than a camera viewport.
+   *
+   * Four bands around `SCREEN_RECT` in body colour, then the recessed surround
+   * redrawn as a ring inside them, so the shell looks exactly as it did; the
+   * only difference is what can now paint over it.
+   */
+  private drawScreenMask(scene: Phaser.Scene): void {
+    const m = scene.add.graphics().setScrollFactor(0).setDepth(MASK_DEPTH);
+    const { x, y, width, height } = SCREEN_RECT;
+    const sx = x - 32;
+    const sy = y - 28;
+    const sw = width + 64;
+    const sh = height + 56;
+
+    // Everything outside the surround: the shell body, redrawn over the spill.
+    m.fillStyle(BODY_COLOR, 1);
+    m.fillRect(0, 0, sx, GAME_HEIGHT);
+    m.fillRect(sx + sw, 0, GAME_WIDTH - (sx + sw), GAME_HEIGHT);
+    m.fillRect(sx, 0, sw, sy);
+    m.fillRect(sx, sy + sh, sw, GAME_HEIGHT - (sy + sh));
+    // The rounded outline, so the corners stay round rather than being squared
+    // off by the rectangles above.
+    m.lineStyle(2, BODY_EDGE_COLOR, 1);
+    m.strokeRoundedRect(10, 8, GAME_WIDTH - 20, GAME_HEIGHT - 20, 56);
+
+    // The recessed surround, as a ring between it and the glass.
+    m.fillStyle(SURROUND_COLOR, 1);
+    m.fillRect(sx, sy, x - sx, sh);
+    m.fillRect(x + width, sy, sx + sw - (x + width), sh);
+    m.fillRect(x, sy, width, y - sy);
+    m.fillRect(x, y + height, width, sy + sh - (y + height));
   }
 
   /** The details that sell it: the bezel right around the glass, a power LED, a

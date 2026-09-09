@@ -122,6 +122,7 @@ appear under more than one heading if it belongs to both.
 
 - [Publishing a game](#publishing-a-game)
 - [Publishing (2026-09-02)](#publishing-2026-09-02)
+- [The demo finally uses the tool, and the console stopped leaking](#the-demo-finally-uses-the-tool-and-the-console-stopped-leaking-2026-09-09)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5048,6 +5049,64 @@ the same class of element that silently regressed before) and then
 screenshots a tight crop of that exact text afterward, confirming smooth,
 anti-aliased edges rather than the blocky look a reverted-to-NEAREST
 texture would show.
+
+### The demo finally uses the tool, and the console stopped leaking (2026-09-09)
+
+Played the published game from its own link, start to finish, for the first
+time since a week of changes. Two content gaps and one real bug.
+
+**Not one level or the world had a background set.** All four fell back to the
+default while four painted scenes sat unused in the build, which is why the
+World Map read as a murky rectangle even after its scrim was lightened on
+2026-09-05 — there was no art behind it to show. All three levels and the world
+now use `sunny-valley`, and the map went from a flat dark band to a pixel-art
+valley with sheep grazing in it, which for a game called "Grampa and the Lost
+Sheep" is luckier than it deserves to be.
+
+**`meadow.png` is the wrong shape, and nothing had noticed.** It is 1120x1120
+where the other three static backgrounds are 1120x625 — `optimise-static-
+backgrounds.py` says in its own docstring that it right-sized *three* images,
+and this was the fourth. Cover-fit into a 1050x468 canvas, a square source shows
+less than half its height at nearly full magnification: one tree filling a
+quarter of the screen, the sun a yellow blob. It was invisible because nothing
+had ever selected meadow as a background. Not fixed here — it is an art job, not
+a code one, and the demo simply uses the scenes that are the right shape. Anyone
+picking Meadow in the editor still gets the zoom.
+
+**The console shell leaked the level out of its screen.** `HandheldShell`
+documents its body as sitting *under* the level, on the assumption the level
+only ever paints inside `SCREEN_RECT`. It does not: a level is up to 60 tiles
+wide and its tilemap and sprites render across the whole canvas, so everything
+past the screen's right edge spilled over the shell and under the face buttons.
+It looked right on the left purely by accident — at a level's start there is
+nothing to the left of column 0 to spill.
+
+Fixed by repainting the silhouette *above* the level with the screen left out
+(`MASK_DEPTH`, between the level and the trim), rather than by giving the camera
+a viewport of `SCREEN_RECT`. The viewport is the architecturally right answer and
+was deliberately not taken: the HUD, the volume slider and the on-screen controls
+all draw into the same camera at scroll-factor 0, so clipping it means a second
+camera and a re-check of every fixed element.
+
+**One invented thing now ships.** A "Grumpy Pillow" — an enemy based on the
+ghost, so it wears the demo's already-painted ghost skin and needed no new art,
+at half speed so it plays differently, with a `thud` of its own. Until now the
+sound feature was invisible to anyone who opened the link. The seed is fixed in
+the file, because the seed *is* the sound: rolling a fresh one would mean the
+shipped game made a different noise every time it was rebuilt.
+
+`src/game/demoBundle.test.ts` now checks the shipped file on every run — that
+every `custom:` reference resolves, every background id is real, and the game
+and worlds parse. It is content, hand-written, and nothing was checking it; a
+dangling reference is silent in the editor and a broken screen for the one
+audience that cannot report a stack trace.
+
+**Still open:** cut-scene panels have no pictures. A panel's `imageId` is a
+background-*library* id — an uploaded image travelling in the bundle — so
+pictures mean embedding image data, which is a different job. The picture-less
+panels centre their words and read fine, which is what that treatment was built
+for.
+
 
 ## Project layout
 
