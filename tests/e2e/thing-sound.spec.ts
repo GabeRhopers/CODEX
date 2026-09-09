@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, selectPaletteCategory, startEditorWithLevel, tileCenter } from "./support/coords";
 import { customDef, seedCustomEntities } from "./support/customEntities";
 import { makeArea, makeLevel } from "./support/levels";
+import { GRID_ORIGIN_X, TILE_SIZE } from "../../src/config/gameConfig";
 
 /**
  * An invented thing makes its own noise, instead of the one it borrows.
@@ -58,19 +59,39 @@ const levelWithThing = () =>
     ]),
   );
 
+/**
+ * Holds Right until the player has walked past tile `tileX`.
+ *
+ * The threshold is in **scene** pixels, which is what `player.x` is: the grid
+ * starts at `GRID_ORIGIN_X`, not at zero. This compared against a bare
+ * `tileX * 32` until 2026-09-09, and 190 of those pixels are the editor's left
+ * panel — so for a spawn at tile 1 the condition was already true before the
+ * player had moved at all, `expect.poll` returned on its first check, and
+ * ArrowRight was released a few hundred milliseconds after being pressed. The
+ * item still got collected most of the time, on nothing but the distance that
+ * brief press happened to cover, and the whole suite running at once was enough
+ * to make it not: one failure in a 22-minute run, passing every time the spec
+ * was run on its own, which is the signature of a test that was never actually
+ * waiting for what it said it was.
+ */
 async function walkInto(page: Page, tileX: number): Promise<void> {
   await page.keyboard.down("ArrowRight");
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const scene = window.__debugGame!.scene.getScene("Play") as unknown as { player?: { x: number } };
-          return scene.player?.x ?? 0;
-        }),
-      { timeout: 15_000 },
-    )
-    .toBeGreaterThan(tileX * 32);
-  await page.keyboard.up("ArrowRight");
+  try {
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const scene = window.__debugGame!.scene.getScene("Play") as unknown as { player?: { x: number } };
+            return scene.player?.x ?? 0;
+          }),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(GRID_ORIGIN_X + tileX * TILE_SIZE);
+  } finally {
+    // In a finally so a level the player cannot cross does not leave the key
+    // held down for whatever runs next.
+    await page.keyboard.up("ArrowRight");
+  }
 }
 
 test("an invented item's own sound replaces the one it borrows", async ({ page }) => {
