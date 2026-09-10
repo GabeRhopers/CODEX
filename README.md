@@ -124,6 +124,7 @@ appear under more than one heading if it belongs to both.
 - [Publishing (2026-09-02)](#publishing-2026-09-02)
 - [The demo finally uses the tool, and the console stopped leaking](#the-demo-finally-uses-the-tool-and-the-console-stopped-leaking-2026-09-09)
 - [Somebody made a game with the tool, and two of the findings were bad](#somebody-made-a-game-with-the-tool-and-two-of-the-findings-were-bad-2026-09-09)
+- [The default background was the one nobody had looked at](#the-default-background-was-the-one-nobody-had-looked-at-2026-09-10)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5072,7 +5073,9 @@ less than half its height at nearly full magnification: one tree filling a
 quarter of the screen, the sun a yellow blob. It was invisible because nothing
 had ever selected meadow as a background. Not fixed here — it is an art job, not
 a code one, and the demo simply uses the scenes that are the right shape. Anyone
-picking Meadow in the editor still gets the zoom.
+picking Meadow in the editor still gets the zoom. *(Fixed on 2026-09-10 — see
+"The default background was the one nobody had looked at". Calling it an art job
+was the wrong call: the art is six colours and a handful of shapes.)*
 
 **The console shell leaked the level out of its screen.** `HandheldShell`
 documents its body as sitting *under* the level, on the assumption the level
@@ -5208,6 +5211,45 @@ have been covered by nothing while still looking green.
 **What a script cannot tell you.** It reports that a step failed, that a control
 could not be reached, that a stage cost sixty gestures. It cannot report that a
 screen was confusing. That half still needs a person.
+
+### The default background was the one nobody had looked at (2026-09-10)
+
+`meadow.png` was 1120x1120 where the other three static backgrounds are
+1120x625. `StaticBackground` cover-fits these into the console's 640x384 screen,
+so the good ones render at 688x384 — the whole picture, 48px trimmed off the
+sides — and the square one rendered at 640x640 with **40% of its height cropped
+away**. What was left was a middle band of two enormous trees whose trunks ran
+behind the level's ground strip and reappeared below it.
+
+Meadow is `DEFAULT_STATIC_BACKGROUND` and the first name in the picker, so this
+was every first level's backdrop. It survived because *nothing had ever selected
+it*: the demo game picks `sunny-valley`, and the one image everybody's first
+level wears was the one nobody had opened.
+
+**Redrawn, not cropped.** The day before, this was written off as "an art job,
+not a code one". Opening the file is what changed that — it is six flat colours
+and a handful of shapes, not a painting. Cropping cannot work: the old
+composition ran clouds at rows ~150-290, sun ~310-530, canopies ~430-745, trunks
+to ~870 and grass ~840-1120, so about 970 of its 1120 rows matter against a
+625-row target, and no band keeps both the sun and the grass. Squashing turns
+the sun into an oval and flattens the canopies, which on hard-edged pixel art
+reads as a bug rather than a style.
+
+`scripts/generate-meadow-background.py` draws the same scene at 1120x625 in the
+palette read off the old file: sky, sun, four clouds instead of two (this frame
+is nearly twice as wide as it is tall, and two left the middle empty), five
+trees along a rolling two-tone ridge. Composed at 224x125 and point-scaled by 5
+rather than drawn at full size — circles drawn at 1120x625 have smooth hairline
+edges that look nothing like the rest of this game. 20KB to 4KB, since six flat
+colours compress hard.
+
+**The guard is the cheap part.** `src/level/staticBackgrounds.test.ts` reads the
+four PNGs' IHDR chunks and asserts they are all one size, and that each is
+within a third of the screen's aspect ratio. A file test rather than a browser
+one, because what was wrong was the asset and not any code that reads it. Both
+assertions were confirmed against the old image before it was replaced: "these
+are not all one size — meadow: 1120x1120, sunny-valley: 1120x625, …" and
+"meadow.png is 1120x1120 — too tall for the screen it renders in".
 
 
 ## Project layout
