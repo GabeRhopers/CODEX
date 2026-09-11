@@ -125,6 +125,7 @@ appear under more than one heading if it belongs to both.
 - [The demo finally uses the tool, and the console stopped leaking](#the-demo-finally-uses-the-tool-and-the-console-stopped-leaking-2026-09-09)
 - [Somebody made a game with the tool, and two of the findings were bad](#somebody-made-a-game-with-the-tool-and-two-of-the-findings-were-bad-2026-09-09)
 - [The default background was the one nobody had looked at](#the-default-background-was-the-one-nobody-had-looked-at-2026-09-10)
+- [My Levels and My Worlds were the same screen twice](#my-levels-and-my-worlds-were-the-same-screen-twice-2026-09-11)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -3467,9 +3468,11 @@ cell, so the spec waits for the snap rather than racing it.
 ~~Still true elsewhere and deliberately not widened into: `LevelBrowserScene` and
 `WorldBrowserScene` have the same row-overflow ceiling and no scrolling either.~~
 **No longer true** — both scenes page through `ui/pager.ts` now, exactly as the
-World Maker's own list does. The note outlived its fix and was found on
-2026-09-11 while auditing what was actually still open; a design log is only
-worth reading if the open items in it are really open.
+World Maker's own list does, and as of 2026-09-11 they are not two scenes with a
+list in them but one list two scenes configure (see "My Levels and My Worlds
+were the same screen twice"). The note outlived its fix and was found while
+auditing what was actually still open; a design log is only worth reading if the
+open items in it are really open.
 
 ### Music upload (2026-08-28)
 
@@ -5254,6 +5257,51 @@ one, because what was wrong was the asset and not any code that reads it. Both
 assertions were confirmed against the old image before it was replaced: "these
 are not all one size — meadow: 1120x1120, sunny-valley: 1120x625, …" and
 "meadow.png is 1120x1120 — too tall for the screen it renders in".
+
+### My Levels and My Worlds were the same screen twice (2026-09-11)
+
+About 200 of their ~320 lines were identical, comments included — and
+`WorldBrowserScene` said so rather than repeating the reasoning: *"Same
+reasoning as LevelBrowserScene's — see that file"*, *"See LevelBrowserScene's
+own field"*. `textButton.ts` had already absorbed one layer of that and names
+these two scenes while doing it. `ui/savedList.ts` is the layer above: a paged
+list of saved things with per-row buttons and a two-tap Delete.
+
+**The line count is not the win, and it would be dishonest to claim it is.** 321
+lines became 289 — the two scenes dropped to 43 and 52 lines of configuration,
+and the new shared module is 194, about half of it this reasoning. What was
+actually bought is that the row layout, the paging, the cross-row disarm and the
+delete-error handling exist once, and two files no longer have to be kept in step
+by hand, which they visibly were.
+
+The test of whether an abstraction like this earns its keep is whether anything
+that differed needed a **special case**, and nothing did. The one real divergence
+— a world has a **Play** button and a level does not — is a list of row actions
+rather than an `extraButton` flag, so neither screen is the default and the other
+the exception. Button positions derive right-to-left from Delete at the
+coordinates both screens already used, so nothing moved on screen.
+
+**Composition, not a base class**, matching `drawScreenHeader` and
+`makePagerControls`: a scene calls it from `create()` and the state a list needs
+lives in that closure, created fresh per `create()` and dying with the scene's
+display list.
+
+**Seven specs failed on the first attempt, and the fix was worth more than the
+refactor.** Dissolving the scene's fields into a closure took `listContainer` and
+`statusText` with them, and `drive-failure`, `phone-landscape` and `templates`
+all read those. Restoring them is not a concession to the tests: *"the rows live
+inside listContainer, so a top-level scan finds nothing and silently reports 'not
+armed'"* is `drive-failure.spec.ts`'s own note, and "what is in the list" really
+is a different question from "what is on the screen". So `drawSavedList` returns
+them and each scene keeps them.
+
+TypeScript then refused to compile them as `private` — declared, never read —
+which was a fair accusation. Nothing in either class reads them; they exist so
+the specs can look. They are public now, and say so. `private` would have been
+the more flattering label and the less true one.
+
+A typecheck and 559 unit tests passed throughout all of that. Only the browser
+found it.
 
 
 ## Project layout

@@ -1,159 +1,56 @@
 import Phaser from "phaser";
-import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { LevelSummary } from "../level/LevelSchema";
 import { getLevelStorage } from "../persistence/storage";
-import { StorageAdapter } from "../persistence/StorageAdapter";
-import { ConfirmButton } from "../ui/confirmButton";
-import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
-import { makePagerControls } from "../ui/PagerControls";
-import { makeTextButton } from "../ui/textButton";
-import { drawScreenHeader } from "../ui/screenHeader";
-
-const ROW_START_Y = 90;
-/** Raised from 44 (2026-08-29) to fit a button tall enough to be worth aiming at
- * with a thumb — see ui/touchTarget.ts. 52 rather than more: the row body
- * (ROW_HEIGHT - 8) only has to clear the button's own 38px, and every extra
- * pixel here costs a row off the page. */
-const ROW_HEIGHT = 52;
-/** Where the pager sits, and therefore how much room the rows get. */
-const PAGER_Y = GAME_HEIGHT - 44;
-const ROWS_PER_PAGE = rowsPerPage(ROW_START_Y, PAGER_Y, ROW_HEIGHT);
+import { drawSavedList } from "../ui/savedList";
 
 /** Lists every saved level with Edit/Delete actions — the piece the MVP's
  * single-slot Save/Load never had. Persistence already supported this
- * (StorageAdapter.list/remove); this scene is purely the missing UI. */
+ * (StorageAdapter.list/remove); this scene is purely the missing UI.
+ *
+ * The screen itself lives in `ui/savedList.ts`, shared with My Worlds — see
+ * that file for why, and for what each of these options is standing in for. */
 export class LevelBrowserScene extends Phaser.Scene {
-  private get storage(): StorageAdapter {
-    return getLevelStorage();
-  }
-  private page = 0;
-  private listContainer!: Phaser.GameObjects.Container;
-  private statusText!: Phaser.GameObjects.Text;
-  /** Every row's Delete, so arming one can stand the others down — two rows
-   * both reading "Delete? Tap again" is a way to delete the wrong level. */
-  private deleteButtons: ConfirmButton[] = [];
+  /**
+   * The rows, and the line that reports a failed delete.
+   *
+   * Public rather than private, and nothing in this class reads them: they are
+   * here as an inspection surface, because the specs address *the list* rather
+   * than the whole screen (see `SavedList`, and `drive-failure.spec.ts`'s own
+   * note on why a top-level scan of the scene is not good enough). Marking them
+   * private would be the more flattering label and the less true one — TypeScript
+   * says as much, refusing to compile a private field with no reader.
+   */
+  listContainer!: Phaser.GameObjects.Container;
+  statusText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("LevelBrowser");
   }
 
   create(): void {
-    drawScreenHeader({
+    ({ listContainer: this.listContainer, statusText: this.statusText } = drawSavedList<LevelSummary>({
       scene: this,
       title: "My Levels",
-      onBack: () => this.scene.start("Menu"),
       action: { label: "New Level", onClick: () => this.scene.start("Editor") },
-    });
-
-    this.statusText = this.add
-      .text(GAME_WIDTH / 2, ROW_START_Y - 22, "", { fontSize: "11px", color: "#a6a6c8" })
-      .setOrigin(0.5);
-
-    this.listContainer = this.add.container(0, 0);
-    void this.refresh();
-  }
-
-  private async refresh(): Promise<void> {
-    this.listContainer.removeAll(true);
-    // The Texts these wrap are destroyed by removeAll above.
-    this.deleteButtons = [];
-    const levels = await this.storage.list();
-
-    if (levels.length === 0) {
-      this.listContainer.add(
-        this.add
-          .text(GAME_WIDTH / 2, ROW_START_Y + 20, "No saved levels yet.", { fontSize: "14px", color: "#a6a6c8" })
-          .setOrigin(0.5),
-      );
-      return;
-    }
-
-    // Rows used to be laid out for the whole list with nothing checking the
-    // canvas was tall enough: exactly eight fitted, so a ninth saved level was
-    // drawn past the bottom edge where it could not be clicked at all.
-    this.page = clampPage(this.page, levels.length, ROWS_PER_PAGE);
-    pageSlice(levels, this.page, ROWS_PER_PAGE).forEach((level, i) =>
-      this.addRow(level, ROW_START_Y + i * ROW_HEIGHT),
-    );
-    this.listContainer.add(
-      makePagerControls({
-        scene: this,
-        x: 40,
-        y: PAGER_Y,
-        page: this.page,
-        total: levels.length,
-        perPage: ROWS_PER_PAGE,
-        onChange: (page) => {
-          this.page = page;
-          void this.refresh();
-        },
-      }),
-    );
-  }
-
-  private addRow(level: LevelSummary, y: number): void {
-    const rowBg = this.add.rectangle(40, y, GAME_WIDTH - 80, ROW_HEIGHT - 8, 0x16213e).setOrigin(0, 0);
-    const name = this.add
-      .text(56, y + (ROW_HEIGHT - 8) / 2, level.name || "Untitled Level", { fontSize: "15px", color: "#ffffff" })
-      .setOrigin(0, 0.5);
-    const updated = this.add
-      .text(56, y + (ROW_HEIGHT - 8) / 2 + 16, `Updated ${this.formatDate(level.updatedAt)}`, {
-        fontSize: "11px",
-        color: "#a6a6c8",
-      })
-      .setOrigin(0, 0.5);
-
-    const editBtn = this.makeSmallButton(GAME_WIDTH - 240, y + (ROW_HEIGHT - 8) / 2, "Edit", () =>
-      this.editLevel(level.id),
-    );
-    // Two taps, like every other destructive action here. This was a single
-    // click that permanently removed a saved level, sitting immediately beside
-    // Edit, with no undo.
-    const deleteBtn = new ConfirmButton({
-      scene: this,
-      x: GAME_WIDTH - 140,
-      y: y + (ROW_HEIGHT - 8) / 2,
-      label: "Delete",
-      armedLabel: "Delete? Tap again",
-      onConfirm: () => void this.deleteLevel(level.id),
-    });
-    deleteBtn.text.on("pointerdown", () => {
-      for (const other of this.deleteButtons) if (other !== deleteBtn) other.disarm();
-    });
-    this.deleteButtons.push(deleteBtn);
-
-    this.listContainer.add([rowBg, name, updated, editBtn, deleteBtn.text]);
-  }
-
-  private makeSmallButton(x: number, yMid: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
-    return makeTextButton({ scene: this, x, y: yMid, label, onClick });
+      emptyMessage: "No saved levels yet.",
+      fallbackName: "Untitled Level",
+      noun: "level",
+      secondary: (level) => `Updated ${formatDate(level.updatedAt)}`,
+      actions: [{ label: "Edit", onClick: (level) => void this.editLevel(level.id) }],
+      list: () => getLevelStorage().list(),
+      remove: (id) => getLevelStorage().remove(id),
+    }));
   }
 
   private async editLevel(id: string): Promise<void> {
-    const level = await this.storage.load(id);
+    const level = await getLevelStorage().load(id);
     if (!level) return;
     this.scene.start("Editor", { level });
   }
+}
 
-  private async deleteLevel(id: string): Promise<void> {
-    try {
-      await this.storage.remove(id);
-    } catch (err) {
-      // Was unguarded: a failed Drive delete threw, refresh() never ran, and
-      // the row simply stayed put saying nothing — indistinguishable from a
-      // click that missed. The level genuinely still exists, so leaving the row
-      // is right; saying so is what was missing.
-      this.statusText.setText("Couldn't delete that level — check your connection and try again.").setColor("#ff6666");
-      console.error("Level delete failed:", err);
-      return;
-    }
-    this.statusText.setText("").setColor("#a6a6c8");
-    void this.refresh();
-  }
-
-  private formatDate(iso: string): string {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "unknown";
-    return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  }
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
