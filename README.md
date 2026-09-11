@@ -3464,8 +3464,12 @@ positions straight after a drag reads *mid-drag pixels*: `dragend` writes the
 layout and starts an async refresh, and only that redraw snaps the node onto its
 cell, so the spec waits for the snap rather than racing it.
 
-Still true elsewhere and deliberately not widened into: `LevelBrowserScene` and
-`WorldBrowserScene` have the same row-overflow ceiling and no scrolling either.
+~~Still true elsewhere and deliberately not widened into: `LevelBrowserScene` and
+`WorldBrowserScene` have the same row-overflow ceiling and no scrolling either.~~
+**No longer true** — both scenes page through `ui/pager.ts` now, exactly as the
+World Maker's own list does. The note outlived its fix and was found on
+2026-09-11 while auditing what was actually still open; a design log is only
+worth reading if the open items in it are really open.
 
 ### Music upload (2026-08-28)
 

@@ -2,6 +2,7 @@ import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFile
 import { getAccessToken } from "../drive/googleAuth";
 import { MusicAsset, MusicLibraryFile } from "./MusicLibrary";
 import { activeBundle } from "../game/contentSource";
+import { parseAssetList } from "../persistence/assetLibrary";
 
 const MUSIC_FILE_NAME = "music.json";
 
@@ -27,8 +28,10 @@ export async function loadMusicLibrary(): Promise<MusicLibraryFile> {
   const content = await getFileContent(token, file.id);
   if (!content.trim()) return [];
   try {
-    const parsed = JSON.parse(content) as MusicLibraryFile;
-    return Array.isArray(parsed) ? parsed : [];
+    // Every entry checked — see backgroundLibraryStorage's twin of this line
+    // and persistence/assetLibrary.ts for why a bad entry is dropped rather
+    // than costing the whole library.
+    return parseAssetList<MusicAsset>(JSON.parse(content), "audioData");
   } catch {
     return [];
   }

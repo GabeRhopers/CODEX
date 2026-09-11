@@ -2,6 +2,7 @@ import { createFile, ensureAppFolder, findFileByName, getFileContent, updateFile
 import { getAccessToken } from "../drive/googleAuth";
 import { BackgroundAsset, BackgroundLibraryFile } from "./BackgroundLibrary";
 import { activeBundle } from "../game/contentSource";
+import { parseAssetList } from "../persistence/assetLibrary";
 
 const BACKGROUNDS_FILE_NAME = "backgrounds.json";
 
@@ -31,8 +32,10 @@ export async function loadBackgroundLibrary(): Promise<BackgroundLibraryFile> {
   const content = await getFileContent(token, file.id);
   if (!content.trim()) return [];
   try {
-    const parsed = JSON.parse(content) as BackgroundLibraryFile;
-    return Array.isArray(parsed) ? parsed : [];
+    // Every entry checked, not just "is this a list" — an upload with no
+    // imageData used to travel all the way to a texture registration, and via
+    // collectBundle.ts into published games. See persistence/assetLibrary.ts.
+    return parseAssetList<BackgroundAsset>(JSON.parse(content), "imageData");
   } catch {
     return [];
   }
