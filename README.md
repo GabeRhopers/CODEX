@@ -416,7 +416,7 @@ Open the dev server URL in a browser.
   the Markers tab) in both Main and Sub, or a **Basket (Up)** in both Main
   and Up, to connect them — see "Sub/Up areas" under Art for the full
   teleport story.
-- **Enemy Size** (right "Level Settings" panel, below Clear): **Small /
+- **Enemy Size** (right "Level Settings" panel, above Clear): **Small /
   Medium / Large** — a placement-time modifier for the next enemy you
   place, not a property of anything currently selected, so it stays put
   across category/brush switches the same way the palette selection
@@ -4193,8 +4193,10 @@ now carry headings, and the right one aligns to a single left edge (the
 reference picker's, since it is the widest thing in the rail and has to end at
 the margin). In the level editor, `Clear` left the "Level Settings" panel: it
 wipes every tile you have placed, and it was grouped and coloured as if it were
-a third asset picker. It now sits last under its own "Level content" heading and
-a rule. Its *resting* colour stays the normal navy on purpose — the two-tap arm
+a third asset picker. It now sits last, under a rule. (It briefly had a "Level
+content" heading above it as well; see "A screen survey" below for why a bold
+heading over one button called Clear was a word and not a help.) Its *resting*
+colour stays the normal navy on purpose — the two-tap arm
 is what signals danger, and tinting the rest state red too would blunt the
 difference between "this is destructive" and "the next tap does it".
 
@@ -5357,6 +5359,57 @@ first strokes of every new thing painted nothing.
 there are two doors to drawing the same sprite. Harmless — the second one adds a
 skin that `adoptsFirstSkin` leaves unused — but redundant, and worth removing
 when someone next touches `skinTargets`.
+
+### A screen survey, and the rectangle it found (2026-09-12)
+
+Phase 4 of the UI week. Phase 4's target was left undecided on purpose —
+*decide with a screenshot, not from here* — and the problem with that was that
+there was no screenshot of most of this app at the size it is actually used. One
+iPad screenshot of one screen started this week and found four defects in five
+minutes. Nobody had looked at the other twelve.
+
+**`tests/e2e/screen-survey.spec.ts`** photographs all thirteen authoring screens
+at iPad Pro 11" landscape (1194x834), in one command. It grew out of
+`header-shots.spec.ts`, which shot six at a 1280x720 desktop viewport and only
+when the shared header moved; that file is gone.
+
+It is **an aid, not an assertion**, and deliberately so. It asserts exactly one
+thing: that it managed to *reach* every screen. A survey that quietly shot twelve
+of thirteen would be worse than none, because the thirteenth is where the bug
+would be. Failures are collected rather than thrown, so one unreachable screen
+costs its own picture and not the other twelve.
+
+**What it found on the first run.** A small black rectangle sitting over the top
+centre of the editor's tile grid, at (525, 64) — which is to say at
+`GAME_WIDTH / 2`, which is to say it was a UI object and not a stray tile. I had
+seen this same artifact in an editor screenshot days earlier and moved past it.
+
+It is `EditorUI`'s `statusText`. **A Phaser `Text` with `backgroundColor` and
+`padding` paints its padding box even when the string is empty** — the empty one
+measures 16x22 and stays visible. Since the status line clears itself 2.5s after
+any message, the rectangle was there essentially always. The fix is that
+`showStatus` is now the only writer and hides the object when the message is
+empty; four other empty-string-with-a-background texts (`PlayScene`'s hud, toast
+and banner, the Menu's bar action) already handled this, each in a different way,
+which is why nobody had named the rule.
+
+Nothing would ever have caught it. `assertLayoutSound` compares only
+*interactive* text, so scenery cannot fail it — the blind spot that already cost
+the Menu's credits line through the controls hint and the empty-palette hint
+through a heading.
+
+**Also, the heading that was one word.** `Clear` sits last in the Level Settings
+panel, under a rule, separated from the two asset pickers because it is not a
+setting. It also had a bold **Level content** heading above it, which meant
+reading "Level content / Clear" top to bottom and learning nothing from the first
+line. The rule was always doing the separating. The heading is gone; the rule
+stays.
+
+The running score for this project stays what it has been all week: every visible
+defect here was found by looking — the murky World Map, the cut-scene panels
+hunched at the bottom of an empty screen, the demo nobody could finish, the
+Meadow zoomed to one tree, the swatch row below the floor of the screen, and now
+this. The cheap checks were green through all of it.
 
 ## Project layout
 

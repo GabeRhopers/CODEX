@@ -562,17 +562,18 @@ export class EditorUI {
     // what signals danger (CLEAR_ARMED_COLOR), and tinting the resting state
     // red as well would blunt the difference between "this is destructive" and
     // "this is armed and the next tap does it".
+    //
+    // The rule is the whole separation. A "Level content" heading sat here too
+    // until 2026-09-12, which put a bold heading over a lone button that
+    // already said Clear — the same thing as reading "Level content / Clear"
+    // top to bottom and learning nothing from the first line. The rule keeps
+    // Clear out of the settings group; the heading only added a word.
     rowY += 12;
     scene.add
       .rectangle(RIGHT_PANEL_X + PANEL_PADDING, rowY, RIGHT_BUTTON_WIDTH, 1, 0x2b3350)
       .setOrigin(0, 0)
       .setDepth(CONTENT_DEPTH);
-    rowY += 12;
-    scene.add
-      .text(RIGHT_PANEL_X + PANEL_PADDING, rowY, "Level content", { fontSize: "13px", color: "#a6a6c8", fontStyle: "bold" })
-      .setOrigin(0, 0)
-      .setDepth(CONTENT_DEPTH);
-    rowY += 24;
+    rowY += 16;
     this.clearButton = this.makeFixedWidthButton(RIGHT_PANEL_X + PANEL_PADDING, rowY, RIGHT_BUTTON_WIDTH, RIGHT_BUTTON_HEIGHT, "Clear", () =>
       this.onClearClicked(),
     );
@@ -608,7 +609,8 @@ export class EditorUI {
         padding: { x: 8, y: 4 },
       })
       .setOrigin(0.5, 0)
-      .setDepth(STATUS_DEPTH);
+      .setDepth(STATUS_DEPTH)
+      .setVisible(false);
   }
 
   /** Unlike the old toolbar's makeRowButton (a single auto-sized Text),
@@ -845,10 +847,26 @@ export class EditorUI {
   }
 
   setStatus(message: string): void {
-    this.statusText.setText(message);
+    this.showStatus(message);
     this.scene.time.delayedCall(2500, () => {
-      if (this.statusText.text === message) this.statusText.setText("");
+      if (this.statusText.text === message) this.showStatus("");
     });
+  }
+
+  /**
+   * The only place `statusText` is written, because writing it needs two
+   * steps rather than one.
+   *
+   * A Phaser Text with `backgroundColor` and `padding` paints its padding box
+   * even when the string is empty: an empty `statusText` measures 16x22 and
+   * stays visible, so a small black rectangle sat over the top-centre of the
+   * tile grid at (525, 64) — which is to say, nearly always, since the status
+   * line clears itself after 2.5s. It survived because nothing asserts on
+   * scenery: `assertLayoutSound` compares only *interactive* text. A screen
+   * survey on 2026-09-12 found it by looking.
+   */
+  private showStatus(message: string): void {
+    this.statusText.setText(message).setVisible(message !== "");
   }
 
   setSaveState(state: SaveState): void {
