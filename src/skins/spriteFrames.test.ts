@@ -5,6 +5,7 @@ import {
   CHARACTER_GRID_SIZE,
   CHARACTER_SKIN_ID,
   ENTITY_GRID_SIZE,
+  frameLabel,
   framePlanFor,
   gridSizeFor,
   loopLength,
@@ -116,5 +117,30 @@ describe("loopLength", () => {
 
   it("is zero for an unpainted skin", () => {
     expect(loopLength(loop, {})).toBe(0);
+  });
+});
+
+describe("what a frame button says", () => {
+  const loop = framePlanFor("enemy-ghost")!;
+  const character = framePlanFor(CHARACTER_SKIN_ID)!;
+  const tile = framePlanFor("ground-grass")!;
+
+  it("counts a loop from one, the way a person counts", () => {
+    // The stored names are "0".."3" — the array index, which is a programmer's
+    // way of counting and was what the Skin Creator put on the buttons.
+    expect(loop.frames.map((f) => frameLabel(loop, f))).toEqual(["Frame 1", "Frame 2", "Frame 3", "Frame 4"]);
+  });
+
+  it("leaves names that already say what they are", () => {
+    // The whole reason this is display-only and per-plan: renaming these would
+    // make them worse, not better.
+    expect(frameLabel(character, "walk1")).toBe("walk1");
+    expect(frameLabel(tile, "top")).toBe("top");
+  });
+
+  it("passes through a name the plan does not have", () => {
+    // A skin saved against a frame set that has since changed. Showing the
+    // stored name beats showing "Frame 0" or crashing.
+    expect(frameLabel(loop, "9")).toBe("9");
   });
 });

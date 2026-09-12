@@ -82,6 +82,26 @@ export type FramePlan =
 const LOOP_BRUSH_IDS = new Set(["enemy-ghost", "enemy-spike", "enemy-bat", "enemy-golem"]);
 
 /**
+ * What to *write on the button* for a frame.
+ *
+ * Display only — `LOOP_FRAMES` are the storage keys (`SkinAsset.frames`,
+ * `frameCells`), so they cannot be renamed without orphaning the art in every
+ * skin already saved. The names are the position in the cycle, zero-indexed
+ * like the array they came from, which is a programmer's way of counting: the
+ * Skin Creator showed an enemy's four frames as `0 1 2 3`, and on a screen aimed
+ * at a child that says nothing about what the buttons are for.
+ *
+ * A character's are `idle`/`walk1`/`jump` and a tile's are `top`/`fill` — both
+ * already say what they are, so both pass through untouched. Only the loop has
+ * this problem, and only the loop is changed.
+ */
+export function frameLabel(plan: FramePlan, name: string): string {
+  if (plan.kind !== "loop") return name;
+  const index = plan.frames.indexOf(name);
+  return index < 0 ? name : `Frame ${index + 1}`;
+}
+
+/**
  * The frame plan for a skin target, or null when it's an ordinary
  * single-frame skin — which is most of them, and is the unchanged path every
  * skin saved before this feature took.

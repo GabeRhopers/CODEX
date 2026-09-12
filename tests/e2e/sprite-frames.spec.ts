@@ -165,7 +165,10 @@ test("a painted enemy skin loops through its frames", async ({ page }) => {
     await paintCell(page, 32, x, y);
   }
 
-  await clickByText(page, "SkinEditor", "1 ·");
+  // The second frame of the loop. Stored as "1" — and shown that way until
+  // 2026-09-12, when a loop's buttons started counting from one like a person
+  // does; the storage keys are untouched, so only the label moved.
+  await clickByText(page, "SkinEditor", "Frame 2 ·");
   await page.waitForTimeout(300);
   for (const [x, y] of [
     [26, 26],

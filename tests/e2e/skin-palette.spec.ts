@@ -153,7 +153,12 @@ test("an off-palette colour survives a frame switch instead of being discarded",
 
   // Switching frames rebuilds canvas mode from scratch — which is exactly where
   // the colour used to be silently reset to palette.colors[0].
-  await clickByText(page, "SkinEditor", "1 ·");
+  //
+  // "Frame 2 ·", not "1 ·": a loop's frames are stored as "0".."3" and were
+  // shown that way until 2026-09-12, which on a screen aimed at a child said
+  // nothing. The stored names are unchanged — renaming them would orphan the art
+  // in every saved skin — so this is the second frame under its new label.
+  await clickByText(page, "SkinEditor", "Frame 2 ·");
   await page.waitForTimeout(200);
   expect(await currentColor(page), "the sampled colour should survive a rebuild").toBe(picked);
 });

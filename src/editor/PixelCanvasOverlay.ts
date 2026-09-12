@@ -80,9 +80,25 @@ export interface PixelCanvasOptions {
 //
 // `backgroundColor` is the fallback where conic-gradient is unsupported: a flat
 // grey, which still reads as "not the page behind" even with no checker at all.
+/**
+ * The transparency checkerboard, in the app's own dark range rather than the
+ * mid-greys a checkerboard usually gets.
+ *
+ * It has two jobs and they pull against each other: say "nothing is here", and
+ * stay out of the way of the drawing. The original `#666`/`#999` did the first
+ * emphatically and the second not at all — on an iPad screenshot
+ * (2026-09-11) it was the brightest thing on a screen whose every other
+ * surface is near-black, so the empty area read as more important than the
+ * sprite sitting on it.
+ *
+ * Darker and much lower contrast fixes that, and the pair is chosen to stay
+ * *recognisably not paint*: no palette in `pixelPalettes.ts` contains anything
+ * near these, so a checker square can never be mistaken for a cell somebody
+ * filled. That is the property worth protecting, not the exact brightness.
+ */
 const CHECKERBOARD_CSS = {
-  backgroundImage: "conic-gradient(#666 0deg 90deg, #999 90deg 180deg, #666 180deg 270deg, #999 270deg 360deg)",
-  backgroundColor: "#999999",
+  backgroundImage: "conic-gradient(#2a2a3c 0deg 90deg, #343450 90deg 180deg, #2a2a3c 180deg 270deg, #343450 270deg 360deg)",
+  backgroundColor: "#2a2a3c",
 };
 
 /** One cell's before/after color — the undo unit. A whole stroke (a

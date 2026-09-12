@@ -141,11 +141,29 @@ test("the checkerboard behind the drawing is squared to the cells you paint", as
   const cell = box.width / GRID;
   const { luma, scale } = await scanLine(page, 16);
 
-  // The checkerboard is #666 on #999: a light/dark split either side of the
-  // midpoint, with nothing else on a blank canvas to confuse it.
+  // Split at the midpoint of the *observed* range rather than at 127.
+  //
+  // This used to say `luma < 127`, which quietly encoded the checkerboard's
+  // colours into a test about its geometry: it worked only while the squares
+  // were #666 on #999, straddling mid-grey. Recolouring them to the app's dark
+  // range on 2026-09-12 put both tones far below 127, so every sample landed on
+  // one side, no edges were found at all, and a test about cell alignment failed
+  // for a reason that had nothing to do with alignment.
+  //
+  // Deriving the threshold from the line keeps the question the same — "do the
+  // square boundaries land on cell boundaries" — for any two tones somebody
+  // picks later.
+  const low = Math.min(...luma);
+  const high = Math.max(...luma);
+  // A blank canvas showing *one* tone is a real failure (no checkerboard at
+  // all, or one too faint to see), and without this it would instead produce a
+  // midpoint inside the noise and a spray of meaningless edges.
+  expect(high - low, `the checkerboard has no visible contrast (luma ${low.toFixed(1)}..${high.toFixed(1)})`).toBeGreaterThan(6);
+  const midpoint = (low + high) / 2;
+
   const edges: number[] = [];
   for (let x = 1; x < luma.length; x++) {
-    if (luma[x - 1] < 127 !== luma[x] < 127) edges.push(x / scale);
+    if (luma[x - 1] < midpoint !== luma[x] < midpoint) edges.push(x / scale);
   }
   expect(edges.length, "no checkerboard found to measure").toBeGreaterThan(4);
 

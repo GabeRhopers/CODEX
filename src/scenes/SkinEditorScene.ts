@@ -22,7 +22,8 @@ import {
   ReferenceSource,
   skinReferenceId,
 } from "../skins/referenceSources";
-import { baseFrameOf, CHARACTER_SKIN_ID, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
+import { baseFrameOf, CHARACTER_SKIN_ID, frameLabel, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
+import { hasFinePointer } from "../ui/pointer";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES, PixelPalette } from "../skins/pixelPalettes";
 import { shadeRamp } from "../skins/colorShades";
 import { addCustomColor, CUSTOM_PALETTE_ID, loadCustomColors, saveCustomColors } from "../skins/customPalette";
@@ -802,6 +803,23 @@ export class SkinEditorScene extends Phaser.Scene {
     const undoButton = this.makeSmallButton(0, footerMidY, "↶ Undo", () => this.performUndo());
     undoButton.setX(redoButton.x - 8 - undoButton.width);
 
+    // Labelled, because without it the field reads as a button: LevelNameInput
+    // paints itself in the same `#0f3460` as every button in the app, centres
+    // its text and rounds its corners, and here — unlike the Editor's header,
+    // which has always had a "Name:" beside it — it sat unlabelled in the middle
+    // of a row of actual buttons. The iPad screenshot on 2026-09-11 showed it
+    // between "Editing: Ghost" and "↶ Undo" looking exactly like a third
+    // control you could press.
+    //
+    // The neighbouring "Editing: <brush>" stays. It was down as a duplicate of
+    // this field and is not one: that is which *brush* the skin is for, this is
+    // the skin's own name, and they only coincide while the name is still the
+    // default. On a skin called "Blue Ghost" deleting it would lose the only
+    // thing on screen saying it is a ghost.
+    this.add
+      .text(GAME_WIDTH / 2 - 128, footerMidY, "Name", { fontSize: "12px", color: "#8a8ab0" })
+      .setOrigin(1, 0.5);
+
     // The name field. Reuses LevelNameInput rather than a second DOM input of
     // its own: that class carries the capture-phase blur that makes clicking
     // Save commit an in-progress edit (rather than saving the previous name),
@@ -1212,8 +1230,17 @@ export class SkinEditorScene extends Phaser.Scene {
       .setOrigin(0, 0);
     // The gestures the buttons above have no equivalent for, kept at the foot
     // of the group they belong to rather than floating mid-column.
-    this.add.text(LEFT_COL_X, leftY + 22, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
-    this.add.text(LEFT_COL_X, leftY + 36, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
+    //
+    // Only where they are true. There is no Ctrl key on a tablet and "scroll"
+    // is not a gesture a finger makes, so on touch this was two lines of
+    // instructions for controls that do not exist — printed unconditionally
+    // since the day it was written, and plainly visible in the first iPad
+    // screenshot anyone took (2026-09-11). Pan and zoom are reachable there by
+    // the Pan tool and the Zoom buttons directly above.
+    if (hasFinePointer()) {
+      this.add.text(LEFT_COL_X, leftY + 22, "Scroll to pan", { fontSize: "10px", color: "#8a8ab0" });
+      this.add.text(LEFT_COL_X, leftY + 36, "Ctrl+scroll zooms", { fontSize: "10px", color: "#8a8ab0" });
+    }
 
     // --- DRAWING, REFERENCE, THIS SKIN — continuing the right rail under
     // PALETTE. One left edge for the whole rail: the reference picker is the
@@ -1486,8 +1513,9 @@ export class SkinEditorScene extends Phaser.Scene {
       // An unpainted frame is dimmed and dotted, so "which poses have I
       // actually drawn" is answerable at a glance instead of by clicking
       // through all five.
+      const shown = frameLabel(plan, name);
       this.add
-        .text(x + 10, y + 13, painted ? name : `${name} ·`, {
+        .text(x + 10, y + 13, painted ? shown : `${shown} ·`, {
           fontSize: "12px",
           // Dimmed while unpainted, but never on the selected row: grey on the
           // amber selected fill is unreadable.
