@@ -119,6 +119,22 @@ export function localHitRect(
   };
 }
 
+/**
+ * Hit-area arguments for a rectangular control in a grid cell, ready to spread
+ * into `new Phaser.Geom.Rectangle(...)` — the rectangular twin of
+ * `circleHitArgs` below, and the same bundling of `hitRectFor` with the
+ * local-space shift so neither can be forgotten separately.
+ *
+ * Works the same under any origin: Phaser hands its hit-area callback the local
+ * point *plus* `displayOrigin`, so the space is 0..width whether the object was
+ * built with origin (0,0) like the Skin Creator's swatches or the default
+ * (0.5, 0.5) like a map node.
+ */
+export function cellHitArgs(content: Size, cell: Size, min = MIN_TAP_PX): [number, number, number, number] {
+  const rect = localHitRect(content, hitRectFor(content, cell, min));
+  return [rect.x, rect.y, rect.width, rect.height];
+}
+
 /** Hit-area arguments for a circular shape, ready to spread into
  * `new Phaser.Geom.Rectangle(...)`. Bundles the two easy mistakes — sizing from
  * the radius instead of the diameter, and forgetting the local-space shift —

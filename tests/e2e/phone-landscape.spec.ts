@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, gotoApp, startEditorWithLevel } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, startEditorWithLevel, waitForSkinCanvas } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 import { makeWorld, seedLevels, seedWorlds } from "./support/worlds";
 
@@ -155,6 +155,32 @@ test("an asset picker's tiles are big enough to tap", async ({ page }) => {
     // the full guideline. See ui/touchTarget.ts.
     30,
   );
+});
+
+test("a colour swatch in the Skin Creator is as big as its cell allows", async ({ page }) => {
+  test.slow();
+  // The Skin Creator is the one interactive scene that never adopted
+  // ui/touchTarget.ts: its swatches accepted taps on the 24px art itself, which
+  // is 19.3 CSS px here — under half the 44px guideline, on the screen a child
+  // spends the longest on, painting one pixel at a time.
+  await gotoApp(page);
+  await clickByText(page, "Menu", "Skin Creator");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await clickByText(page, "SkinEditor", "+ New Skin");
+  await clickIconWithLabel(page, "SkinEditor", "Ghost");
+  await waitForSkinCanvas(page);
+
+  const swatches = (await tapTargets(page, "SkinEditor")).filter((t) => t.label === "palette-swatch");
+  expect(swatches.length, "no palette swatches found to measure").toBeGreaterThan(8);
+
+  const worst = smallest(swatches);
+  // Not the guideline, and deliberately not pretending otherwise. Swatches sit
+  // on a 28px pitch, so the cell caps them at 22.5 CSS px here; reaching 44
+  // would need a 55px cell and six columns of those are 328px against the
+  // ~213px this column has. The cell is the honest ceiling — same trade, and
+  // the same reasoning, as the palette brushes above.
+  expect(worst.width, `narrowest swatch target: ${JSON.stringify(worst)}`).toBeGreaterThanOrEqual(22);
+  expect(worst.height, `shortest swatch target: ${JSON.stringify(worst)}`).toBeGreaterThanOrEqual(22);
 });
 
 test("a world map node is big enough to tap", async ({ page }) => {

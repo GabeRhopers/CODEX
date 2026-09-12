@@ -24,6 +24,7 @@ import {
 } from "../skins/referenceSources";
 import { baseFrameOf, CHARACTER_SKIN_ID, frameLabel, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
 import { hasFinePointer } from "../ui/pointer";
+import { cellHitArgs } from "../ui/touchTarget";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES, PixelPalette } from "../skins/pixelPalettes";
 import { shadeRamp } from "../skins/colorShades";
 import { addCustomColor, CUSTOM_PALETTE_ID, loadCustomColors, saveCustomColors } from "../skins/customPalette";
@@ -998,7 +999,7 @@ export class SkinEditorScene extends Phaser.Scene {
     const swatchStep = swatchSize + swatchGap;
     const SWATCH_COLS = 6;
     const swatchColors: (string | null)[] = [...palette.colors, null];
-    left2Y = heading(LEFT_COL2_X, left2Y, "Colours");
+    left2Y = heading(LEFT_COL2_X, left2Y, "Colour");
     const swatchTop = left2Y;
     let sx = LEFT_COL2_X;
     let sy = swatchTop;
@@ -1025,10 +1026,29 @@ export class SkinEditorScene extends Phaser.Scene {
         .rectangle(sx, sy, swatchSize, swatchSize, color ? Phaser.Display.Color.HexStringToColor(color).color : 0x333333)
         .setOrigin(0, 0)
         .setStrokeStyle(1, 0x000000, 0.4)
-        .setInteractive({ useHandCursor: true })
+        // Taps land on the whole cell, not just the 24px of paint. This scene
+        // was the only interactive one that never adopted ui/touchTarget.ts, and
+        // it is the one a child spends longest on placing single pixels: on a
+        // phone held sideways a swatch met a thumb at 19.3 CSS px, under half
+        // the 44px guideline.
+        //
+        // The cell is the ceiling and this does not reach the guideline —
+        // `hitRectFor` caps at the cell on purpose, because a hit area wider
+        // than its pitch would sit on its neighbour's and a tap aimed at red
+        // would pick orange, which is worse than a small target. Reaching 44
+        // needs a 55px cell, and six columns of those are 328px against the
+        // ~213px this column has. Recorded rather than designed around, exactly
+        // as the palette brushes' own 0.6px shortfall is.
+        .setInteractive(
+          new Phaser.Geom.Rectangle(
+            ...cellHitArgs({ width: swatchSize, height: swatchSize }, { width: swatchStep, height: swatchStep }),
+          ),
+          Phaser.Geom.Rectangle.Contains,
+        )
         // Named so tests can find these without guessing from geometry — see
         // SHADE_STEP_NAME's note below.
         .setName(PALETTE_SWATCH_NAME);
+      bg.input!.cursor = "pointer";
       if (!color) {
         this.add.text(sx + swatchSize / 2, sy + swatchSize / 2, "✕", { fontSize: "13px", color: "#ffffff" }).setOrigin(0.5);
       }
@@ -1099,7 +1119,14 @@ export class SkinEditorScene extends Phaser.Scene {
     const rampSize = 24;
     const rampGap = 4;
     const rampX = LEFT_COL2_X;
-    const rampY = heading(rampX, left2Y, "Shades");
+    // No heading of its own since 2026-09-12: the ramp is three more swatches
+    // of the colour already selected, sitting directly beneath the grid it
+    // derives from, and each one is marked "−" or "+". A "SHADES" label above
+    // them was a fifth of a heading per control.
+    // `left2Y` already carries one GROUP_GAP out of the swatch loop, so adding
+    // another here pushed the ramp away from the grid it belongs to — which is
+    // the opposite of what dropping its heading was for.
+    const rampY = left2Y;
     const rampNodes: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }[] = [];
     for (let i = 0; i < 3; i++) {
       const x = rampX + i * (rampSize + rampGap);
@@ -1107,8 +1134,17 @@ export class SkinEditorScene extends Phaser.Scene {
         .rectangle(x, rampY, rampSize, rampSize, 0x333333)
         .setOrigin(0, 0)
         .setStrokeStyle(1, 0x000000, 0.4)
-        .setInteractive({ useHandCursor: true })
+        // Same cell-capped target as the palette swatches above — these are the
+        // same 24px art on the same pitch, and are if anything tapped more
+        // often, since shading is one press per step.
+        .setInteractive(
+          new Phaser.Geom.Rectangle(
+            ...cellHitArgs({ width: rampSize, height: rampSize }, { width: rampSize + rampGap, height: rampSize + rampGap }),
+          ),
+          Phaser.Geom.Rectangle.Contains,
+        )
         .setName(SHADE_STEP_NAME);
+      bg.input!.cursor = "pointer";
       const label = this.add
         .text(x + rampSize / 2, rampY + rampSize / 2, "", { fontSize: "11px", color: "#ffffff" })
         .setOrigin(0.5);
@@ -1195,12 +1231,15 @@ export class SkinEditorScene extends Phaser.Scene {
     // so the reference has to be re-applied rather than set once.
     this.pixelCanvas.setReferenceImage(this.referenceDataUrl);
 
-    // --- VIEW, under TOOLS in the first left column -------------------------
-    // Everything about *looking* at the drawing, kept together and below the
-    // tools that draw on it. Built here rather than up with TOOLS because these
-    // buttons all reach into `this.pixelCanvas`, which only exists from the line
-    // above; `leftY` has carried the column's position down to meet them.
-    leftY = heading(LEFT_COL_X, leftY, "View");
+    // --- the rest of TOOLS: looking at the drawing --------------------------
+    // Built here rather than up with the painting tools because these buttons
+    // all reach into `this.pixelCanvas`, which only exists from the line above;
+    // `leftY` has carried the column's position down to meet them.
+    //
+    // Under the same heading since 2026-09-12. "View" was a second label on the
+    // same column for four more buttons, and the distinction it drew — tools
+    // that change the drawing versus tools that change your view of it — is one
+    // a child has no reason to care about while looking for the zoom.
     this.makeSmallButton(LEFT_COL_X, leftY + SMALL_BUTTON_H / 2, "＋ Zoom", () => this.adjustZoom(1));
     leftY += STACK_STEP;
     this.makeSmallButton(LEFT_COL_X, leftY + SMALL_BUTTON_H / 2, "－ Zoom", () => this.adjustZoom(-1));
@@ -1248,7 +1287,20 @@ export class SkinEditorScene extends Phaser.Scene {
     // buildReferenceControls) and has to end at the right margin, so its left
     // edge is what everything else aligns to; three different x values read as
     // ragged rather than as a column.
-    railY = heading(railX, railY, "Drawing");
+    // One heading for the rest of the rail, where there were three.
+    //
+    // "Drawing" held two buttons, "Reference" held two, and "This skin" held
+    // one — three labels to name five controls, each costing a heading plus its
+    // 18px gap in the column this file already calls the tight one ("PALETTE
+    // (5 rows), DRAWING, REFERENCE and THIS SKIN have to finish above the
+    // footer at y=421, and at 22/16 the last button ended at 426, measurably on
+    // top of Undo"). Merging them buys back about 60px there, which is the
+    // difference between a column that fits and one that only just does.
+    //
+    // They also all say the same thing: every one of these acts on the skin
+    // currently open. Mirror and Clear draw on it, the reference is traced into
+    // it, "Set as default" is about it.
+    railY = heading(railX, railY, "This skin");
     const mirrorButton = this.makeSmallButton(
       railX,
       railY + SMALL_BUTTON_H / 2,
@@ -1264,11 +1316,13 @@ export class SkinEditorScene extends Phaser.Scene {
     railY += STACK_STEP;
     // Clear (two-tap confirm, same shape as EditorUI's Clear/Delete Area)
     this.clearButton = this.makeSmallButton(railX, railY + SMALL_BUTTON_H / 2, "Clear", () => this.onClearClicked());
-    railY = endGroup(railY + STACK_STEP);
+    railY += STACK_STEP;
 
-    railY = heading(railX, railY, "Reference");
+    // The reference controls carry their own meaning in their labels — the
+    // picker reads "Trace: None ▾" and the button "Trace in" — so they needed a
+    // heading saying "Reference" above them least of all.
     this.buildReferenceControls(target, railY + 13);
-    railY = endGroup(railY + STACK_STEP * 2);
+    railY += STACK_STEP * 2;
 
     // "Set as default" lives here as well as in the level editor because the
     // player character is only reachable from this scene — it is deliberately
@@ -1276,7 +1330,6 @@ export class SkinEditorScene extends Phaser.Scene {
     // there, and without this a painted character could be saved and never
     // worn by anything. Two-tap confirmed, same as Clear, since it reaches
     // every level that hasn't chosen for itself.
-    railY = heading(railX, railY, "This skin");
     this.defaultButton = this.makeSmallButton(railX, railY + SMALL_BUTTON_H / 2, "Set as default", () =>
       this.onSetDefaultClicked(),
     );

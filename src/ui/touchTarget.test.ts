@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cellHitArgs,
   circleHitArgs,
   GUIDELINE_CSS_PX,
   hitRectFor,
@@ -181,3 +182,27 @@ describe("circleHitArgs", () => {
     expect(h).toBeLessThanOrEqual(40);
   });
 });
+
+describe("a rectangular control in a grid cell", () => {
+  it("grows to the cell and stops there", () => {
+    // The Skin Creator's swatches: 24px of paint on a 28px pitch. The cell is
+    // the ceiling because a wider target would overlap its neighbour's, and a
+    // tap aimed at red picking orange is worse than a small target.
+    const [x, y, width, height] = cellHitArgs({ width: 24, height: 24 }, { width: 28, height: 28 });
+    expect({ width, height }).toEqual({ width: 28, height: 28 });
+    // Two pixels beyond the art on every side, in the local space Phaser hands
+    // its hit-area callback.
+    expect({ x, y }).toEqual({ x: -2, y: -2 });
+  });
+
+  it("reaches the guideline where the cell can afford it", () => {
+    const [, , width] = cellHitArgs({ width: 24, height: 24 }, { width: 200, height: 200 });
+    expect(width).toBe(MIN_TAP_PX);
+  });
+
+  it("never shrinks a control that is already bigger than the guideline", () => {
+    const [, , width, height] = cellHitArgs({ width: 300, height: 300 }, { width: 320, height: 320 });
+    expect({ width, height }).toEqual({ width: 300, height: 300 });
+  });
+});
+
