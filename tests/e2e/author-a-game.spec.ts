@@ -9,7 +9,6 @@ import {
   readStatusText,
   selectPaletteCategory,
   tileCenter,
-  waitForSkinCanvas,
 } from "./support/coords";
 import type { GameBundle } from "../../src/game/gameBundle";
 
@@ -318,13 +317,14 @@ const PUPILS: [x: number, y: number][] = [
 
 const GRID = 32;
 
-/** Clicks the swatch of a given colour. Found by its fill rather than its
- * position, so a palette-row relayout does not silently start painting in some
- * other colour — the failure mode a coordinate would have. */
+/** Clicks the swatch of a given colour, on the Thing Maker's own palette row.
+ * Found by its fill rather than its position, so a relayout does not silently
+ * start painting in some other colour — the failure mode a coordinate would
+ * have. */
 async function pickColor(page: Page, run: Run, hex: string): Promise<void> {
   run.count();
   const at = await page.evaluate((wanted) => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor");
+    const scene = window.__debugGame!.scene.getScene("ThingMaker");
     const target = parseInt(wanted.slice(1), 16);
     for (const child of scene.children.list) {
       const o = child as unknown as { name?: string; x?: number; y?: number; width?: number; fillColor?: number };
@@ -362,10 +362,10 @@ async function paintRow(page: Page, run: Run, y: number, x0: number, x1: number)
 
 const paintedCells = (page: Page): Promise<number> =>
   page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
-      pixelCanvas?: { getCells(): (string | null)[] };
+    const scene = window.__debugGame!.scene.getScene("ThingMaker") as unknown as {
+      spriteCells?: (string | null)[];
     };
-    return (scene.pixelCanvas?.getCells() ?? []).filter((c) => c !== null).length;
+    return (scene.spriteCells ?? []).filter((c) => c !== null).length;
   });
 
 // --- The walk --------------------------------------------------------------
@@ -389,13 +389,11 @@ test("a person can make a small game from the Menu to a link", async ({ page }, 
   await hand.tap("ThingMaker", "Slow");
   await hand.tap("ThingMaker", "Thud");
   await shot(page, "01-thing");
-  await hand.tap("ThingMaker", "Save & draw sprite →");
 
-  // --- 2. Draw it ----------------------------------------------------------
-  run.begin("Skin Creator");
-  await waitFor(page, "SkinEditor");
-  await waitForSkinCanvas(page);
-
+  // --- 2. Draw it, on the same screen --------------------------------------
+  // Not a second stage any more. Until 2026-09-12 this was "Save & draw
+  // sprite →", a trip to the Skin Creator and back; the drawing is now beside
+  // the fields that say what the thing does, so the walk never leaves.
   await pickColor(page, run, BODY);
   for (const [y, x0, x1] of BUG_ROWS) await paintRow(page, run, y, x0, x1);
   await pickColor(page, run, EYE);
@@ -408,15 +406,7 @@ test("a person can make a small game from the Menu to a link", async ({ page }, 
   expect(await paintedCells(page), "the sprite came out empty").toBeGreaterThan(100);
   await shot(page, "02-sprite");
 
-  await hand.type("Skin name", THING);
-  await hand.tap("SkinEditor", "Save");
-  await expect
-    .poll(() => readStatusText(page, "SkinEditor", "Saved"), { timeout: 20_000 })
-    .toContain("Saved");
-
-  await hand.tap("SkinEditor", "← Back");
-  await hand.tap("SkinEditor", "← Back");
-  await waitFor(page, "ThingMaker");
+  await hand.tap("ThingMaker", "Save");
   await hand.tap("ThingMaker", "← Back");
   await waitFor(page, "Menu");
 

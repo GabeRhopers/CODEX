@@ -107,3 +107,16 @@ export const DEFAULT_PIXEL_PALETTE_ID = PIXEL_PALETTES[0].id;
 export function findPalette(id: string): PixelPalette {
   return PIXEL_PALETTES.find((p) => p.id === id) ?? PIXEL_PALETTES[0];
 }
+
+/**
+ * The Phaser object name every colour swatch carries, on whichever screen draws
+ * one.
+ *
+ * Lives here, beside the palettes themselves, because two scenes now paint
+ * swatches — the Skin Creator and the Thing Maker — and a magic string copied
+ * into both is one rename away from a test that silently finds nothing. The
+ * reasoning for naming them at all is SkinEditorScene's: picking these out of a
+ * display list by geometry ("24px wide and left of centre") describes a layout
+ * rather than an object, and broke the first time one moved.
+ */
+export const PALETTE_SWATCH_NAME = "palette-swatch";

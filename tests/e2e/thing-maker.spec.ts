@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, readSceneField, selectPaletteCategory, startEditorWithLevel, tileCenter } from "./support/coords";
+import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, pixelCanvasBox, readSceneField, selectPaletteCategory, startEditorWithLevel, tileCenter } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 import { customDef, seedCustomEntities } from "./support/customEntities";
 import type { PlayerStats } from "../../src/gameplay/PlayerStats";
@@ -138,25 +138,78 @@ test("editing one changes it, and deleting one takes two taps", async ({ page })
   await expect.poll(() => storedThings(page)).toEqual([]);
 });
 
-test("Save & draw sprite lands on the canvas for the thing just made", async ({ page }) => {
+test("the sprite is drawn on the same screen, and saving keeps it", async ({ page }) => {
   test.slow();
+  // Inventing a thing and drawing it are one act, and since 2026-09-12 they are
+  // one screen. This used to be "Save & draw sprite →", a button that left for
+  // the Skin Creator and came back; the box it sat beside said "until you draw
+  // it", which was a promise the next screen had to keep.
   await gotoApp(page);
   await openThingMaker(page);
   await clickByText(page, "ThingMaker", "+ New Thing");
   await typeName(page, "Star Fruit");
-  await clickByText(page, "ThingMaker", "Save & draw sprite →");
 
-  // Straight to painting, not to the 40-tile pick grid — which is the whole
-  // point of the handoff.
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await expect.poll(() => readSceneField<string>(page, "SkinEditor", "mode"), { timeout: 20_000 }).toBe("canvas");
-  const brushId = await page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
-      target?: { brush: { id: string; label: string } };
+  // The canvas is a real DOM <canvas>, sized one buffer pixel per cell, so the
+  // 32x32 one is the drawing surface — see pixelCanvasBox's own note.
+  const box = await pixelCanvasBox(page, 32);
+  const cell = box.width / 32;
+  for (const [x, y] of [
+    [10, 10],
+    [11, 10],
+    [10, 11],
+  ]) {
+    await page.mouse.click(box.left + (x + 0.5) * cell, box.top + (y + 0.5) * cell);
+  }
+
+  await clickByText(page, "ThingMaker", "Save");
+  await expect.poll(() => storedThings(page).then((t) => t.map((d) => d.name))).toEqual(["Star Fruit"]);
+
+  // The load-bearing half: the drawing was saved *as this thing's skin*, and is
+  // its default, so the thing wears it rather than the ghost it copies. Without
+  // the second assertion this would pass on art that saved and was never used —
+  // which is exactly the bug adoptsFirstSkin was written for.
+  const skin = await page.evaluate(async () => {
+    const storage = (await import("/src/skins/skinStorage.ts")) as {
+      loadCustomSkins(): Promise<Record<string, { activeId: string | null; items: { id: string }[] }>>;
     };
-    return scene.target?.brush.id ?? null;
+    const all = await storage.loadCustomSkins();
+    const key = Object.keys(all).find((k) => k.startsWith("custom:"));
+    return key ? all[key] : null;
   });
-  expect(brushId).toMatch(/^custom:/);
+  expect(skin, "nothing was saved for the invented thing").not.toBeNull();
+  expect(skin!.items).toHaveLength(1);
+  expect(skin!.activeId).toBe(skin!.items[0].id);
+});
+
+test("re-opening a thing shows the sprite already drawn for it", async ({ page }) => {
+  test.slow();
+  // The other half, and the one that fails quietly: a PNG is all that is stored
+  // (a skin keeps no second copy of its cells), so re-opening means decoding it
+  // back. Get that wrong and the canvas is blank — and saving then writes the
+  // blank over the artwork.
+  await gotoApp(page);
+  await openThingMaker(page);
+  await clickByText(page, "ThingMaker", "+ New Thing");
+  await typeName(page, "Star Fruit");
+  const box = await pixelCanvasBox(page, 32);
+  const cell = box.width / 32;
+  await page.mouse.click(box.left + 10.5 * cell, box.top + 10.5 * cell);
+  await clickByText(page, "ThingMaker", "Save");
+  await expect.poll(() => storedThings(page).then((t) => t.length)).toBe(1);
+
+  await clickByText(page, "ThingMaker", "Edit");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const scene = window.__debugGame!.scene.getScene("ThingMaker") as unknown as {
+            spriteCells?: (string | null)[];
+          };
+          return (scene.spriteCells ?? []).filter((c) => c !== null).length;
+        }),
+      { timeout: 20_000 },
+    )
+    .toBe(1);
 });
 
 test("the Skin Creator's grid pages rather than drawing an invented thing off the canvas", async ({ page }) => {

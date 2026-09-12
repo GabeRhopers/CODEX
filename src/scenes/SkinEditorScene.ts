@@ -25,7 +25,7 @@ import {
 import { baseFrameOf, CHARACTER_SKIN_ID, frameLabel, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
 import { hasFinePointer } from "../ui/pointer";
 import { cellHitArgs } from "../ui/touchTarget";
-import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PIXEL_PALETTES, PixelPalette } from "../skins/pixelPalettes";
+import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PALETTE_SWATCH_NAME, PIXEL_PALETTES, PixelPalette } from "../skins/pixelPalettes";
 import { shadeRamp } from "../skins/colorShades";
 import { addCustomColor, CUSTOM_PALETTE_ID, loadCustomColors, saveCustomColors } from "../skins/customPalette";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
@@ -77,7 +77,6 @@ const REFERENCE_WIDTH = 260;
 // objects, and it broke the moment the 2026-09-05 rework put both groups in the
 // same column. Naming them says what they are and survives being moved.
 const SHADE_STEP_NAME = "shade-step";
-const PALETTE_SWATCH_NAME = "palette-swatch";
 
 // --- canvas-mode layout ---------------------------------------------------
 // One place for the geometry, so the three regions can be read against each
@@ -254,22 +253,9 @@ export class SkinEditorScene extends Phaser.Scene {
   private customDefs: CustomEntityDef[] = [];
   /** Which page of the pick-brush grid is showing. */
   private pickPage = 0;
-  /** Set by the Thing Maker so "Save & draw sprite" lands on the canvas for the
-   * thing just made, instead of in a 40-tile grid to hunt for it. */
-  private openTargetBrushId?: string;
-  /** Where "← Back" goes from the browse list. The Menu unless another screen
-   * sent us here and wants us back. */
-  private returnTo = "Menu";
 
   constructor() {
     super("SkinEditor");
-  }
-
-  init(data?: { targetBrushId?: string; returnTo?: string }): void {
-    // Read here rather than in create() because Phaser calls init() with the
-    // scene-start payload and create() with nothing.
-    this.openTargetBrushId = data?.targetBrushId;
-    this.returnTo = data?.returnTo ?? "Menu";
   }
 
   create(): void {
@@ -278,22 +264,13 @@ export class SkinEditorScene extends Phaser.Scene {
     this.pickPage = 0;
     this.rebuild();
 
-    // Custom targets arrive asynchronously. If we were asked to open one
-    // directly, that can only happen once they land — hence the resolve doing
-    // the opening rather than create().
+    // Invented things are skinnable targets too, and they arrive asynchronously,
+    // so the grid is redrawn once they land rather than rendered without them.
     void loadCustomEntities()
       .catch(() => [] as CustomEntityDef[])
       .then((defs) => {
         if (!this.scene.isActive()) return;
         this.customDefs = defs;
-        const requested = this.openTargetBrushId;
-        this.openTargetBrushId = undefined;
-        if (requested) {
-          const brush = skinTargets(defs).find((b) => b.id === requested);
-          // A definition deleted between screens leaves nothing to paint; the
-          // browse list is the honest place to land rather than a blank canvas.
-          if (brush) return void this.openCanvasFor(brush);
-        }
         if (this.mode === "browse" || this.mode === "pick-brush") this.rebuild();
       });
 
@@ -457,7 +434,7 @@ export class SkinEditorScene extends Phaser.Scene {
   // --- mode: browse ------------------------------------------------------
 
   private buildBrowse(): void {
-    this.addBackButton(() => this.scene.start(this.returnTo));
+    this.addBackButton(() => this.scene.start("Menu"));
     this.add.text(GAME_WIDTH / 2, 24, "Skin Creator", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
     this.add
       .text(GAME_WIDTH / 2, 50, "Pixel-art skins for Markers/Enemies/Items/Decor.", {
@@ -743,9 +720,10 @@ export class SkinEditorScene extends Phaser.Scene {
   /**
    * Starts a *new* skin for `brush` and opens the canvas on it.
    *
-   * Shared by the pick grid and by the Thing Maker's "Save & draw sprite"
-   * handoff, so arriving from either lands in exactly the same state — there is
-   * no second way to open a fresh canvas that could drift from this one.
+   * Reached from the pick grid. It used to be shared with the Thing Maker's
+   * "Save & draw sprite" handoff; since 2026-09-12 that screen draws its own
+   * sprites and the handoff is gone, along with the `targetBrushId` plumbing
+   * that served it.
    */
   private async openCanvasFor(brush: Brush): Promise<void> {
     const plan = framePlanFor(brush.id);

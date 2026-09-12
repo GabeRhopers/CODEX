@@ -126,6 +126,7 @@ appear under more than one heading if it belongs to both.
 - [Somebody made a game with the tool, and two of the findings were bad](#somebody-made-a-game-with-the-tool-and-two-of-the-findings-were-bad-2026-09-09)
 - [The default background was the one nobody had looked at](#the-default-background-was-the-one-nobody-had-looked-at-2026-09-10)
 - [My Levels and My Worlds were the same screen twice](#my-levels-and-my-worlds-were-the-same-screen-twice-2026-09-11)
+- [The Thing Maker and the Skin Creator were one screen pretending to be two](#the-thing-maker-and-the-skin-creator-were-one-screen-pretending-to-be-two-2026-09-12)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5303,6 +5304,59 @@ the more flattering label and the less true one.
 A typecheck and 559 unit tests passed throughout all of that. Only the browser
 found it.
 
+
+### The Thing Maker and the Skin Creator were one screen pretending to be two (2026-09-12)
+
+Phase 3 of the UI week, and the one that changes a flow rather than a layout.
+
+Inventing a thing and drawing it are one act. They were two screens: the form
+had a 150x110 box showing the built-in art the thing copies, captioned *"until
+you draw it"*, and a **Save & draw sprite →** button that left for the Skin
+Creator and came back. The caption was a promise the next screen had to keep,
+and the next screen was mostly chrome that did not apply to it.
+
+**The drawing is now on the form**, beside the fields that say what the thing
+does — name, family, what it acts like, speed, sound, and its sprite, together.
+
+**Why this is not the Skin Creator embedded.** An invented thing is always a
+single 32x32 frame: `framePlanFor` returns null for a `custom:` id, since it is
+neither the character nor in the loop or tile brush sets. So the frames rail, the
+tracing reference, the 40-tile brush grid and "Set as default" — automatic for
+custom brushes since `adoptsFirstSkin` — all had nothing to do there. What is
+left is a canvas, four tools and a palette row, which is small enough to build
+directly on `PixelCanvasOverlay` rather than to share a 1,500-line scene for.
+
+The Skin Creator keeps its own screen for the job this cannot do: reskinning the
+38 built-ins, where every one of those controls earns its place.
+
+**What went with it.** `Save & draw sprite →`, the per-row `Draw sprite` button,
+the `targetBrushId`/`returnTo` plumbing in `SkinEditorScene` and the async
+open-target branch in its `create()` — all dead once nothing hands off. Dead code
+carrying a comment about a button that no longer exists is the same defect as a
+stale note in this file.
+
+**Measured, not asserted.** `author-a-game.spec.ts` walks the whole creation path
+and counts gestures. It went from **125 to 121**, and more to the point its
+"Thing Maker" and "Skin Creator" stages — 7 and 27 — became one stage of 30. The
+saving is the round trip: two `← Back` taps, the handoff, and a second name field
+for the skin, against one extra Save.
+
+**The geometry had to be solved backwards.** The panel is sized by what must fit
+*below* it: eighteen swatches in rows of six is three rows of 28 starting 10px
+under the drawing, so `70 + SPRITE_SIZE + 10 + 84` has to stay inside the scene's
+468px floor. At the 320 it started as, the last row — the one holding the
+transparent ✕ — sat at y=482 and was simply off screen. 296 it is, which is 9.25
+screen pixels per cell against the Skin Creator's 12.
+
+Two things the first screenshot caught that no assertion would have: that missing
+swatch row, and the ✕ being *selected* on a new thing, because the "no colour
+chosen yet" state and "paint with transparent" were the same `null` — so the
+first strokes of every new thing painted nothing.
+
+**Still open:** invented things remain listed in the Skin Creator's pick grid, so
+there are two doors to drawing the same sprite. Harmless — the second one adds a
+skin that `adoptsFirstSkin` leaves unused — but redundant, and worth removing
+when someone next touches `skinTargets`.
 
 ## Project layout
 

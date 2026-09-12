@@ -17,6 +17,13 @@ import {
 import { loadCustomEntities, removeCustomEntity, saveCustomEntity } from "../entities/customEntityStorage";
 import { textureKeyFor } from "../entities/entityRegistry";
 import { PALETTE } from "../editor/Palette";
+import { PixelCanvasOverlay, type PixelTool } from "../editor/PixelCanvasOverlay";
+import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PALETTE_SWATCH_NAME } from "../skins/pixelPalettes";
+import { cellsFromPngDataUrl, cellsToPngDataUrl, hasPaintedCells } from "../skins/pixelSkinCells";
+import { loadCustomSkins, savePixelSkin } from "../skins/skinStorage";
+import { ENTITY_GRID_SIZE } from "../skins/spriteFrames";
+import { loadActiveProfile } from "../profile/Profile";
+import { cellHitArgs } from "../ui/touchTarget";
 import { playSoundKey } from "../audio/sfx";
 import { registerSound, soundKeyFor } from "../audio/soundLoader";
 import { rollSeed, SOUND_PRESETS, type SoundPreset, type SoundSpec } from "../audio/soundSynth";
@@ -54,6 +61,41 @@ const ROW_HEIGHT = 52;
 /** Leaves room under the last row for the pager, which sits at LIST_BOTTOM_Y. */
 const LIST_BOTTOM_Y = GAME_HEIGHT - 74;
 const PAGER_Y = GAME_HEIGHT - 62;
+
+// --- the drawing panel ------------------------------------------------------
+// Sized from the right margin inwards, so the form to its left keeps the space
+// it had. The form's widest row is "Acts like" (six cells of 78 from x=110,
+// ending at 578) and the sound row (eight buttons of 62 from x=110, ending
+// about 606), which is what fixes TOOL_X at 630.
+/** Small-button column beside the drawing. */
+const TOOL_X = 630;
+/** Left edge of the drawing and of the swatch grid under it. */
+const SPRITE_X = 706;
+/** Just under the title, rather than level with the form's first row: the
+ * drawing and its palette together are taller than the form, so every pixel
+ * spent above the canvas comes off the bottom of the swatch grid. */
+const SPRITE_TOP = 70;
+/**
+ * Sized by what has to fit *below* it, not by what looks generous.
+ *
+ * Eighteen swatches in rows of six is three rows of 28, and they start 10px
+ * under the drawing: 70 + SPRITE_SIZE + 10 + 84 has to stay inside the scene's
+ * 468px floor. At the 320 this started as, the last row — which holds the
+ * transparent ✕ — sat at y=482 and was simply not on screen.
+ *
+ * 296 over a 32-cell grid is 9.25 screen pixels per cell, against the Skin
+ * Creator's 12 at fit zoom. Smaller, and the right trade: that screen is for a
+ * body of artwork and this one is for one sprite you can see whole while you
+ * decide what it does.
+ */
+const SPRITE_SIZE = 296;
+const SWATCH_SIZE = 24;
+const SWATCH_STEP = 28;
+const SWATCH_COLS = 6;
+/** Sound buttons are stepped rather than fixed at the old 76 so the row's last
+ * button ("▶ Play", the eighth) finishes clear of the tool column at 630. */
+const SOUND_STEP = 62;
+const SWATCH_TOP = SPRITE_TOP + SPRITE_SIZE + 10;
 
 /** The three families, in the order the form offers them. */
 const CATEGORIES: { id: CustomEntityCategory; label: string }[] = [
@@ -114,6 +156,25 @@ export class ThingMakerScene extends Phaser.Scene {
   private deleteButtons: ConfirmButton[] = [];
   private saveError?: string;
 
+  // --- the drawing, carried across rebuilds ---------------------------------
+  // Every field on the form calls `rebuild`, which destroys the whole display
+  // list and the canvas overlay with it, so the drawing lives here rather than
+  // inside the panel that draws it. Without this, choosing a different "acts
+  // like" halfway through would throw the artwork away.
+  private spriteCanvas?: PixelCanvasOverlay;
+  private spriteCells?: (string | null)[];
+  /**
+   * `null` means the transparent ✕ — an eraser you paint with — so it is not a
+   * safe "nothing chosen yet" value: starting there selects the ✕ and the first
+   * strokes of every new thing paint nothing at all. Starts on a real colour and
+   * only becomes null when somebody picks the ✕ deliberately.
+   */
+  private spriteColor: string | null = findPalette(DEFAULT_PIXEL_PALETTE_ID).colors[0] ?? "#000000";
+  private spriteTool: PixelTool = "paint";
+  /** The library entry this drawing came from, so re-saving edits it in place
+   * rather than leaving a second skin behind on every save. */
+  private spriteSkinId?: string;
+
   constructor() {
     super("ThingMaker");
   }
@@ -142,6 +203,10 @@ export class ThingMakerScene extends Phaser.Scene {
     // the stale-listener bug that distinction causes.
     this.nameInput?.destroy();
     this.nameInput = undefined;
+    // Its cells are already in `spriteCells` — `onPaint` writes them on every
+    // stroke — so destroying it here loses the element, never the drawing.
+    this.spriteCanvas?.destroy();
+    this.spriteCanvas = undefined;
     this.deleteButtons = [];
     for (const child of [...this.children.list]) child.destroy();
 
@@ -240,8 +305,11 @@ export class ThingMakerScene extends Phaser.Scene {
         .text(84, mid + 8, `Acts like a ${builtinLabel(def.basedOn)}`, { fontSize: "11px", color: MUTED_COLOR })
         .setOrigin(0, 0);
 
-      this.makeButton(GAME_WIDTH - 380, mid, "Edit", () => this.startEdit(def));
-      this.makeButton(GAME_WIDTH - 320, mid, "Draw sprite", () => this.drawSpriteFor(def));
+      // One button, where there were two. "Draw sprite" used to sit here and
+      // jump to the Skin Creator; Edit now opens the form *and* the drawing
+      // together, so a second door to half of it is just a second thing to
+      // read.
+      this.makeButton(GAME_WIDTH - 320, mid, "Edit", () => this.startEdit(def));
       const del = new ConfirmButton({
         scene: this,
         x: GAME_WIDTH - 200,
@@ -282,6 +350,7 @@ export class ThingMakerScene extends Phaser.Scene {
     this.draft = newCustomEntityDef(makeCustomEntityId(crypto.randomUUID()), "items");
     this.draftIsNew = true;
     this.saveError = undefined;
+    this.clearSprite();
     this.goTo("edit");
   }
 
@@ -289,7 +358,44 @@ export class ThingMakerScene extends Phaser.Scene {
     this.draft = { ...def };
     this.draftIsNew = false;
     this.saveError = undefined;
+    this.clearSprite();
     this.goTo("edit");
+    void this.loadSprite(def.id);
+  }
+
+  /** Forgets the previous thing's drawing. Without this, opening a second thing
+   * would show the first one's sprite until its own finished decoding — and
+   * would then *save* it onto the second thing. */
+  private clearSprite(): void {
+    this.spriteCells = undefined;
+    this.spriteSkinId = undefined;
+    this.spriteColor = findPalette(DEFAULT_PIXEL_PALETTE_ID).colors[0] ?? "#000000";
+    this.spriteTool = "paint";
+  }
+
+  /**
+   * Loads whatever has already been drawn for this thing, if anything.
+   *
+   * The PNG is the storage format — a skin keeps no second copy of its cell
+   * grid (see PixelSkinData.cells) — so re-opening one means decoding it back,
+   * exactly as SkinEditorScene.openForEditing does.
+   *
+   * Guarded against arriving late: decoding is asynchronous and a fast hand can
+   * be on a different thing, or back at the list, before it lands. Writing the
+   * cells then would put one thing's artwork on another.
+   */
+  private async loadSprite(id: string): Promise<void> {
+    const entry = await loadCustomSkins()
+      .then((skins) => skins[id])
+      .catch(() => undefined);
+    const asset = entry?.items[0];
+    if (!asset) return;
+    const cells = await cellsFromPngDataUrl(asset.imageData, ENTITY_GRID_SIZE).catch(() => null);
+    if (!cells || !this.scene.isActive()) return;
+    if (this.mode !== "edit" || this.draft?.id !== id) return;
+    this.spriteCells = cells;
+    this.spriteSkinId = asset.id;
+    this.spriteCanvas?.loadCells(cells);
   }
 
   private buildEdit(): void {
@@ -415,7 +521,7 @@ export class ThingMakerScene extends Phaser.Scene {
       this.makeButton(110, soundY, "None", () => setSound(undefined), () => !current);
       SOUND_PRESETS.forEach((preset, i) => {
         this.makeButton(
-          172 + i * 76,
+          172 + i * SOUND_STEP,
           soundY,
           SOUND_LABELS[preset],
           // Picking a kind with no seed yet rolls one, so a single tap is always
@@ -428,31 +534,131 @@ export class ThingMakerScene extends Phaser.Scene {
       // Roll is how you get a *different* noise of the same kind: the seed is
       // the only variation mechanism, deliberately, instead of a panel of
       // sliders nobody wants on a game canvas.
-      this.makeButton(172 + SOUND_PRESETS.length * 76, soundY, "🎲 Roll", () => {
+      this.makeButton(172 + SOUND_PRESETS.length * SOUND_STEP, soundY, "🎲 Roll", () => {
         if (current) setSound({ preset: current.preset, seed: rollSeed() });
       });
-      this.makeButton(172 + (SOUND_PRESETS.length + 1) * 76, soundY, "▶ Play", () => {
+      this.makeButton(172 + (SOUND_PRESETS.length + 1) * SOUND_STEP, soundY, "▶ Play", () => {
         if (current) void this.previewSound(current);
       });
       y += 56;
     }
 
-    // --- preview
-    this.add.text(GAME_WIDTH - 220, 78, "Looks like", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
-    const previewArt = this.artFor(draft);
-    this.add.rectangle(GAME_WIDTH - 230, 96, 150, 110, 0x0f1830).setOrigin(0, 0);
-    if (previewArt) fitWithinTile(this.add.image(GAME_WIDTH - 155, 142, previewArt), 56);
-    this.add
-      .text(GAME_WIDTH - 155, 182, "until you draw it", { fontSize: "10px", color: MUTED_COLOR })
-      .setOrigin(0.5, 0);
+    this.buildSpritePanel();
 
     // --- save
     if (this.saveError) {
       this.add.text(60, y, this.saveError, { fontSize: "12px", color: "#ff9d9d" }).setOrigin(0, 0.5);
     }
     y += 34;
-    this.makeButton(60, y, "Save", () => void this.save(false));
-    this.makeButton(130, y, "Save & draw sprite →", () => void this.save(true));
+    this.makeButton(60, y, "Save", () => void this.save());
+  }
+
+  /**
+   * The drawing, on the same screen as the thing it belongs to.
+   *
+   * Until 2026-09-12 this corner held a 150x110 box showing the built-in art
+   * the thing copies, captioned "until you draw it", and a "Save & draw
+   * sprite →" button that left for the Skin Creator and came back. Inventing a
+   * thing and drawing it are one act, and they are one screen now: the caption
+   * was a promise that the next screen would deliver, and the next screen was
+   * mostly chrome that did not apply.
+   *
+   * **Why this is not the Skin Creator embedded.** An invented thing is always a
+   * single 32x32 frame — `framePlanFor` returns null for a `custom:` id, since
+   * it is not the character and not in the loop or tile brush sets — so the
+   * frames rail, the tracing reference, the 40-tile brush grid and "Set as
+   * default" (automatic for custom brushes since `adoptsFirstSkin`) all have
+   * nothing to do here. What is left is a canvas, four tools and some colours,
+   * which is small enough to build directly on `PixelCanvasOverlay` rather than
+   * to share a 1,500-line scene for.
+   *
+   * The Skin Creator keeps its own screen for the job this cannot do: reskinning
+   * the 38 built-ins, where every one of those controls earns its place.
+   */
+  private buildSpritePanel(): void {
+    this.add.text(SPRITE_X, SPRITE_TOP - 14, "Looks like", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
+
+    this.spriteCanvas = new PixelCanvasOverlay({
+      scene: this,
+      viewport: { x: SPRITE_X, y: SPRITE_TOP, width: SPRITE_SIZE, height: SPRITE_SIZE },
+      gridSize: ENTITY_GRID_SIZE,
+      // Carried across rebuilds rather than re-read from storage: every field on
+      // this form rebuilds the whole scene (see `rebuild`), so choosing a
+      // different "acts like" halfway through drawing would otherwise throw the
+      // drawing away. Same reason SkinEditorScene re-captures cells on a palette
+      // switch.
+      initialCells: this.spriteCells,
+      onPaint: () => {
+        this.spriteCells = this.spriteCanvas?.getCells();
+      },
+      onColorPicked: (color) => {
+        this.spriteColor = color;
+        this.rebuild();
+      },
+    });
+    this.spriteCanvas.setCurrentColor(this.spriteColor);
+    this.spriteCanvas.setTool(this.spriteTool);
+    this.spriteCanvas.fitToViewport();
+
+    // Tools, in a column to the left of the drawing.
+    const tools: { tool: PixelTool; label: string }[] = [
+      { tool: "paint", label: "Paint" },
+      { tool: "erase", label: "Erase" },
+      { tool: "fill", label: "Fill" },
+      { tool: "eyedropper", label: "Pick" },
+    ];
+    tools.forEach(({ tool, label }, i) => {
+      this.makeButton(
+        TOOL_X,
+        SPRITE_TOP + 13 + i * 34,
+        label,
+        () => {
+          this.spriteTool = tool;
+          this.spriteCanvas?.setTool(tool);
+          this.rebuild();
+        },
+        () => this.spriteTool === tool,
+      );
+    });
+    this.makeButton(TOOL_X, SPRITE_TOP + 13 + 4 * 34 + 10, "Undo", () => {
+      if (this.spriteCanvas?.undo()) this.spriteCells = this.spriteCanvas.getCells();
+    });
+
+    // Colours, under the drawing. One fixed palette rather than the Skin
+    // Creator's five: picking a palette is a decision about a body of artwork,
+    // and this screen is one sprite.
+    const palette = findPalette(DEFAULT_PIXEL_PALETTE_ID);
+    const swatches: (string | null)[] = [...palette.colors, null];
+    swatches.forEach((color, i) => {
+      const sx = SPRITE_X + (i % SWATCH_COLS) * SWATCH_STEP;
+      const sy = SWATCH_TOP + Math.floor(i / SWATCH_COLS) * SWATCH_STEP;
+      const selected = color === this.spriteColor;
+      const bg = this.add
+        .rectangle(sx, sy, SWATCH_SIZE, SWATCH_SIZE, color ? Phaser.Display.Color.HexStringToColor(color).color : 0x333333)
+        .setOrigin(0, 0)
+        .setStrokeStyle(selected ? 3 : 1, selected ? 0xffeb3b : 0x000000, selected ? 1 : 0.4)
+        // The whole cell, same as the Skin Creator's — see ui/touchTarget.ts.
+        .setInteractive(
+          new Phaser.Geom.Rectangle(
+            ...cellHitArgs({ width: SWATCH_SIZE, height: SWATCH_SIZE }, { width: SWATCH_STEP, height: SWATCH_STEP }),
+          ),
+          Phaser.Geom.Rectangle.Contains,
+        )
+        .setName(PALETTE_SWATCH_NAME);
+      bg.input!.cursor = "pointer";
+      if (!color) {
+        this.add
+          .text(sx + SWATCH_SIZE / 2, sy + SWATCH_SIZE / 2, "✕", { fontSize: "13px", color: "#ffffff" })
+          .setOrigin(0.5);
+      }
+      bg.on("pointerdown", () => {
+        this.spriteColor = color;
+        // Reaching for a colour means you want to paint with it, not keep
+        // erasing — the same reading SkinEditorScene's swatches take.
+        if (this.spriteTool === "erase" && color !== null) this.spriteTool = "paint";
+        this.rebuild();
+      });
+    });
   }
 
   // --- actions -------------------------------------------------------------
@@ -464,7 +670,7 @@ export class ThingMakerScene extends Phaser.Scene {
    * The reason is `validationError`'s, verbatim — this scene never composes its
    * own message, so what it refuses and what storage would refuse cannot drift.
    */
-  private async save(thenDraw: boolean): Promise<void> {
+  private async save(): Promise<void> {
     const draft = this.draft;
     if (!draft) return;
     const reason = validationError(draft);
@@ -474,13 +680,49 @@ export class ThingMakerScene extends Phaser.Scene {
       return;
     }
     await saveCustomEntity(draft);
+    await this.saveSprite(draft);
     await this.reloadDefs();
-    if (thenDraw) this.drawSpriteFor(draft);
-    else this.goTo("browse");
+    this.goTo("browse");
   }
 
-  /** Hands off to the Skin Creator with this thing already selected, so drawing
-   * it is one tap from making it rather than a hunt through a 40-tile grid. */
+  /**
+   * Writes the drawing, if there is one, as this thing's skin.
+   *
+   * Silent when nothing has been painted: a thing with no sprite is a perfectly
+   * good thing — it wears the art of whatever it copies — and saving a blank
+   * PNG over that would replace working art with an invisible square. This is
+   * the same judgement `hasPaintedCells` exists for in the Skin Creator's own
+   * frame handling.
+   *
+   * `spriteSkinId` is passed so re-saving edits the library entry in place.
+   * Without it, every Save on an existing thing would leave another skin
+   * behind, and the first one drawn would stay the default for ever — see
+   * `adoptsFirstSkin`.
+   *
+   * A failure here does not fail the save: the definition is already written
+   * and is the part that cannot be redrawn from memory. It says so rather than
+   * pretending, and the thing keeps the art it had.
+   */
+  private async saveSprite(draft: CustomEntityDef): Promise<void> {
+    const cells = this.spriteCells;
+    if (!cells || !hasPaintedCells(cells)) return;
+    const imageData = this.spriteCanvas?.exportPngDataUrl() ?? cellsToPngDataUrl(cells, ENTITY_GRID_SIZE);
+    try {
+      this.spriteSkinId = await savePixelSkin(
+        draft.id,
+        this.spriteSkinId,
+        imageData,
+        { paletteId: DEFAULT_PIXEL_PALETTE_ID },
+        loadActiveProfile() ?? "unknown",
+        undefined,
+        draft.name,
+      );
+    } catch (err) {
+      console.error("Thing sprite save failed:", err);
+      this.saveError = "Saved the thing, but its drawing could not be saved.";
+    }
+  }
+
   /**
    * Decodes a sound and plays it once, so you can hear what you picked.
    *
@@ -492,10 +734,6 @@ export class ThingMakerScene extends Phaser.Scene {
   private async previewSound(sound: SoundSpec): Promise<void> {
     const key = await registerSound(this, soundKeyFor(`${this.draft?.id ?? "preview"}-preview`), sound);
     if (key) playSoundKey(this, key);
-  }
-
-  private drawSpriteFor(def: CustomEntityDef): void {
-    this.scene.start("SkinEditor", { targetBrushId: def.id, returnTo: "ThingMaker" });
   }
 
   private async deleteThing(def: CustomEntityDef): Promise<void> {
