@@ -1,7 +1,12 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
-import { CutScene, CutScenePanel, playablePanels } from "../game/CutScene";
+import { CutScene, CutScenePanel, panelActors, playablePanels } from "../game/CutScene";
+import { actorTextureKey } from "../game/cutSceneCast";
+import { BAND_HEIGHT, stageHeightOf } from "../game/cutSceneLayout";
+import { loadCustomEntities } from "../entities/customEntityStorage";
 import { loadLibraryImageTexture } from "../gameplay/backgroundLoader";
+import { isBuiltinBackgroundId, staticBackgroundDef } from "../level/staticBackgrounds";
+import { resolveSkinTextureKeys } from "../skins/skinLoader";
 import { BUTTON_COLOR, BUTTON_HOVER_COLOR } from "../ui/theme";
 
 /**
@@ -29,10 +34,21 @@ interface CutSceneSceneData {
   next?: NextSceneInstruction;
 }
 
-/** The words sit in a band across the bottom rather than over the middle of the
- * picture: a caption that lands on somebody's face is the usual way this looks
- * wrong, and a fixed band is also a fixed place for the eye to return to. */
-const BAND_HEIGHT = 132;
+/**
+ * Explicit, because add-order stopped being enough once characters arrived.
+ *
+ * The picture is drawn late (it is async) and so has always had to say where it
+ * belongs. Actors sit above it and below the caption — a character standing over
+ * the words would make the words unreadable, and the whole reason the band
+ * exists is that a caption must never land on somebody's face. Actor depth is
+ * `ACTORS + index`, so an actor placed later stands in front of one placed
+ * earlier; `WORDS` is far enough above that no plausible cast can reach it.
+ */
+const BACKDROP_DEPTH = -20;
+const PICTURE_DEPTH = -10;
+const ACTORS_DEPTH = 0;
+const WORDS_DEPTH = 1000;
+const CONTROLS_DEPTH = 2000;
 
 export class CutSceneScene extends Phaser.Scene {
   private panels: CutScenePanel[] = [];
@@ -75,11 +91,51 @@ export class CutSceneScene extends Phaser.Scene {
     this.children.removeAll(true);
     const panel = this.panels[this.index];
 
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x12122a).setOrigin(0, 0);
+    // What a panel with no picture shows, and what fills any edge a picture does
+    // not cover. **Its depth is load-bearing**: it is opaque, so while it sat at
+    // the default 0 with the picture at -10 it painted over every picture this
+    // screen has ever been given. Nothing caught that — the e2e test checks the
+    // published bundle rather than the pixels, no shipped game had a picture, and
+    // until 2026-09-13 the maker's picker did not offer one that needed no
+    // upload, so the combination was close to unreachable.
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x12122a).setOrigin(0, 0).setDepth(BACKDROP_DEPTH);
     if (panel.imageId) void this.drawPicture(panel.imageId);
+    if (panelActors(panel).length > 0) void this.drawActors(panel);
     if (panel.words?.trim()) this.drawWords(panel.words.trim(), !!panel.imageId);
 
     this.drawControls();
+  }
+
+  /**
+   * Everybody standing in this panel.
+   *
+   * Async for the same reason `drawPicture` is — resolving custom skins is a
+   * storage read — and guarded the same way: a cast that arrives after the
+   * reader has pressed Next must not paint itself over the panel that replaced
+   * it.
+   *
+   * Drawn in array order, so an actor added later stands in front of one added
+   * earlier. That is the only depth rule, and it is one an author can act on:
+   * to put somebody behind, place them first.
+   */
+  private async drawActors(panel: CutScenePanel): Promise<void> {
+    const shownAt = this.index;
+    const [skins, defs] = await Promise.all([resolveSkinTextureKeys(this), loadCustomEntities()]);
+    if (!this.scene.isActive() || this.index !== shownAt) return;
+
+    panelActors(panel).forEach((actor, order) => {
+      const key = actorTextureKey(skins, defs, actor.id);
+      if (!key || !this.textures.exists(key)) return;
+      this.add
+        // Origin (0.5, 1): `y` is the character's feet. Standing on the ground
+        // is what an author is nearly always aiming at, and the one position
+        // that has to land exactly where they put it.
+        .image(actor.x * GAME_WIDTH, actor.y * stageHeightOf(GAME_HEIGHT), key)
+        .setOrigin(0.5, 1)
+        .setScale(actor.scale ?? 1)
+        .setFlipX(!!actor.flip)
+        .setDepth(ACTORS_DEPTH + order);
+    });
   }
 
   /**
@@ -92,15 +148,34 @@ export class CutSceneScene extends Phaser.Scene {
    * it.
    */
   private async drawPicture(imageId: string): Promise<void> {
+    // A built-in is already on the GPU — BootScene preloads all four — so it is
+    // painted immediately, with **no staleness guard at all**. That is not an
+    // oversight: nothing has happened yet that could have gone stale, and the
+    // guard below is actively wrong here. `scene.isActive()` is false while
+    // `create()` is still running, so checking it on this path silently dropped
+    // every built-in picture — the first version of this shared one guard
+    // between both branches and drew nothing at all.
+    if (isBuiltinBackgroundId(imageId)) {
+      this.paintPicture(staticBackgroundDef(imageId).textureKey);
+      return;
+    }
+
     const shownAt = this.index;
     const key = await loadLibraryImageTexture(this, imageId);
+    // Now the guard earns its place: this resumes some time later, and by then
+    // the scene may be gone or the reader may have pressed Next.
     if (!key || !this.scene.isActive() || this.index !== shownAt) return;
-    const image = this.add.image(GAME_WIDTH / 2, (GAME_HEIGHT - BAND_HEIGHT) / 2, key).setDepth(-10);
-    const scale = Math.max(GAME_WIDTH / image.width, (GAME_HEIGHT - BAND_HEIGHT) / image.height);
-    image.setScale(scale);
-    // Behind the words, which were drawn first: this arrives late, so it has to
-    // say where it belongs rather than rely on the order things were added.
-    this.children.sendToBack(image);
+    this.paintPicture(key);
+  }
+
+  /** Cover-fit into the stage, so the picture fills the width and the caption
+   * band sits below it rather than over somebody's face. */
+  private paintPicture(key: string): void {
+    const image = this.add.image(GAME_WIDTH / 2, (GAME_HEIGHT - BAND_HEIGHT) / 2, key).setDepth(PICTURE_DEPTH);
+    image.setScale(Math.max(GAME_WIDTH / image.width, (GAME_HEIGHT - BAND_HEIGHT) / image.height));
+    // No `sendToBack`: it used to stand in for a depth and could not actually
+    // work, since the backdrop it needed to get behind is opaque and was added
+    // first. The depth constants say it properly.
   }
 
   /**
@@ -121,7 +196,10 @@ export class CutSceneScene extends Phaser.Scene {
    */
   private drawWords(words: string, hasPicture: boolean): void {
     if (hasPicture) {
-      this.add.rectangle(0, GAME_HEIGHT - BAND_HEIGHT, GAME_WIDTH, BAND_HEIGHT, 0x0b0b1c, 0.82).setOrigin(0, 0);
+      this.add
+        .rectangle(0, GAME_HEIGHT - BAND_HEIGHT, GAME_WIDTH, BAND_HEIGHT, 0x0b0b1c, 0.82)
+        .setOrigin(0, 0)
+        .setDepth(WORDS_DEPTH);
       this.add
         .text(GAME_WIDTH / 2, GAME_HEIGHT - BAND_HEIGHT + 22, words, {
           fontSize: "16px",
@@ -130,7 +208,8 @@ export class CutSceneScene extends Phaser.Scene {
           lineSpacing: 6,
           wordWrap: { width: GAME_WIDTH - 220 },
         })
-        .setOrigin(0.5, 0);
+        .setOrigin(0.5, 0)
+        .setDepth(WORDS_DEPTH);
       return;
     }
 
@@ -145,14 +224,27 @@ export class CutSceneScene extends Phaser.Scene {
         lineSpacing: 10,
         wordWrap: { width: GAME_WIDTH - 260 },
       })
-      .setOrigin(0.5, 0.5);
+      .setOrigin(0.5, 0.5)
+      .setDepth(WORDS_DEPTH);
   }
 
   private drawControls(): void {
     const isLast = this.index === this.panels.length - 1;
     this.add
-      .text(GAME_WIDTH / 2, 26, `${this.index + 1} / ${this.panels.length}`, { fontSize: "12px", color: "#a6a6c8" })
-      .setOrigin(0.5);
+      // Carries its own dark pill. It used to be bare muted grey, which read
+      // fine against the flat backdrop that was all this screen ever actually
+      // drew — the moment pictures started rendering it landed on bright sky and
+      // vanished. Safe to give a `backgroundColor` because this string is never
+      // empty: an empty padded Text still paints its padding box, which is the
+      // stray rectangle the editor carried for weeks.
+      .text(GAME_WIDTH / 2, 26, `${this.index + 1} / ${this.panels.length}`, {
+        fontSize: "12px",
+        color: "#e6e6f0",
+        backgroundColor: "#0b0b1cbb",
+        padding: { x: 8, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setDepth(CONTROLS_DEPTH);
     this.button(GAME_WIDTH - 130, GAME_HEIGHT - 34, isLast ? "Begin ▶" : "Next ▸", () => this.advance());
     // Always offered, including on the last panel, where it means the same
     // thing as Next — one control that always ends the scene is easier to find
@@ -169,6 +261,7 @@ export class CutSceneScene extends Phaser.Scene {
         padding: { x: 14, y: 10 },
       })
       .setOrigin(0, 0.5)
+      .setDepth(CONTROLS_DEPTH)
       .setInteractive({ useHandCursor: true });
     text.on("pointerdown", onClick);
     text.on("pointerover", () => text.setStyle({ backgroundColor: BUTTON_HOVER_COLOR }));

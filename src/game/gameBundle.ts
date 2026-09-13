@@ -1,6 +1,6 @@
 import { BackgroundAsset } from "../backgrounds/BackgroundLibrary";
 import { CustomEntityDef, CustomEntityId, isCustomEntityId } from "../entities/customEntity";
-import { cutSceneBackgroundIds } from "./CutScene";
+import { cutSceneActorIds, cutSceneBackgroundIds } from "./CutScene";
 import { LevelArea, LevelData } from "../level/LevelSchema";
 import { MusicAsset } from "../music/MusicLibrary";
 import { CustomSkinsFile } from "../skins/CustomSkins";
@@ -135,6 +135,16 @@ export function bundleProblems(bundle: GameBundle): string[] {
   }
   for (const id of referencedCustomEntityIds(bundle.levels)) {
     if (!entityIds.has(id)) problems.push(`An invented thing is missing (${id}); it will not be drawn.`);
+  }
+  // Cut-scene actors need no collecting — `customEntities` and `skins` travel
+  // whole, so the art is always there — but an actor can still name an invented
+  // thing the author has since deleted, and that panel would play a character
+  // short with nothing said about it. Built-in ids are not custom ids, so they
+  // never reach this.
+  for (const id of cutSceneActorIds(bundle.game.opening, bundle.game.closing)) {
+    if (isCustomEntityId(id) && !entityIds.has(id)) {
+      problems.push(`A cut-scene panel uses an invented thing that is missing (${id}); it will not be drawn.`);
+    }
   }
   return problems;
 }

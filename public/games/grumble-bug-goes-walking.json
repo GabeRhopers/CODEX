@@ -14,10 +14,52 @@
     "opening": {
       "panels": [
         {
-          "words": "A Grumble Bug woke up in the meadow."
+          "imageId": "meadow",
+          "words": "A Grumble Bug woke up in the meadow.",
+          "actors": [
+            {
+              "id": "decor-mushroom",
+              "x": 0.28,
+              "y": 1,
+              "scale": 2
+            },
+            {
+              "id": "decor-sprout",
+              "x": 0.66,
+              "y": 1,
+              "scale": 2
+            },
+            {
+              "id": "custom:fcc0cefd-30c2-43c5-b622-54223f9b7702",
+              "x": 0.46,
+              "y": 1,
+              "scale": 2.5
+            }
+          ]
         },
         {
-          "words": "It was a long way home."
+          "imageId": "meadow",
+          "words": "It was a long way home.",
+          "actors": [
+            {
+              "id": "decor-tree",
+              "x": 0.62,
+              "y": 1,
+              "scale": 2.5
+            },
+            {
+              "id": "decor-rocks",
+              "x": 0.85,
+              "y": 1,
+              "scale": 2
+            },
+            {
+              "id": "custom:fcc0cefd-30c2-43c5-b622-54223f9b7702",
+              "x": 0.2,
+              "y": 1,
+              "scale": 2
+            }
+          ]
         }
       ]
     },

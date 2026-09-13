@@ -46,6 +46,20 @@ export function resolveStaticBackground(level: { background?: StaticBackgroundId
   return DEFAULT_STATIC_BACKGROUND;
 }
 
+/**
+ * Whether an arbitrary string is one of the 4 shipped ids.
+ *
+ * The question a cut scene has to ask. A panel's `imageId` holds *either* a
+ * built-in id or a background-library uuid, and the two behave nothing alike:
+ * a built-in is preloaded by BootScene and ships with the app, a library id has
+ * to be loaded at runtime and carried into a published bundle. Three places need
+ * to tell them apart — the picker's label, playback's texture lookup and the
+ * bundle collector — so the rule lives here rather than three times over.
+ */
+export function isBuiltinBackgroundId(id: string): id is BuiltinStaticBackgroundId {
+  return STATIC_BACKGROUNDS.some((bg) => bg.id === id);
+}
+
 export function staticBackgroundDef(id: BuiltinStaticBackgroundId): StaticBackgroundDef {
   const def = STATIC_BACKGROUNDS.find((bg) => bg.id === id);
   if (!def) throw new Error(`Unknown static background: ${id}`);

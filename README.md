@@ -129,6 +129,7 @@ appear under more than one heading if it belongs to both.
 - [The Thing Maker and the Skin Creator were one screen pretending to be two](#the-thing-maker-and-the-skin-creator-were-one-screen-pretending-to-be-two-2026-09-12)
 - [A screen survey, and the rectangle it found](#a-screen-survey-and-the-rectangle-it-found-2026-09-12)
 - [The letterbox stopped looking like a bug](#the-letterbox-stopped-looking-like-a-bug-2026-09-13)
+- [Cut-scene pictures nobody could reach, and characters to stand in them](#cut-scene-pictures-nobody-could-reach-and-characters-to-stand-in-them-2026-09-13)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5117,11 +5118,17 @@ and worlds parse. It is content, hand-written, and nothing was checking it; a
 dangling reference is silent in the editor and a broken screen for the one
 audience that cannot report a stack trace.
 
-**Still open:** cut-scene panels have no pictures. A panel's `imageId` is a
-background-*library* id — an uploaded image travelling in the bundle — so
-pictures mean embedding image data, which is a different job. The picture-less
-panels centre their words and read fine, which is what that treatment was built
-for.
+**Still open:** the shipped demos' cut-scene panels have no pictures. A panel's
+`imageId` is a background-*library* id — an uploaded image travelling in the
+bundle — and these demos ship no uploads, so their panels centre their words
+instead, which is what that treatment was built for.
+
+*Resolved 2026-09-13.* The wording above was wrong in a way worth keeping
+visible: it says "no pictures" when it meant "these two games have none", and
+that reading of it stood for eleven days. It also named the real cause without
+noticing — `imageId` could only be a *library* id, so a panel could show a
+picture only if somebody had uploaded one. Both demos are illustrated now. See
+"Cut-scene pictures nobody could reach, and characters to stand in them".
 
 ### Somebody made a game with the tool, and two of the findings were bad (2026-09-09)
 
@@ -5451,6 +5458,94 @@ reads. `HandheldShell` deliberately frames the game as a handheld console; until
 now it was a console floating in the same colour as itself. A darkened surround
 is the desk it was always meant to be sitting on.
 
+### Cut-scene pictures nobody could reach, and characters to stand in them (2026-09-13)
+
+This started as "cut scenes are still text on an empty field, let's add
+pictures". Pictures already existed — authored, rendered, published and
+e2e-tested since 2026-09-02. Chasing why nobody had ever seen one turned up
+three faults, each of which hid the next.
+
+**1. The picker offered nothing to pick.** `refreshThumbnails` built its list as
+`No picture` plus the uploaded background library — and stopped there.
+`EditorScene.onBackgroundPickerOpen`, which looks identical and sits forty lines
+away in a different file, merges the 4 shipped backgrounds in. So a child who had
+never uploaded an image opened the picture picker and found exactly one option,
+called "No picture". That is every child on day one, and it is why both shipped
+games have words-only openings. The feature was unreachable rather than missing.
+
+**2. The picture was painted over.** `render()` draws an opaque `#12122a`
+backdrop and then the picture at depth −10. Depth sorting puts −10 first, so the
+backdrop covered every picture this screen was ever given. The old
+`children.sendToBack(image)` could not help — reordering cannot beat a depth
+sort, and the thing it needed to get behind was added first. The depths are named
+constants now (`BACKDROP · PICTURE · ACTORS · WORDS · CONTROLS`), because
+add-order stopped being enough the moment characters could stand between the
+picture and the caption.
+
+**3. `scene.isActive()` is false inside `create()`.** Found while fixing 1 and 2,
+and only because a built-in needs no loading: `drawPicture` guards against a
+picture arriving after the reader has pressed Next, which is correct *after an
+await* and simply wrong before one. The synchronous built-in path tripped it and
+returned every time. The guard now lives only on the branch that actually
+suspends, with a note saying why the other branch has none.
+
+None of the three could fail the suite that existed, which checked the published
+*bundle* rather than the pixels — and no shipped game had a picture to check.
+There is a pixel assertion now: the upper third of the canvas measures ~26 when
+the picture is missing and ~180 when it draws, and the test was run against the
+broken code first to confirm it fails at 26.
+
+**Characters.** The new half. `CutScenePanel.actors` is a list of
+`{ id, x, y, scale, flip }`, where the id is an ordinary palette/entity id, so a
+reskinned ghost or an invented thing needs nothing special — and a child who
+redrew the hero gets *their* hero, because `actorTextureKey` asks the skin
+library first. Positions are fractions of the picture area rather than pixels:
+storing pixels would bake today's caption band into every saved game, and
+`cutSceneLayout.ts` holds that shape once so the maker's small preview and
+full-size playback cannot disagree. `y` is the character's **feet** — standing on
+the ground is what an author is nearly always aiming at.
+
+Nothing was needed in the bundle collector: `skins` and `customEntities` travel
+**whole** rather than filtered (see `GameBundle`'s own docstring), so actor art
+already published correctly. `bundleProblems` gained one line, for an actor
+naming an invented thing that has since been deleted.
+
+**The Cut Scene Maker gained a stage.** The preview box is now the thing you drag
+characters around in, with a cast strip under it. Three things worth recording:
+
+- **Tapping a cast icon adds that character and selects it**, rather than arming
+  a brush the next stage tap places. The editor's palette works the armed way,
+  but this stage has a second job the tile grid does not — you also tap it to
+  pick up somebody already standing there — and one tap meaning two things
+  depending on invisible state is how a child ends up with four ghosts.
+- **The model is written on `dragend`, not on `drag`.** Every edit rebuilds the
+  scene, which destroys every child including the sprite under the finger.
+- **New characters fan out** (`placementFor`). They all landed dead centre at
+  first, so a second tap put one exactly on top of the first and read as nothing
+  having happened.
+
+Also: the scale ladder starts at 1 and defaults to 2, because 1 means "the size
+it is in a level" and a level shows 20 tiles across 640px where a panel is the
+full 1050 — the first screenshot was two characters the size of a word. And the
+panel counter now carries a dark pill: it was bare muted grey, which was fine
+against the flat backdrop that was all this screen ever actually drew, and
+vanished into bright sky the moment pictures started working.
+
+**What the screen survey caught**, one day after it was built: the cast pager's
+`Next ›` hanging off the right edge of the canvas. `assertLayoutSound` checks
+exactly that and had never seen it, because the hero plus the 19 built-in
+entities is *precisely* one page — the pager only exists once a child has
+invented something, and no layout test seeded one. There is a test for that state
+now, and it was confirmed to fail at `Text "Next ›" @(1022,365)-(1079,399)`
+before the fix.
+
+**Both demos are illustrated.** Grampa opens standing above his flock in Sunny
+Valley — whose painted art happens to have sheep in it, which was luck — and the
+Grumble Bug wakes up in the Meadow drawn with the skin somebody painted for it.
+One content note worth keeping: the tile set's blocky decor reads as *pasted* on
+a detailed painted background like Sunny Valley, and sits naturally on the app's
+own flat backgrounds like Meadow. Grampa's panels use no decor for that reason.
+
 ## Project layout
 
 See `docs/spellbound-editor-implementation-plan.md` §4 for the intended
@@ -5476,7 +5571,7 @@ src/
 │   ├── EndingScene.ts        the screen after the last world: the author's own words over the trophy
 │   ├── ThingMakerScene.ts    invent an item/enemy/decoration: name it, say what it acts like, hand off to the Skin Creator to draw it — see "The Thing Maker" under Art
 │   ├── PublishScene.ts       download the file, put it in public/games/, send the link — see "Publishing a game"
-│   ├── CutSceneMakerScene.ts one panel at a time: its picture, its words, and where it sits — see "Cut scenes"
+│   ├── CutSceneMakerScene.ts one panel at a time: its picture, its words, and the stage you drag characters around in — see "Cut scenes"
 │   └── CutSceneScene.ts      plays a cut scene, and knows nothing about games — Next, Skip, then whatever comes after
 ├── editor/
 │   ├── Palette.ts            data-driven brush definitions
@@ -5545,7 +5640,9 @@ src/
 │   └── customEntityStorage.ts  load/save/remove against the shared, non-profile-scoped custom-entities.json, same caching pattern as skinStorage.ts
 ├── game/
 │   ├── GameSchema.ts           GameData (title, ordered worldIds, ending, the two cut scenes) + its rules (pure, + unit tests)
-│   ├── CutScene.ts             panels of picture-and-words: what plays, what moving one means, and which pictures a game reaches (pure, + unit tests)
+│   ├── CutScene.ts             panels of picture, words and characters: what plays, what moving one means, and which pictures a game reaches (pure, + unit tests)
+│   ├── cutSceneCast.ts         who can stand in a panel, and the art each of them draws with (pure, + unit tests)
+│   ├── cutSceneLayout.ts       the caption band and actor sizes as fractions, so the maker's preview and playback agree (pure, + unit tests)
 │   ├── gameRun.ts              where a run starts and ends — the opening's and closing's seams in one place (pure, + unit tests)
 │   ├── gameStorage.ts          the one game per profile, mirroring the world adapter's file-per-record appProperties pattern
 │   ├── gameBundle.ts           a whole game in one file: the reference walk, bundleProblems, the size summary, and the slug the file and link share (pure, + unit tests)

@@ -16,17 +16,57 @@
     "opening": {
       "panels": [
         {
-          "words": "Every morning Grampa counted his sheep.\nThis morning, three were missing."
+          "imageId": "sunny-valley",
+          "words": "Every morning Grampa counted his sheep.\nThis morning, three were missing.",
+          "actors": [
+            {
+              "id": "player",
+              "x": 0.34,
+              "y": 1,
+              "scale": 2.5
+            }
+          ]
         },
         {
-          "words": "He put on his hat, took his basket,\nand set off down the meadow path."
+          "imageId": "sunny-valley",
+          "words": "He put on his hat, took his basket,\nand set off down the meadow path.",
+          "actors": [
+            {
+              "id": "player",
+              "x": 0.22,
+              "y": 1,
+              "scale": 2.5,
+              "flip": false
+            }
+          ]
         }
       ]
     },
     "closing": {
       "panels": [
         {
-          "words": "All three sheep were safe in the pen.\nGrampa put the kettle on."
+          "imageId": "sunny-valley",
+          "words": "All three sheep were safe in the pen.\nGrampa put the kettle on.",
+          "actors": [
+            {
+              "id": "item-heart",
+              "x": 0.38,
+              "y": 0.74,
+              "scale": 1.5
+            },
+            {
+              "id": "item-heart",
+              "x": 0.62,
+              "y": 0.74,
+              "scale": 1.5
+            },
+            {
+              "id": "player",
+              "x": 0.5,
+              "y": 1,
+              "scale": 3
+            }
+          ]
         }
       ]
     }

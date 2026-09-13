@@ -4,6 +4,7 @@ import { clickByText, gotoApp, waitForGame } from "./support/coords";
 import { makeWorld, seedLevels, seedWorlds } from "./support/worlds";
 import { assertLayoutSound } from "./support/layout";
 import { pngBuffer } from "./support/images";
+import { customDef, seedCustomEntities } from "./support/customEntities";
 import type { GameBundle } from "../../src/game/gameBundle";
 
 /**
@@ -299,4 +300,174 @@ test("the published game plays its opening, with no Drive at all", async ({ page
   await clickByText(page, "CutScene", "Begin ▶");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMap"));
   await context.close();
+});
+
+/**
+ * The three things that were wrong until 2026-09-13, each of which hid the next.
+ *
+ * 1. The maker's picker offered `No picture` plus the uploaded library and
+ *    nothing else, while the Editor's identical-looking picker merged the 4
+ *    shipped backgrounds in. A child who had never uploaded an image found one
+ *    option, called "No picture" — so nobody reached step 2.
+ * 2. The opaque backdrop sat at the default depth 0 with the picture at -10, so
+ *    every picture this screen was ever given was painted over.
+ * 3. `scene.isActive()` is false while `create()` is still running, so the
+ *    synchronous built-in path tripped a guard written for async resumption.
+ *
+ * None of them could fail the suite that existed: it checked the *bundle*, and
+ * no shipped game had a picture. So these check pixels.
+ */
+
+/**
+ * The mean brightness of a horizontal strip of the canvas, 0..255.
+ *
+ * The page decodes Playwright's own screenshot, the way `skin-grid-alignment`
+ * and `skin-grid` already do: Node has no PNG decoder and adding a dependency
+ * for one measurement is not worth it. Reading the live canvas directly does not
+ * work at all here — Phaser renders through WebGL without `preserveDrawingBuffer`,
+ * so `drawImage` from it comes back empty and every measurement would read as a
+ * black screen, which would make this test pass for the wrong reason.
+ *
+ * The sky of any of the 4 built-ins is far brighter than the `#12122a` backdrop,
+ * so this separates "a picture is drawn" from "a picture is chosen".
+ */
+async function stripBrightness(page: Page, fromFraction: number, toFraction: number): Promise<number> {
+  const box = (await page.locator("canvas").boundingBox())!;
+  const png = (await page.screenshot({ clip: box })).toString("base64");
+  return page.evaluate(
+    async ({ png, fromFraction, toFraction }) => {
+      const image = new Image();
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+        image.src = `data:image/png;base64,${png}`;
+      });
+      const scratch = document.createElement("canvas");
+      scratch.width = image.width;
+      scratch.height = image.height;
+      const ctx = scratch.getContext("2d")!;
+      ctx.drawImage(image, 0, 0);
+      const y = Math.floor(image.height * fromFraction);
+      const height = Math.max(1, Math.floor(image.height * (toFraction - fromFraction)));
+      const { data } = ctx.getImageData(0, y, image.width, height);
+      let total = 0;
+      for (let i = 0; i < data.length; i += 4) total += (data[i] + data[i + 1] + data[i + 2]) / 3;
+      return total / (data.length / 4);
+    },
+    { png, fromFraction, toFraction },
+  );
+}
+
+test("a shipped background can be chosen with an empty picture library", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  // Deliberately no seedPicture: this is the day-one child, and before this
+  // existed the only thing in the dropdown was "No picture".
+  await buildGame(page);
+
+  await clickByText(page, "GameMaker", "Opening…");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("CutSceneMaker"));
+  await clickByText(page, "CutSceneMaker", "+ Add panel");
+  await clickByText(page, "CutSceneMaker", "Picture: None ▾");
+  await expect.poll(() => labels(page, "CutSceneMaker")).toContain("Meadow");
+  await clickByText(page, "CutSceneMaker", "Meadow");
+  await expect.poll(() => labels(page, "CutSceneMaker").then((l) => l.join(" "))).toContain("Picture: Meadow");
+});
+
+test("the picture is actually drawn when the panel plays", async ({ page }) => {
+  await gotoApp(page);
+  await page.evaluate(() => {
+    const game = window.__debugGame!;
+    for (const active of game.scene.getScenes(true)) if (active.scene.key !== "Boot") game.scene.stop(active.scene.key);
+    game.scene.start("CutScene", { cutScene: { panels: [{ imageId: "meadow", words: "Once." }] }, next: { key: "Menu" } });
+  });
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("CutScene"));
+
+  // The upper third is sky when the picture draws and flat #12122a when it does
+  // not. Measured against the real thing before the fix: ~26 without, ~180 with.
+  await expect.poll(() => stripBrightness(page, 0.15, 0.4), { timeout: 10_000 }).toBeGreaterThan(90);
+});
+
+test("a panel of only characters still plays, and draws them", async ({ page }) => {
+  await gotoApp(page);
+  await page.evaluate(() => {
+    const game = window.__debugGame!;
+    for (const active of game.scene.getScenes(true)) if (active.scene.key !== "Boot") game.scene.stop(active.scene.key);
+    game.scene.start("CutScene", {
+      // No picture and no words: `panelHasContent` has to count the cast, or
+      // `playablePanels` drops this and the whole scene never plays.
+      cutScene: { panels: [{ actors: [{ id: "player", x: 0.5, y: 1, scale: 3 }] }] },
+      next: { key: "Menu" },
+    });
+  });
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("CutScene"));
+  await expect.poll(() => labels(page, "CutScene")).toContain("1 / 1");
+
+  const drawn = await page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("CutScene");
+    type Obj = { type?: string; texture?: { key: string } };
+    return (scene.children.list as unknown as Obj[]).filter((c) => c.type === "Image").map((c) => c.texture?.key);
+  });
+  expect(drawn).toContain("wizard-idle");
+});
+
+test("characters placed in the maker travel in the published file", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  await buildGame(page);
+
+  await clickByText(page, "GameMaker", "Opening…");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("CutSceneMaker"));
+  await clickByText(page, "CutSceneMaker", "+ Add panel");
+
+  // Through the real cast strip, at its real coordinates — the first column is
+  // the hero. A test that called addActor directly would not notice the strip
+  // failing to draw, which is the half an author actually touches.
+  const box = (await page.locator("canvas").boundingBox())!;
+  const scale = box.width / 1050;
+  await page.mouse.click(box.x + (24 + 15) * scale, box.y + (366 + 15) * scale);
+  await expect.poll(() => labels(page, "CutSceneMaker")).toContain("Take out");
+
+  await clickByText(page, "CutSceneMaker", "Save");
+  await expect.poll(() => labels(page, "CutSceneMaker")).toContain("Saved.");
+  await clickByText(page, "CutSceneMaker", "← Back");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameMaker"));
+
+  await clickByText(page, "GameMaker", "Publish…");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Publish"));
+  const [download] = await Promise.all([page.waitForEvent("download"), clickByText(page, "Publish", "Download")]);
+  const bundle = JSON.parse(readFileSync(await download.path(), "utf8")) as GameBundle;
+
+  const actors = bundle.game.opening?.panels[0].actors ?? [];
+  expect(actors).toHaveLength(1);
+  expect(actors[0]).toMatchObject({ id: "player" });
+  // The art travels because `skins` and `customEntities` ship whole, so there is
+  // nothing for the collector to have missed — but a built-in hero needs no
+  // library entry either, and publishing must not invent one.
+  expect(bundle.backgrounds).toEqual([]);
+});
+
+/**
+ * The cast strip, in the state where it has to page.
+ *
+ * The hero plus the 19 built-in entities is exactly one page, so the pager only
+ * exists once a child has invented something — which is why the layout test
+ * above never saw it, and why the first version reserved 180px for a row that
+ * needs 240 and pushed "Next ›" off the right edge of the canvas. A screen
+ * survey caught that; `assertLayoutSound` would have too, given this state.
+ */
+test("the cast strip stays on the canvas once it has to page", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  await seedCustomEntities(page, [
+    customDef({ id: "custom:bug", name: "Grumble Bug", category: "enemies", basedOn: "enemy-ghost" }),
+    customDef({ id: "custom:fruit", name: "Star Fruit" }),
+    customDef({ id: "custom:rock", name: "Wobble Rock" }),
+  ]);
+  await buildGame(page);
+  await clickByText(page, "GameMaker", "Opening…");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("CutSceneMaker"));
+  await clickByText(page, "CutSceneMaker", "+ Add panel");
+  await expect.poll(() => labels(page, "CutSceneMaker").then((l) => l.join(" "))).toContain("Page 1 of");
+  await assertLayoutSound(page, "CutSceneMaker");
 });

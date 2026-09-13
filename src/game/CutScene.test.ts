@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  addActor,
   addPanel,
   CutScene,
+  cutSceneActorIds,
   cutSceneBackgroundIds,
   emptyCutScene,
   hasContent,
   movePanel,
+  panelActors,
   panelHasContent,
   playablePanels,
+  removeActor,
   removePanel,
+  updateActor,
   updatePanel,
 } from "./CutScene";
 
@@ -25,6 +30,19 @@ describe("panelHasContent", () => {
     expect(panelHasContent({})).toBe(false);
     expect(panelHasContent({ words: "" })).toBe(false);
     expect(panelHasContent({ words: "   \n  " })).toBe(false);
+  });
+
+  /**
+   * A panel holding nothing but a character on the plain backdrop is still a
+   * panel somebody composed. Miss this and `playablePanels` drops it, so the
+   * work is plainly there in the maker and silently gone on the link.
+   */
+  it("counts a panel whose only content is somebody standing in it", () => {
+    expect(panelHasContent({ actors: [{ id: "enemy-ghost", x: 0.5, y: 0.8 }] })).toBe(true);
+  });
+
+  it("does not count an actors field that is present but empty", () => {
+    expect(panelHasContent({ actors: [] })).toBe(false);
   });
 });
 
@@ -116,5 +134,76 @@ describe("cutSceneBackgroundIds", () => {
   it("is empty when there are no cut scenes, or none of them have pictures", () => {
     expect(cutSceneBackgroundIds(undefined, undefined)).toEqual([]);
     expect(cutSceneBackgroundIds(scene({ words: "words only" }))).toEqual([]);
+  });
+
+  /**
+   * The half that can break publishing silently. A panel may name one of the 4
+   * shipped backgrounds, which has nothing in the library to collect — report it
+   * and `collectGameBundle` hunts for an asset that was never there, then
+   * `bundleProblems` tells the author a picture is missing when it is fine.
+   */
+  it("ignores the shipped built-ins and reports only uploaded pictures", () => {
+    const opening = scene({ imageId: "meadow" }, { imageId: "bg-upload-1" }, { imageId: "pirate-cove" });
+    expect(cutSceneBackgroundIds(opening)).toEqual(["bg-upload-1"]);
+    expect(cutSceneBackgroundIds(scene({ imageId: "sunny-valley" }, { imageId: "frozen-volcano" }))).toEqual([]);
+  });
+});
+
+describe("editing actors", () => {
+  const panel = (...actors: { id: string; x: number; y: number }[]): CutScene => scene({ actors });
+
+  it("treats a missing actors field as an empty cast", () => {
+    expect(panelActors(undefined)).toEqual([]);
+    expect(panelActors({ words: "nobody here" })).toEqual([]);
+  });
+
+  it("adds to the end of the panel's cast", () => {
+    const one = addActor(scene({}), 0, { id: "enemy-ghost", x: 0.5, y: 0.9 });
+    const two = addActor(one, 0, { id: "item-coin", x: 0.2, y: 0.7 });
+    expect(panelActors(two.panels[0]).map((a) => a.id)).toEqual(["enemy-ghost", "item-coin"]);
+  });
+
+  /** A drag that leaves the stage means "as far as it goes". An actor stored
+   * outside 0..1 would draw off the edge of a panel nobody could then select. */
+  it("clamps a position to the stage rather than refusing it", () => {
+    const added = addActor(scene({}), 0, { id: "enemy-ghost", x: -3, y: 9 });
+    expect(panelActors(added.panels[0])[0]).toMatchObject({ x: 0, y: 1 });
+
+    const moved = updateActor(added, 0, 0, { x: 1.4, y: -0.2 });
+    expect(panelActors(moved.panels[0])[0]).toMatchObject({ x: 1, y: 0 });
+  });
+
+  it("changes only the actor named, and leaves its siblings alone", () => {
+    const next = updateActor(panel({ id: "a", x: 0.1, y: 0.1 }, { id: "b", x: 0.2, y: 0.2 }), 0, 1, { flip: true });
+    expect(panelActors(next.panels[0])[0]).toEqual({ id: "a", x: 0.1, y: 0.1 });
+    expect(panelActors(next.panels[0])[1]).toMatchObject({ id: "b", flip: true });
+  });
+
+  it("removes by index and keeps the rest in order", () => {
+    const next = removeActor(panel({ id: "a", x: 0, y: 0 }, { id: "b", x: 0, y: 0 }, { id: "c", x: 0, y: 0 }), 0, 1);
+    expect(panelActors(next.panels[0]).map((a) => a.id)).toEqual(["a", "c"]);
+  });
+
+  /** Same convention as movePanel: an index naming nothing returns the very same
+   * object, so a caller can skip a redraw on identity rather than on a compare. */
+  it("returns the same cut scene when the panel or the actor does not exist", () => {
+    const one = panel({ id: "a", x: 0, y: 0 });
+    expect(addActor(one, 4, { id: "b", x: 0, y: 0 })).toBe(one);
+    expect(updateActor(one, 0, 3, { flip: true })).toBe(one);
+    expect(updateActor(one, 0, -1, { flip: true })).toBe(one);
+    expect(removeActor(one, 0, 3)).toBe(one);
+  });
+});
+
+describe("cutSceneActorIds", () => {
+  it("finds ids across both cut scenes and de-duplicates them", () => {
+    const opening = scene({ actors: [{ id: "enemy-ghost", x: 0, y: 0 }] }, { words: "nobody" });
+    const closing = scene({ actors: [{ id: "enemy-ghost", x: 0, y: 0 }, { id: "custom:bug", x: 0, y: 0 }] });
+    expect(cutSceneActorIds(opening, closing).sort()).toEqual(["custom:bug", "enemy-ghost"]);
+  });
+
+  it("is empty when nobody is standing in anything", () => {
+    expect(cutSceneActorIds(undefined)).toEqual([]);
+    expect(cutSceneActorIds(scene({ imageId: "meadow" }))).toEqual([]);
   });
 });
