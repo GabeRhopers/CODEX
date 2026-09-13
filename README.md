@@ -127,6 +127,8 @@ appear under more than one heading if it belongs to both.
 - [The default background was the one nobody had looked at](#the-default-background-was-the-one-nobody-had-looked-at-2026-09-10)
 - [My Levels and My Worlds were the same screen twice](#my-levels-and-my-worlds-were-the-same-screen-twice-2026-09-11)
 - [The Thing Maker and the Skin Creator were one screen pretending to be two](#the-thing-maker-and-the-skin-creator-were-one-screen-pretending-to-be-two-2026-09-12)
+- [A screen survey, and the rectangle it found](#a-screen-survey-and-the-rectangle-it-found-2026-09-12)
+- [The letterbox stopped looking like a bug](#the-letterbox-stopped-looking-like-a-bug-2026-09-13)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5410,6 +5412,44 @@ defect here was found by looking — the murky World Map, the cut-scene panels
 hunched at the bottom of an empty screen, the demo nobody could finish, the
 Meadow zoomed to one tree, the swatch row below the floor of the screen, and now
 this. The cheap checks were green through all of it.
+
+### The letterbox stopped looking like a bug (2026-09-13)
+
+Phase 5, the last of the UI week, and the smallest: no TypeScript at all, only
+`index.html`.
+
+The canvas is a fixed 1050x468 scaled with `Scale.FIT`, so every screen whose
+aspect is not 2.24:1 gives up a band. An iPad Pro 11" landscape gives up about a
+third of its height. **The band is not the defect and is not being reclaimed** —
+`GAME_HEIGHT = HEADER_HEIGHT + GRID_ROWS * TILE_SIZE + FOOTER_HEIGHT`, with 84
+things reading those, so reclaiming the band would change how tall a level is and
+break both published games. See "Cross-device layout: the double-centering bug"
+for how the canvas gets centered in that space.
+
+The defect was that **the matting was the same colour as the thing it matted**.
+`main.ts` clears the canvas to `#1a1a2e`; `index.html`'s body was `#1a1a2e`. With
+no edge anywhere, a third of the screen read as an app that had failed to finish
+drawing rather than as a frame around a screen.
+
+Now the body is a vignette — `radial-gradient` from `#1d1e36` at the centre to
+`#07070e` at the edges, which is where the bands are — and the canvas carries a
+hairline and a drop shadow, so it reads as a panel sitting on a surface.
+
+Two notes for whoever touches this next:
+
+- **No `border-radius`.** Rounding the canvas corners would clip real pixels, and
+  the corners are not all empty — `HandheldShell` paints into them.
+- **`box-shadow` is safe where other CSS would not be.** It paints outside the
+  border box and changes no layout, so Phaser's Scale Manager still owns the
+  canvas's size and its inline centering margins, and the canvas's
+  `getBoundingClientRect()` — which `phone-landscape.spec.ts` measures — is
+  untouched. Anything that changed the box would have re-run the double-centering
+  bug.
+
+**For `PlayScene` the band was always correct**, and this is the first time that
+reads. `HandheldShell` deliberately frames the game as a handheld console; until
+now it was a console floating in the same colour as itself. A darkened surround
+is the desk it was always meant to be sitting on.
 
 ## Project layout
 

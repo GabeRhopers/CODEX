@@ -21,7 +21,23 @@
       html, body {
         margin: 0;
         padding: 0;
-        background: #1a1a2e;
+        /* The surround, and deliberately NOT the canvas colour.
+           `main.ts` clears the canvas to #1a1a2e, and this used to be the
+           same #1a1a2e — so on any screen whose aspect isn't 1050x468 (an
+           iPad Pro 11" landscape gives up about a third of its height to
+           letterbox) the band read as an app that had failed to finish
+           drawing rather than as matting around a screen. A vignette that
+           is clearly darker than the canvas at the edges makes the canvas
+           the lit thing in the middle. Note this does not *reclaim* the
+           band: the canvas aspect is derived from the level grid
+           (GAME_HEIGHT = HEADER_HEIGHT + GRID_ROWS * TILE_SIZE +
+           FOOTER_HEIGHT), so reclaiming it would change level height. For
+           PlayScene the band is correct on purpose — HandheldShell frames
+           the game as a console on a desk, and a darkened surround is
+           exactly the desk. */
+        background: #07070e;
+        background: radial-gradient(ellipse at 50% 50%, #1d1e36 0%, #101021 58%, #07070e 100%);
+        background-attachment: fixed;
         overflow: hidden;
         /* `pinch-zoom` (not `none`): stops the browser from turning a
            single-finger tap/drag on an on-screen game control into a page
@@ -66,6 +82,17 @@
         image-rendering: pixelated;
         image-rendering: crisp-edges;
         touch-action: pinch-zoom;
+        /* A hairline and a drop shadow, so the canvas reads as a panel
+           sitting on the surface above rather than as a region of it.
+           `box-shadow` paints outside the border box and changes no
+           layout, so Phaser's Scale Manager still owns the canvas's size
+           and its inline centering margins, and the canvas's bounding box
+           — which `phone-landscape.spec.ts` measures — is untouched.
+           No `border-radius`: rounding would clip real corner pixels, and
+           the corners are not all empty (HandheldShell paints into them). */
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.07),
+          0 18px 56px rgba(0, 0, 0, 0.55);
       }
     </style>
   </head>
