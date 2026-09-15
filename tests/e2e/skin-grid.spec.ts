@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, pixelCanvasBox } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox } from "./support/coords";
 
 /**
  * The Grid overlay has to be visible against the art you are drawing, which is
@@ -103,9 +103,7 @@ async function floodWith(page: Page, hex: string): Promise<void> {
 test("the grid stays visible against both the lightest and the darkest art", async ({ page }) => {
   test.slow();
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
   await clickByText(page, "SkinEditor", "Fit");

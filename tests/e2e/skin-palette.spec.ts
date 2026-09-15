@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings } from "./support/coords";
 
 /**
  * The palette row: the shade ramp, and "Yours".
@@ -68,9 +68,7 @@ async function clickScene(page: Page, x: number, y: number): Promise<void> {
 
 async function openGhostCanvas(page: Page): Promise<void> {
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
 }

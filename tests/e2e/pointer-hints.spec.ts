@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas } from "./support/coords";
+import { clickIconWithLabel, gotoApp, openThings, waitForSkinCanvas } from "./support/coords";
 
 /**
  * Advice about a mouse is only shown to people holding one.
@@ -41,9 +41,7 @@ const labels = (page: Page): Promise<string[]> =>
 
 async function openTheCanvas(page: Page): Promise<void> {
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await waitForSkinCanvas(page);
 }

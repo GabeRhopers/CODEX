@@ -3,7 +3,7 @@ import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { AssetPickerItem, AssetPickerMenu } from "../editor/AssetPickerMenu";
 import { Brush, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
-import { CustomEntityDef } from "../entities/customEntity";
+import { CustomEntityDef, isCustomEntityId } from "../entities/customEntity";
 import { customBrushes } from "../entities/entityRegistry";
 import { loadCustomEntities } from "../entities/customEntityStorage";
 import { makePagerControls } from "../ui/PagerControls";
@@ -171,19 +171,35 @@ function skinTargets(customDefs: readonly CustomEntityDef[] = []): Brush[] {
 }
 
 /**
- * Standalone pixel-art skin creator, reachable from the Menu (see "Skin
- * Creator" under Art) rather than nested in the level Editor — drawing a
- * skin isn't tied to any one level, the same way uploading one already
- * wasn't (skins are a shared, non-profile-scoped library — see
- * skinStorage.ts). Three flat modes rather than sub-scenes: `browse`
- * (pick an existing pixel-drawn skin to re-edit, or start a new one),
- * `pick-brush` (which of the ~26 skinnable brushes a *new* skin is for),
- * and `canvas` (the actual 32x32 painter). Each mode's `build*` method
- * fully repopulates the scene's display list — `rebuild()` always clears
- * everything first — rather than showing/hiding three pre-built layers,
- * matching this codebase's existing "throwaway and reconstruct" pattern
- * for infrequent, full-screen mode switches (e.g. EditorScene's own
- * rebuildVisualsFromLevel).
+ * **The one list of everything you can paint**, and the painter behind it.
+ *
+ * Reachable from the Menu's single "Things" chip (see "One list of everything
+ * you can paint" under Art) rather than nested in the level Editor — drawing a
+ * skin isn't tied to any one level, the same way uploading one already wasn't
+ * (skins are a shared, non-profile-scoped library — see skinStorage.ts).
+ *
+ * Three flat modes rather than sub-scenes:
+ *
+ * - `pick-brush` — the **front door** since 2026-09-15, and misleadingly named
+ *   for what it now is: the grid of every paintable thing, which `skinTargets()`
+ *   builds as the hero plus the skinnable built-ins plus everything this child
+ *   has invented. It used to be a step *between* `browse` and `canvas`, reached
+ *   from "+ New Skin", while invented things had a second list of their own on
+ *   the Thing Maker. One grid, one door.
+ * - `browse` — "My skins", every skin painted so far. No longer where the screen
+ *   opens; a button on the grid.
+ * - `canvas` — the painter itself.
+ *
+ * Each mode's `build*` method fully repopulates the scene's display list —
+ * `rebuild()` always clears everything first — rather than showing/hiding three
+ * pre-built layers, matching this codebase's existing "throwaway and
+ * reconstruct" pattern for infrequent, full-screen mode switches (e.g.
+ * EditorScene's own rebuildVisualsFromLevel).
+ *
+ * An invented tile hands off to `ThingMakerScene`, which holds the fields a
+ * built-in has no use for (family, acts-like, speed, sound). Folding those into
+ * `canvas` behind an `isCustomEntityId` check is what would make this one room
+ * as well as one door.
  */
 export class SkinEditorScene extends Phaser.Scene {
   private mode: Mode = "browse";
@@ -259,7 +275,12 @@ export class SkinEditorScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.mode = "browse";
+    // The grid of everything paintable is the front door, not a step on the way
+    // to a new skin. Until 2026-09-15 this opened on the saved-skins list and
+    // the grid was reached from "+ New Skin" — which meant the Menu had to offer
+    // "Skin Creator" and "Thing Maker" as a choice made *before* a child knows
+    // which they need. See the class docstring.
+    this.mode = "pick-brush";
     this.target = undefined;
     this.pickPage = 0;
     this.rebuild();
@@ -434,19 +455,18 @@ export class SkinEditorScene extends Phaser.Scene {
   // --- mode: browse ------------------------------------------------------
 
   private buildBrowse(): void {
-    this.addBackButton(() => this.scene.start("Menu"));
-    this.add.text(GAME_WIDTH / 2, 24, "Skin Creator", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
+    this.addBackButton(() => this.goTo("pick-brush"));
+    this.add.text(GAME_WIDTH / 2, 24, "My skins", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
     this.add
-      .text(GAME_WIDTH / 2, 50, "Pixel-art skins for Markers/Enemies/Items/Decor.", {
+      .text(GAME_WIDTH / 2, 50, "Every skin you have painted, newest last.", {
         fontSize: "12px",
         color: "#a6a6c8",
       })
       .setOrigin(0.5, 0);
 
-    this.makeSmallButton(GAME_WIDTH - 24 - 100, 20 + 10, "+ New Skin", () => this.goTo("pick-brush")).setOrigin(
-      0,
-      0.5,
-    );
+    // No "+ New Skin" here any more: painting starts from the Things grid, which
+    // is now what Back goes to, so a second route to it would be two buttons one
+    // above the other doing the same thing.
 
     // Browse mode had no status line at all, so anything that went wrong here
     // — most importantly openForEditing failing to decode a skin's PNG — wrote
@@ -470,7 +490,7 @@ export class SkinEditorScene extends Phaser.Scene {
 
       if (entries.length === 0) {
         this.add
-          .text(GAME_WIDTH / 2, ROW_START_Y + 20, "No pixel skins yet — tap + New Skin to paint one.", {
+          .text(GAME_WIDTH / 2, ROW_START_Y + 20, "No skins yet — go back and tap something to paint it.", {
             fontSize: "14px",
             color: "#a6a6c8",
           })
@@ -648,11 +668,33 @@ export class SkinEditorScene extends Phaser.Scene {
 
   // --- mode: pick-brush ----------------------------------------------------
 
+  /**
+   * Every thing you can paint, in one grid: the hero, the built-ins, and
+   * whatever this child has invented.
+   *
+   * This *was* "choose what a new skin is for", a step between the saved-skins
+   * list and the canvas. It is now the front door, because the union it already
+   * built — `skinTargets()` — is exactly the one list the app was missing.
+   * Invented things sit among the built-ins rather than on a screen of their
+   * own, which is what closes the "two doors to one sprite" hole: they used to
+   * be listed both here and on the Thing Maker.
+   */
   private buildPickBrush(): void {
-    this.addBackButton(() => this.goTo("browse"));
+    this.addBackButton(() => this.scene.start("Menu"));
+    this.add.text(GAME_WIDTH / 2, 18, "Things", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
     this.add
-      .text(GAME_WIDTH / 2, 24, "Choose something to paint a skin for", { fontSize: "18px", color: "#ffffff" })
+      .text(GAME_WIDTH / 2, 44, "Paint any of these, or invent one of your own.", {
+        fontSize: "12px",
+        color: "#a6a6c8",
+      })
       .setOrigin(0.5, 0);
+
+    // Inventing is an addition to this list, so it sits with the list rather
+    // than on a screen you have to choose first.
+    this.makeSmallButton(GAME_WIDTH - 24 - 108, 30, "+ New Thing", () =>
+      this.scene.start("ThingMaker"),
+    ).setOrigin(0, 0.5);
+    this.makeSmallButton(24 + 86, 30, "My skins", () => this.goTo("browse")).setOrigin(0, 0.5);
 
     const skinnable = skinTargets(this.customDefs);
     // 8 columns of 125 rather than 6 of 150. Adding the ten block brushes took
@@ -692,7 +734,13 @@ export class SkinEditorScene extends Phaser.Scene {
       if (brush.id === "basket-up") icon.setTint(UP_BASKET_TINT_COLOR);
       const label = this.add.text(cx, cy + 46, brush.label, { fontSize: "11px", color: "#c8c8e0" }).setOrigin(0.5, 0);
 
-      const onClick = () => void this.openCanvasFor(brush);
+      // An invented thing opens its own form, where its name, family, speed and
+      // sound live alongside its drawing; a built-in has none of those, so it
+      // opens straight onto the canvas. One tile, one tap, two rooms — the rooms
+      // become one when the form folds into the canvas (phase 2).
+      const onClick = isCustomEntityId(brush.id)
+        ? () => this.scene.start("ThingMaker", { id: brush.id })
+        : () => void this.openCanvasFor(brush);
       icon.on("pointerdown", onClick);
       label.setInteractive({ useHandCursor: true }).on("pointerdown", onClick);
     });
@@ -770,7 +818,10 @@ export class SkinEditorScene extends Phaser.Scene {
     // right-to-left, since makeSmallButton has no fixed-width rectangle the way
     // EditorUI's header buttons do), the name field centred, and the status text
     // in the gap that leaves.
-    this.addBackButton(() => this.goTo("browse"), FOOTER_Y - 13);
+    // Back to the Things grid, which is where the canvas is entered from. It
+    // used to go to the saved-skins list, which was the entry point before the
+    // grid became the front door — landing somewhere you did not come from.
+    this.addBackButton(() => this.goTo("pick-brush"), FOOTER_Y - 13);
     const footerMidY = FOOTER_Y;
     this.add
       .text(110, footerMidY, `Editing: ${target.brush.label}`, { fontSize: "13px", color: "#a6a6c8" })

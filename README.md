@@ -130,6 +130,7 @@ appear under more than one heading if it belongs to both.
 - [A screen survey, and the rectangle it found](#a-screen-survey-and-the-rectangle-it-found-2026-09-12)
 - [The letterbox stopped looking like a bug](#the-letterbox-stopped-looking-like-a-bug-2026-09-13)
 - [Cut-scene pictures nobody could reach, and characters to stand in them](#cut-scene-pictures-nobody-could-reach-and-characters-to-stand-in-them-2026-09-13)
+- [One list of everything you can paint](#one-list-of-everything-you-can-paint-2026-09-15)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5369,6 +5370,10 @@ there are two doors to drawing the same sprite. Harmless — the second one adds
 skin that `adoptsFirstSkin` leaves unused — but redundant, and worth removing
 when someone next touches `skinTargets`.
 
+*Closed 2026-09-15.* Not by removing them from that grid, which was the obvious
+reading of the note above and the wrong one — it is the **right** list, and the
+Thing Maker's was the duplicate. See "One list of everything you can paint".
+
 ### A screen survey, and the rectangle it found (2026-09-12)
 
 Phase 4 of the UI week. Phase 4's target was left undecided on purpose —
@@ -5546,6 +5551,92 @@ One content note worth keeping: the tile set's blocky decor reads as *pasted* on
 a detailed painted background like Sunny Valley, and sits naturally on the app's
 own flat backgrounds like Meadow. Grampa's panels use no decor for that reason.
 
+### One list of everything you can paint (2026-09-15)
+
+The Menu offered **Skin Creator** and **Thing Maker** side by side, and the
+comment on the second one gave the whole thing away:
+
+> The Thing Maker sits beside the Skin Creator because the two are a pair: one
+> invents what a thing *does*, the other what it *looks like*, and the former
+> hands straight off to the latter.
+
+A pair with one purpose is one screen. This is the first phase of merging them:
+**one door, one list.**
+
+**What the research said.** Scratch is the closest comparable tool and it has
+already answered this. A *sprite* owns its art as *costumes*; the paint editor is
+not a destination but a tab on the sprite you already have, with a costume pane
+down the left listing them. And a sprite chosen from the library and one painted
+from scratch are the same kind of object, edited identically — which maps exactly
+onto our 38 built-in brushes versus a thing a child invents. Resnick &
+Silverman's IDC'05 principles put the sharper point on it: *"give people what
+they want, not what they ask for"*, illustrated by a Cricket `setcolor` command
+that gave direct control of three numbers when what kids actually wanted was to
+drive an LED from a temperature sensor. Two Menu chips were our `setcolor` — a
+choice a child has to make *before* knowing which they need. Their
+*"make it as simple as possible — and maybe even simpler"* adds that "reducing
+the number of features often improves the user experience."
+
+(Those are search-surfaced summaries, not pages read end to end: this
+environment's egress policy returns 403 for `nngroup.com`,
+`en.scratch-wiki.info`, `web.media.mit.edu` and `beyondbitsandatoms.org`.)
+
+**The merge is a UI change, not a data one**, and that was the finding that made
+it cheap. `customEntity.ts` already says art "is deliberately *not* a field
+here" — an invented thing's sprite is simply "the active skin for its own id",
+resolved through the same library, by the same rule, as any built-in brush.
+Nothing in storage, the bundle or the renderer moved.
+
+**The one list already existed.** `skinTargets()` is
+`[CHARACTER_BRUSH, ...PALETTE.filter(isSkinnable), ...customBrushes(customDefs)]`
+— the hero, the built-ins and every invented thing. It was serving as a step
+*between* the saved-skins list and the canvas, reached from "+ New Skin". It is
+now the front door: **Things**, a grid where Grampa, Grass, Ghost, Coin and your
+own Grumble Bug sit together.
+
+That inverts the note left on 2026-09-12, which said invented things should
+probably be removed from this grid. They should not — this is the right list,
+and the Thing Maker's own list was the duplicate. That one is gone; the Thing
+Maker is now the form behind one tile.
+
+**What moved, and why each:**
+
+- **Back from the canvas goes to the grid**, not to the saved-skins list. You
+  came from the grid; landing somewhere else is the kind of thing that reads as
+  the app losing your place.
+- **"My skins"** is a button on the grid — every skin you have painted is still
+  one tap away, it is just no longer the thing the screen opens on.
+- **Delete moved onto the form.** It used to be a per-row button on the Thing
+  Maker's list. The merged list also holds 38 built-ins, which cannot be
+  deleted, so a per-row Delete would exist for some rows and not others; on the
+  form it unambiguously deletes the thing you are looking at.
+- **The Menu's Game Maker chip moved from column 2 to column 1.** Removing a chip
+  left a hole in the keyboard-navigation grid, so Right from Things would have
+  skipped past it to nothing. The *visual* gap stays, because it is Grampa's.
+
+**The gesture count did not move, and that is worth saying plainly.** The plan
+for this work said "a merge that does not reduce it has not simplified
+anything". `author-a-game` still reads **121**, because the scripted author
+already knew which door it wanted: Menu → Thing Maker → + New Thing was two taps
+and Menu → Things → + New Thing is two taps. What this phase removes is a
+*choice*, not a tap, and the walk cannot measure a choice it never had to make.
+The honest claim is narrower than the plan's: one door instead of two, and one
+list instead of two overlapping ones.
+
+**`openThings` in `support/coords.ts` is new, and the reason is the point.**
+Twenty spec files each repeated `clickByText(Menu, "Skin Creator")`, a wait, and
+`clickByText(SkinEditor, "+ New Skin")`. When the label changed and "+ New Skin"
+stopped existing, twenty files had to be told — which is an argument for the
+helper, not against the merge. `thing-maker.spec.ts` also stopped reading a
+`defs` field off the scene (there is no list there to hold one) and now reads
+storage through `__debugCustomEntities.list`, which is the better seam anyway: it
+asserts what was written rather than what one screen happened to remember.
+
+**Still open:** the two rooms behind the one door are still different — a
+built-in tile opens the canvas, an invented tile opens a form with its own
+canvas, so `PixelCanvasOverlay` is still hosted twice. Folding the form's fields
+into the canvas screen, gated on the id being a `custom:` one, is phase 2.
+
 ## Project layout
 
 See `docs/spellbound-editor-implementation-plan.md` §4 for the intended
@@ -5569,7 +5660,7 @@ src/
 │   ├── WorldMakerScene.ts    build/edit a World's level order
 │   ├── GameMakerScene.ts     title + worlds in order + an ending, and Play Game — see "A game" under Art
 │   ├── EndingScene.ts        the screen after the last world: the author's own words over the trophy
-│   ├── ThingMakerScene.ts    invent an item/enemy/decoration: name it, say what it acts like, hand off to the Skin Creator to draw it — see "The Thing Maker" under Art
+│   ├── ThingMakerScene.ts    the form behind one tile of the Things grid: name it, say what it acts like, draw it — see "The Thing Maker" under Art
 │   ├── PublishScene.ts       download the file, put it in public/games/, send the link — see "Publishing a game"
 │   ├── CutSceneMakerScene.ts one panel at a time: its picture, its words, and the stage you drag characters around in — see "Cut scenes"
 │   └── CutSceneScene.ts      plays a cut scene, and knows nothing about games — Next, Skip, then whatever comes after

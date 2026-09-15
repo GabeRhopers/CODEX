@@ -21,6 +21,7 @@ import { WorldMapScene } from "./scenes/WorldMapScene";
 import { installTextDefaults } from "./ui/textDefaults";
 import {
   invalidateCustomEntitiesCache,
+  loadCustomEntities,
   removeCustomEntity,
   saveCustomEntity,
 } from "./entities/customEntityStorage";
@@ -105,12 +106,19 @@ if (import.meta.env.DEV) {
         save: typeof saveCustomEntity;
         remove: typeof removeCustomEntity;
         invalidate: typeof invalidateCustomEntitiesCache;
+        list: typeof loadCustomEntities;
       };
     }
   ).__debugCustomEntities = {
     save: saveCustomEntity,
     remove: removeCustomEntity,
     invalidate: invalidateCustomEntitiesCache,
+    // Read as well as write. The Thing Maker's tests used to assert against a
+    // `defs` field on the scene, which was really a cache of this; once that
+    // screen stopped holding a list there was nothing to read, and reading
+    // storage is the better seam regardless — it asserts what was written, not
+    // what one scene happened to remember.
+    list: loadCustomEntities,
   };
 }
 

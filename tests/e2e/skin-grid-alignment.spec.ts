@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, pixelCanvasBox } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox } from "./support/coords";
 
 /**
  * What you can see behind the drawing has to agree with the cells you paint.
@@ -116,9 +116,7 @@ function runBounds(flags: boolean[], scale: number): { left: number; right: numb
 
 async function openNewSkin(page: Page): Promise<void> {
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await pixelCanvasBox(page, GRID); // waits for the canvas; every measurement below needs it
 

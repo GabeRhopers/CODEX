@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings } from "./support/coords";
 
 /**
  * The Skin Creator's zoom, reworked 2026-08-23 from "grow the canvas inside a
@@ -62,9 +62,7 @@ const paintedIndexes = (cells: (string | null)[]): number[] =>
 
 async function openGhostCanvas(page: Page): Promise<void> {
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
   // Every test starts from a known zoom — the level is a persisted tool

@@ -123,18 +123,23 @@ test("every authoring screen, on an iPad", async ({ page }, testInfo) => {
     await open("Menu");
     await startEditorWithLevel(page, LEVEL());
   });
-  await survey("07-thing-list", async () => {
-    await open("ThingMaker");
-    await expect.poll(() => sceneHas(page, "ThingMaker", "Grumble Bug"), { timeout: 20_000 }).toBe(true);
+  // One list of everything paintable, built-in and invented, since 2026-09-15 —
+  // there is no second list of things to photograph any more.
+  await survey("07-things", async () => {
+    await open("SkinEditor");
+    await expect.poll(() => sceneHas(page, "SkinEditor", "Grumble Bug"), { timeout: 20_000 }).toBe(true);
   });
   await survey("08-thing-form", async () => {
-    await clickByText(page, "ThingMaker", "+ New Thing");
+    await clickByText(page, "SkinEditor", "+ New Thing");
+    await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
+    await expect.poll(() => sceneHas(page, "ThingMaker", "Save"), { timeout: 20_000 }).toBe(true);
   });
   await survey("09-skin-browse", async () => {
     await open("SkinEditor");
+    await clickByText(page, "SkinEditor", "My skins");
   });
   await survey("10-skin-canvas", async () => {
-    await clickByText(page, "SkinEditor", "+ New Skin");
+    await open("SkinEditor");
     await clickIconWithLabel(page, "SkinEditor", "Ghost");
     await waitForSkinCanvas(page);
   });

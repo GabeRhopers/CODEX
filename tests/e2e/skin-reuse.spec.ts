@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas , pixelCanvasBox } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox, waitForSkinCanvas } from "./support/coords";
 
 /**
  * Reusing art you already have: copying a skin as a starting point without
@@ -44,8 +44,7 @@ async function saveSkin(page: Page): Promise<void> {
 
 async function openSkinCreator(page: Page): Promise<void> {
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await openThings(page);
 }
 
 /** How many skins the library holds for a brush — read through the real
@@ -62,7 +61,6 @@ test("Copy starts a new skin from an existing one and leaves the original alone"
   test.slow();
   await openSkinCreator(page);
 
-  await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
   for (const [x, y] of [
@@ -80,6 +78,9 @@ test("Copy starts a new skin from an existing one and leaves the original alone"
   expect(await skinCount(page, "enemy-ghost")).toBe(1);
 
   // Copy, then paint something clearly different and save.
+  // Saved skins live behind "My skins" now: the Things grid is where this
+  // screen opens, and Back from the canvas returns there.
+  await clickByText(page, "SkinEditor", "My skins");
   await clickByText(page, "SkinEditor", "Copy");
   await waitForSkinCanvas(page);
   // The copy opens holding the source's pixels — that is what makes it a base.
@@ -109,7 +110,6 @@ test("a tracing reference guides the drawing but never gets saved into it", asyn
   test.slow();
   await openSkinCreator(page);
 
-  await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
 
@@ -134,6 +134,7 @@ test("a tracing reference guides the drawing but never gets saved into it", asyn
 
   await saveSkin(page);
   await clickByText(page, "SkinEditor", "← Back");
+  await clickByText(page, "SkinEditor", "My skins");
   await clickByText(page, "SkinEditor", "Edit");
   await waitForSkinCanvas(page);
 
@@ -146,7 +147,6 @@ test("Trace in stamps the reference as a starting point, and Undo takes it back"
   test.slow();
   await openSkinCreator(page);
 
-  await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Grampa");
   await page.waitForSelector("canvas");
 

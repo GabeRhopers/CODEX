@@ -15,7 +15,6 @@ import {
   withCategory,
 } from "../entities/customEntity";
 import { loadCustomEntities, removeCustomEntity, saveCustomEntity } from "../entities/customEntityStorage";
-import { textureKeyFor } from "../entities/entityRegistry";
 import { PALETTE } from "../editor/Palette";
 import { PixelCanvasOverlay, type PixelTool } from "../editor/PixelCanvasOverlay";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PALETTE_SWATCH_NAME } from "../skins/pixelPalettes";
@@ -28,17 +27,18 @@ import { playSoundKey } from "../audio/sfx";
 import { registerSound, soundKeyFor } from "../audio/soundLoader";
 import { rollSeed, SOUND_PRESETS, type SoundPreset, type SoundSpec } from "../audio/soundSynth";
 import { ConfirmButton } from "../ui/confirmButton";
-import { makePagerControls } from "../ui/PagerControls";
-import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { BUTTON_COLOR, BUTTON_HOVER_COLOR, MUTED_COLOR, SELECTED_COLOR, SELECTED_HOVER_COLOR } from "../ui/theme";
 
 /**
- * Where you invent a new item, enemy or decoration.
+ * One invented item, enemy or decoration: its name, what it acts like, and the
+ * drawing of it.
  *
- * Custom entities have worked end to end since 2026-08-31 — stored, placed,
- * played — but the only way to *make* one was a dev-only `window` hook that
- * doesn't exist in a production build. This is the front door: name a thing,
- * say what it acts like, then go and draw it.
+ * **Not a front door.** It was one until 2026-09-15 — it had its own list and
+ * its own Menu chip beside the Skin Creator's, which meant a child had to
+ * choose between "skin" and "thing" before knowing which they needed. The
+ * Things grid on `SkinEditorScene` is the one list of everything paintable now,
+ * built-in and invented alike, and this screen is the form behind one of its
+ * tiles. Nothing else starts it.
  *
  * **It owns almost no rules.** What a thing may copy is `clonableTypes`, whether
  * a definition is usable is `validationError`, and what it then *does* is
@@ -47,20 +47,21 @@ import { BUTTON_COLOR, BUTTON_HOVER_COLOR, MUTED_COLOR, SELECTED_COLOR, SELECTED
  * tempting to write an `if` about behaviour here, that was the signal the rule
  * belonged in the pure module instead.
  *
- * Two flat modes with one `rebuild()`, the same shape SkinEditorScene uses,
- * rather than sub-scenes — and the same explicit child-destroying teardown, for
- * the reason documented there: a stale invisible button from a previous mode
- * sitting where the new one is means both handlers fire on one click.
+ * One screen, rebuilt in place — every field calls `rebuild()`, which is why the
+ * drawing is carried in scene state rather than inside the panel that draws it.
+ * The teardown destroys each child explicitly, for the reason documented in
+ * SkinEditorScene: a stale invisible button sitting where the new one is means
+ * both handlers fire on one click.
+ *
+ * It still owns almost no rules — see below — and the drawing is still saved as
+ * this thing's *skin*, keyed by its own id, which is the reason the merge with
+ * the Skin Creator is a UI change and not a data one.
  */
 
-type Mode = "browse" | "edit";
-
-
-const ROW_START_Y = 92;
-const ROW_HEIGHT = 52;
-/** Leaves room under the last row for the pager, which sits at LIST_BOTTOM_Y. */
-const LIST_BOTTOM_Y = GAME_HEIGHT - 74;
-const PAGER_Y = GAME_HEIGHT - 62;
+/** What the Things grid hands over. No id means "invent a new one". */
+interface ThingMakerSceneData {
+  id?: string;
+}
 
 // --- the drawing panel ------------------------------------------------------
 // Sized from the right margin inwards, so the form to its left keeps the space
@@ -141,8 +142,8 @@ function builtinLabel(type: string): string {
 }
 
 export class ThingMakerScene extends Phaser.Scene {
-  private mode: Mode = "browse";
-  private defs: CustomEntityDef[] = [];
+  /** Which thing the Things grid sent us to, if any. */
+  private editingId?: string;
   /** The definition being edited, valid or not — the form holds a whole def and
    * hands it to `validationError`, rather than tracking each field's validity
    * itself. */
@@ -151,9 +152,7 @@ export class ThingMakerScene extends Phaser.Scene {
    * reads from — an unsaved draft is never written anywhere, so leaving one
    * needs no cleanup. */
   private draftIsNew = false;
-  private page = 0;
   private nameInput?: LevelNameInput;
-  private deleteButtons: ConfirmButton[] = [];
   private saveError?: string;
 
   // --- the drawing, carried across rebuilds ---------------------------------
@@ -179,23 +178,44 @@ export class ThingMakerScene extends Phaser.Scene {
     super("ThingMaker");
   }
 
-  create(): void {
-    this.mode = "browse";
+  /**
+   * Which thing to edit, handed over by the Things grid.
+   *
+   * An id edits that thing; nothing at all starts a new one. There is no
+   * "which thing?" mode here any more — the grid on `SkinEditor` is the one
+   * list of everything paintable, and this screen is only ever the form behind
+   * one of its tiles. See that scene's docstring for why there is one list.
+   */
+  init(data?: ThingMakerSceneData): void {
+    this.editingId = data?.id;
     this.draft = undefined;
-    this.page = 0;
-    this.defs = [];
+  }
+
+  create(): void {
     this.rebuild();
     void this.reloadDefs();
   }
 
-  /** Re-reads the library and redraws, if we are still on a screen that shows
-   * it. Every mutation goes through here rather than patching `this.defs` by
-   * hand, so what is on screen is always what actually got written. */
+  /**
+   * Re-reads the library, then opens the thing this screen was sent to edit.
+   *
+   * The read has to land before the form can be drawn for an existing thing —
+   * the draft *is* a definition out of the library — so the first `rebuild()`
+   * draws the loading line and this draws the form.
+   */
   private async reloadDefs(): Promise<void> {
     const defs = await loadCustomEntities().catch(() => [] as CustomEntityDef[]);
     if (!this.scene.isActive()) return;
-    this.defs = defs;
-    if (this.mode === "browse") this.rebuild();
+    if (this.draft) return; // already editing; a later reload must not revert the form
+    const existing = this.editingId ? defs.find((def) => def.id === this.editingId) : undefined;
+    if (existing) this.startEdit(existing);
+    else this.startNew();
+  }
+
+  /** Back to the one list. Every exit from this screen goes here, so there is
+   * no way to end up on a second list of the same things. */
+  private leave(): void {
+    this.scene.start("SkinEditor");
   }
 
   private rebuild(): void {
@@ -207,17 +227,20 @@ export class ThingMakerScene extends Phaser.Scene {
     // stroke — so destroying it here loses the element, never the drawing.
     this.spriteCanvas?.destroy();
     this.spriteCanvas = undefined;
-    this.deleteButtons = [];
     for (const child of [...this.children.list]) child.destroy();
 
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1a2e).setOrigin(0, 0);
-    if (this.mode === "browse") this.buildBrowse();
-    else this.buildEdit();
+    if (this.draft) this.buildEdit();
+    else this.buildLoading();
   }
 
-  private goTo(mode: Mode): void {
-    this.mode = mode;
-    this.rebuild();
+  /** The moment before the library read lands. Says which thing is coming
+   * rather than flashing an empty form. */
+  private buildLoading(): void {
+    this.addBackButton(() => this.leave());
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Loading…", { fontSize: "14px", color: MUTED_COLOR })
+      .setOrigin(0.5);
   }
 
   // --- shared bits ---------------------------------------------------------
@@ -255,95 +278,6 @@ export class ThingMakerScene extends Phaser.Scene {
     return text;
   }
 
-  /** The art a definition currently wears — its own skin once one is drawn,
-   * otherwise the built-in it copies. `textureKeyFor` is the same resolver
-   * PlayScene spawns from, so this preview cannot drift from the real thing. */
-  private artFor(def: CustomEntityDef): string | null {
-    return textureKeyFor([def], def.id) ?? builtinTextureKey(def.basedOn);
-  }
-
-  // --- mode: browse --------------------------------------------------------
-
-  private buildBrowse(): void {
-    this.addBackButton(() => this.scene.start("Menu"));
-    this.add.text(GAME_WIDTH / 2, 24, "Thing Maker", { fontSize: "20px", color: "#ffffff" }).setOrigin(0.5, 0);
-    this.add
-      .text(GAME_WIDTH / 2, 50, "Invent your own items, enemies and decorations.", { fontSize: "12px", color: MUTED_COLOR })
-      .setOrigin(0.5, 0);
-
-    this.makeButton(GAME_WIDTH - 150, 30, "+ New Thing", () => this.startNew());
-
-    if (this.defs.length === 0) {
-      this.add
-        .text(
-          GAME_WIDTH / 2,
-          GAME_HEIGHT / 2 - 20,
-          "Nothing invented yet.\n\nA thing you make here borrows what it does from something\nthat already exists — a coin, a ghost, a bush — and wears\nwhatever sprite you draw for it.",
-          { fontSize: "13px", color: MUTED_COLOR, align: "center", lineSpacing: 4 },
-        )
-        .setOrigin(0.5, 0.5);
-      return;
-    }
-
-    const perPage = rowsPerPage(ROW_START_Y, LIST_BOTTOM_Y, ROW_HEIGHT);
-    this.page = clampPage(this.page, this.defs.length, perPage);
-    const shown = pageSlice(this.defs, this.page, perPage);
-
-    shown.forEach((def, i) => {
-      const y = ROW_START_Y + i * ROW_HEIGHT;
-      const mid = y + (ROW_HEIGHT - 8) / 2;
-      this.add.rectangle(24, y, GAME_WIDTH - 48, ROW_HEIGHT - 8, 0x0f1830).setOrigin(0, 0);
-
-      const art = this.artFor(def);
-      if (art) {
-        const icon = this.add.image(52, mid, art);
-        fitWithinTile(icon, 30);
-      }
-
-      this.add.text(84, mid - 10, def.name, { fontSize: "14px", color: "#ffffff" }).setOrigin(0, 0);
-      this.add
-        .text(84, mid + 8, `Acts like a ${builtinLabel(def.basedOn)}`, { fontSize: "11px", color: MUTED_COLOR })
-        .setOrigin(0, 0);
-
-      // One button, where there were two. "Draw sprite" used to sit here and
-      // jump to the Skin Creator; Edit now opens the form *and* the drawing
-      // together, so a second door to half of it is just a second thing to
-      // read.
-      this.makeButton(GAME_WIDTH - 320, mid, "Edit", () => this.startEdit(def));
-      const del = new ConfirmButton({
-        scene: this,
-        x: GAME_WIDTH - 200,
-        y: mid,
-        label: "Delete",
-        armedLabel: "Delete? Tap again",
-        onConfirm: () => void this.deleteThing(def),
-      });
-      // One armed button at a time — two both reading "Delete? Tap again" is a
-      // way to delete the wrong thing.
-      del.text.on("pointerdown", () => {
-        for (const other of this.deleteButtons) if (other !== del) other.disarm();
-      });
-      this.deleteButtons.push(del);
-    });
-
-    // Called for its side effect: makePagerControls builds through
-    // `scene.add.*`, so the controls are already on the display list. Other
-    // callers keep the returned objects only to reparent them into the
-    // container they wipe on refresh; this scene wipes children directly.
-    makePagerControls({
-      scene: this,
-      x: 24,
-      y: PAGER_Y,
-      page: this.page,
-      total: this.defs.length,
-      perPage,
-      onChange: (page) => {
-        this.page = page;
-        this.rebuild();
-      },
-    });
-  }
-
   // --- mode: edit ----------------------------------------------------------
 
   private startNew(): void {
@@ -351,7 +285,7 @@ export class ThingMakerScene extends Phaser.Scene {
     this.draftIsNew = true;
     this.saveError = undefined;
     this.clearSprite();
-    this.goTo("edit");
+    this.rebuild();
   }
 
   private startEdit(def: CustomEntityDef): void {
@@ -359,7 +293,7 @@ export class ThingMakerScene extends Phaser.Scene {
     this.draftIsNew = false;
     this.saveError = undefined;
     this.clearSprite();
-    this.goTo("edit");
+    this.rebuild();
     void this.loadSprite(def.id);
   }
 
@@ -392,7 +326,7 @@ export class ThingMakerScene extends Phaser.Scene {
     if (!asset) return;
     const cells = await cellsFromPngDataUrl(asset.imageData, ENTITY_GRID_SIZE).catch(() => null);
     if (!cells || !this.scene.isActive()) return;
-    if (this.mode !== "edit" || this.draft?.id !== id) return;
+    if (this.draft?.id !== id) return;
     this.spriteCells = cells;
     this.spriteSkinId = asset.id;
     this.spriteCanvas?.loadCells(cells);
@@ -400,9 +334,9 @@ export class ThingMakerScene extends Phaser.Scene {
 
   private buildEdit(): void {
     const draft = this.draft;
-    if (!draft) return this.goTo("browse");
+    if (!draft) return;
 
-    this.addBackButton(() => this.goTo("browse"));
+    this.addBackButton(() => this.leave());
     this.add
       .text(GAME_WIDTH / 2, 24, this.draftIsNew ? "New Thing" : "Edit Thing", { fontSize: "20px", color: "#ffffff" })
       .setOrigin(0.5, 0);
@@ -550,7 +484,24 @@ export class ThingMakerScene extends Phaser.Scene {
       this.add.text(60, y, this.saveError, { fontSize: "12px", color: "#ff9d9d" }).setOrigin(0, 0.5);
     }
     y += 34;
-    this.makeButton(60, y, "Save", () => void this.save());
+    const save = this.makeButton(60, y, "Save", () => void this.save());
+
+    // Delete lives here now. It used to sit on this screen's own list of
+    // things, which is gone — there is one list of everything paintable, on the
+    // Things grid, and a built-in cannot be deleted, so a per-row Delete there
+    // would be a button that exists for some rows and not others. On the form it
+    // is unambiguous: it deletes the thing you are looking at. Absent for an
+    // unsaved draft, which has nothing to delete — leaving one needs no cleanup.
+    if (!this.draftIsNew) {
+      new ConfirmButton({
+        scene: this,
+        x: save.x + save.width + 12,
+        y,
+        label: "Delete",
+        armedLabel: "Delete? Tap again",
+        onConfirm: () => void this.deleteThing(draft),
+      });
+    }
   }
 
   /**
@@ -681,8 +632,7 @@ export class ThingMakerScene extends Phaser.Scene {
     }
     await saveCustomEntity(draft);
     await this.saveSprite(draft);
-    await this.reloadDefs();
-    this.goTo("browse");
+    this.leave();
   }
 
   /**
@@ -738,6 +688,6 @@ export class ThingMakerScene extends Phaser.Scene {
 
   private async deleteThing(def: CustomEntityDef): Promise<void> {
     await removeCustomEntity(def.id);
-    await this.reloadDefs();
+    this.leave();
   }
 }

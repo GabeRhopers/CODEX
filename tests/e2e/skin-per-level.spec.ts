@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, selectPaletteCategory, startEditorWithLevel, pixelCanvasBox } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox, selectPaletteCategory, startEditorWithLevel } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 
 /**
@@ -48,9 +48,7 @@ async function skinTriggerLabel(page: Page): Promise<string> {
 /** Paints a two-cell Ghost skin in the Skin Creator and returns to the Menu,
  * leaving it in the library and chosen by nobody. */
 async function paintGhostSkin(page: Page): Promise<void> {
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
 

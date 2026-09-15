@@ -1,13 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import {
-  clickByText,
-  clickIconWithLabel,
-  gotoApp,
-  selectPaletteCategory,
-  startEditorWithLevel,
-  pixelCanvasBox,
-  waitForSkinCanvas,
-} from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox, selectPaletteCategory, startEditorWithLevel, waitForSkinCanvas } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 
 /**
@@ -51,6 +43,13 @@ async function storedSkins(page: Page, brushId: string): Promise<{ id: string; n
  * text at each row's x=90. Read separately from storage on purpose: a name that
  * saves correctly but displays as the brush label would pass a storage-only
  * assertion and still be the bug this feature exists to fix. */
+/** Opens "My skins" — the saved-skins list, which is no longer where this
+ * screen starts. Back from the canvas returns to the Things grid now, since
+ * that is where the canvas was entered from. */
+async function openMySkins(page: Page): Promise<void> {
+  await clickByText(page, "SkinEditor", "My skins");
+}
+
 async function browseRowNames(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const scene = window.__debugGame!.scene.getScene("SkinEditor");
@@ -91,12 +90,10 @@ async function paintCell(page: Page, x: number, y: number): Promise<void> {
 }
 
 async function openSkinCreator(page: Page): Promise<void> {
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await openThings(page);
 }
 
 async function newGhostSkin(page: Page): Promise<void> {
-  await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
 }
@@ -139,6 +136,7 @@ test("a named skin is saved under that name and the browse list shows it", async
     [9, 8],
   ]);
 
+  await openMySkins(page);
   await expect.poll(() => browseRowNames(page)).toEqual(["Spooky pillow"]);
   expect((await storedSkins(page, "enemy-ghost")).map((s) => s.name)).toEqual(["Spooky pillow"]);
 });
@@ -158,6 +156,7 @@ test("reopening a skin brings back its name and every pixel together", async ({ 
   ];
   await paintAndSave(page, "Corners", painted);
 
+  await openMySkins(page);
   await clickByText(page, "SkinEditor", "Edit");
   await waitForSkinCanvas(page);
 
@@ -180,12 +179,14 @@ test("renaming updates the one skin in place rather than forking a second", asyn
   ]);
   const [before] = await storedSkins(page, "enemy-ghost");
 
+  await openMySkins(page);
   await clickByText(page, "SkinEditor", "Edit");
   await waitForSkinCanvas(page);
   await setName(page, "Second thoughts");
   await saveSkin(page);
   await clickByText(page, "SkinEditor", "← Back");
 
+  await openMySkins(page);
   await expect.poll(() => browseRowNames(page)).toEqual(["Second thoughts"]);
   const after = await storedSkins(page, "enemy-ghost");
   // Same id, same count: a rename that quietly saved a copy would leave two
@@ -194,6 +195,7 @@ test("renaming updates the one skin in place rather than forking a second", asyn
   expect(after[0].id).toBe(before.id);
 
   // ...and the pixels came through the rename untouched.
+  await openMySkins(page);
   await clickByText(page, "SkinEditor", "Edit");
   await waitForSkinCanvas(page);
   await expect.poll(() => skinCanvasCells(page).then(paintedCount)).toBe(3);
@@ -217,6 +219,7 @@ test("a blank name falls back to a default instead of saving an empty label", as
   // are rendered from an async `listPixelSkins()`, so reading straight after
   // "← Back" can catch the list still empty — which is what this one lone bare
   // read was doing, intermittently, and reporting as `[]`.
+  await openMySkins(page);
   await expect.poll(() => browseRowNames(page)).toEqual(["Ghost 1"]);
   const names = await browseRowNames(page);
   expect(names[0].trim()).not.toBe("");
@@ -242,6 +245,7 @@ test("two skins for the same brush get distinct default names", async ({ page })
   await saveSkin(page);
   await clickByText(page, "SkinEditor", "← Back");
 
+  await openMySkins(page);
   await expect.poll(() => browseRowNames(page)).toEqual(["Ghost 1", "Ghost 2"]);
 });
 
@@ -256,6 +260,7 @@ test("Copy gets its own name and leaves the original's name and pixels alone", a
     [4, 3],
   ]);
 
+  await openMySkins(page);
   await clickByText(page, "SkinEditor", "Copy");
   await waitForSkinCanvas(page);
   await expect(await nameField(page)).toHaveValue("Original copy");
@@ -263,6 +268,7 @@ test("Copy gets its own name and leaves the original's name and pixels alone", a
   await saveSkin(page);
   await clickByText(page, "SkinEditor", "← Back");
 
+  await openMySkins(page);
   await expect.poll(() => browseRowNames(page)).toEqual(["Original", "Original copy"]);
   const stored = await storedSkins(page, "enemy-ghost");
   expect(stored).toHaveLength(2);
@@ -337,11 +343,13 @@ test("a skin saved before names existed still opens, showing its brush label", a
   await openSkinCreator(page);
   // No name stored, so the row falls back to the brush label — exactly what it
   // showed before names existed, which is what makes this migration-free.
+  await openMySkins(page);
   await expect.poll(() => browseRowNames(page)).toEqual(["Ghost"]);
   expect((await storedSkins(page, "enemy-ghost"))[0].name).toBeUndefined();
 
   // Opening it offers that fallback in the field, and saving makes it a real
   // stored name — the skin migrates itself the first time it is touched.
+  await openMySkins(page);
   await clickByText(page, "SkinEditor", "Edit");
   await waitForSkinCanvas(page);
   await expect(await nameField(page)).toHaveValue("Ghost");
@@ -349,6 +357,7 @@ test("a skin saved before names existed still opens, showing its brush label", a
   await saveSkin(page);
   await clickByText(page, "SkinEditor", "← Back");
 
+  await openMySkins(page);
   await expect.poll(() => browseRowNames(page)).toEqual(["Now it has a name"]);
   expect((await storedSkins(page, "enemy-ghost"))[0].name).toBe("Now it has a name");
 });

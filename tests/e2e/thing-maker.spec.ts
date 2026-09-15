@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, pixelCanvasBox, readSceneField, selectPaletteCategory, startEditorWithLevel, tileCenter } from "./support/coords";
+import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, openThings, pixelCanvasBox, readSceneField, selectPaletteCategory, startEditorWithLevel, tileCenter } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
-import { customDef, seedCustomEntities } from "./support/customEntities";
+import { customDef, listCustomEntities, seedCustomEntities } from "./support/customEntities";
 import type { PlayerStats } from "../../src/gameplay/PlayerStats";
 
 /**
@@ -20,8 +20,30 @@ import type { PlayerStats } from "../../src/gameplay/PlayerStats";
 
 const NAME_FIELD = "Star Fruit"; // the field's placeholder, and the name we type
 
-async function openThingMaker(page: Page): Promise<void> {
-  await clickByText(page, "Menu", "Thing Maker");
+/**
+ * Menu → Things → invent a new one.
+ *
+ * There is no "Thing Maker" on the Menu any more. Since 2026-09-15 there is one
+ * door — the Things grid — listing everything paintable, built-in or invented,
+ * and this screen is the form behind one of its tiles.
+ */
+async function openNewThing(page: Page): Promise<void> {
+  await openThings(page);
+  await clickByText(page, "SkinEditor", "+ New Thing");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
+}
+
+/** Menu → Things → the tile for an existing thing, which opens its form. */
+async function openThing(page: Page, label: string): Promise<void> {
+  await openThings(page);
+  await pickThing(page, label);
+}
+
+/** The tile, when the Things grid is already on screen — which it is straight
+ * after a Save, since saving returns there. */
+async function pickThing(page: Page, label: string): Promise<void> {
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await clickIconWithLabel(page, "SkinEditor", label);
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
 }
 
@@ -31,14 +53,10 @@ async function typeName(page: Page, name: string): Promise<void> {
   await page.getByPlaceholder(NAME_FIELD).press("Enter");
 }
 
-/** Every definition currently in the library, read back through the scene. */
-function storedThings(page: Page): Promise<{ name: string; category: string; basedOn: string }[]> {
-  return page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("ThingMaker") as unknown as {
-      defs: { name: string; category: string; basedOn: string }[];
-    };
-    return scene.defs.map((d) => ({ name: d.name, category: d.category, basedOn: d.basedOn }));
-  });
+/** Every definition currently in the library, read through storage. */
+async function storedThings(page: Page): Promise<{ name: string; category: string; basedOn: string }[]> {
+  const defs = await listCustomEntities(page);
+  return defs.map((d) => ({ name: d.name, category: d.category, basedOn: d.basedOn }));
 }
 
 const RUNWAY = () =>
@@ -52,9 +70,7 @@ const RUNWAY = () =>
 test("a thing invented here can be placed, and scores as what it copies", async ({ page }) => {
   test.slow();
   await gotoApp(page);
-  await openThingMaker(page);
-
-  await clickByText(page, "ThingMaker", "+ New Thing");
+  await openNewThing(page);
   await typeName(page, "Star Fruit");
   // Items is the category a new thing opens on, and Coin the built-in it opens
   // pointed at — so this is the shortest real path to a custom coin.
@@ -64,11 +80,13 @@ test("a thing invented here can be placed, and scores as what it copies", async 
   ]);
 
   // Now the half that matters: what the maker wrote is what the editor offers.
-  // Left via the Back button rather than scene.start from the test: Phaser's
-  // global ScenePlugin starts a scene without stopping the current one, and a
-  // still-live Thing Maker draws its own full-screen background over whatever
-  // comes next.
-  await clickByText(page, "ThingMaker", "← Back");
+  // Saving already returned us to the Things grid — one list, and the place a
+  // thing you just made appears — so this leaves from there. Left via the Back
+  // button rather than scene.start from the test: Phaser's global ScenePlugin
+  // starts a scene without stopping the current one, and a still-live scene
+  // draws its own full-screen background over whatever comes next.
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await clickByText(page, "SkinEditor", "← Back");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));
   await startEditorWithLevel(page, RUNWAY());
   await selectPaletteCategory(page, "Editor", "Items");
@@ -89,8 +107,7 @@ test("a thing invented here can be placed, and scores as what it copies", async 
 test("a thing with no name is refused, with the reason validation gives", async ({ page }) => {
   test.slow();
   await gotoApp(page);
-  await openThingMaker(page);
-  await clickByText(page, "ThingMaker", "+ New Thing");
+  await openNewThing(page);
 
   // Saving a blank one must not write anything, and must say why rather than
   // inventing an "Untitled" the way a level name would.
@@ -102,8 +119,7 @@ test("a thing with no name is refused, with the reason validation gives", async 
 test("switching family never leaves it copying something from the old one", async ({ page }) => {
   test.slow();
   await gotoApp(page);
-  await openThingMaker(page);
-  await clickByText(page, "ThingMaker", "+ New Thing");
+  await openNewThing(page);
   await typeName(page, "Zoom Ghost");
 
   // Items/Coin is where it starts. Switching to Enemy has to abandon the coin —
@@ -122,14 +138,15 @@ test("editing one changes it, and deleting one takes two taps", async ({ page })
   test.slow();
   await gotoApp(page);
   await seedCustomEntities(page, [customDef({ id: "custom:star", name: "Star Fruit" })]);
-  await openThingMaker(page);
   await expect.poll(() => storedThings(page).then((t) => t.length)).toBe(1);
-
-  await clickByText(page, "ThingMaker", "Edit");
+  await openThing(page, "Star Fruit");
   await typeName(page, "Moon Fruit");
   await clickByText(page, "ThingMaker", "Save");
   await expect.poll(() => storedThings(page).then((t) => t.map((d) => d.name))).toEqual(["Moon Fruit"]);
 
+  // Delete lives on the form now rather than on a per-row button, because the
+  // one list also holds built-ins and those cannot be deleted.
+  await pickThing(page, "Moon Fruit");
   // One tap only arms it — the same discipline every other destructive action
   // in this app follows.
   await clickByText(page, "ThingMaker", "Delete");
@@ -145,8 +162,7 @@ test("the sprite is drawn on the same screen, and saving keeps it", async ({ pag
   // the Skin Creator and came back; the box it sat beside said "until you draw
   // it", which was a promise the next screen had to keep.
   await gotoApp(page);
-  await openThingMaker(page);
-  await clickByText(page, "ThingMaker", "+ New Thing");
+  await openNewThing(page);
   await typeName(page, "Star Fruit");
 
   // The canvas is a real DOM <canvas>, sized one buffer pixel per cell, so the
@@ -188,8 +204,7 @@ test("re-opening a thing shows the sprite already drawn for it", async ({ page }
   // back. Get that wrong and the canvas is blank — and saving then writes the
   // blank over the artwork.
   await gotoApp(page);
-  await openThingMaker(page);
-  await clickByText(page, "ThingMaker", "+ New Thing");
+  await openNewThing(page);
   await typeName(page, "Star Fruit");
   const box = await pixelCanvasBox(page, 32);
   const cell = box.width / 32;
@@ -197,7 +212,7 @@ test("re-opening a thing shows the sprite already drawn for it", async ({ page }
   await clickByText(page, "ThingMaker", "Save");
   await expect.poll(() => storedThings(page).then((t) => t.length)).toBe(1);
 
-  await clickByText(page, "ThingMaker", "Edit");
+  await pickThing(page, "Star Fruit");
   await expect
     .poll(
       () =>
@@ -222,9 +237,7 @@ test("the Skin Creator's grid pages rather than drawing an invented thing off th
     customDef({ id: "custom:b", name: "Moon Fruit" }),
     customDef({ id: "custom:c", name: "Totem", category: "decor", basedOn: "decor-tree" }),
   ]);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
 
   await expect.poll(() => visibleLabels(page)).toContain("Page 1 of 2");
   expect(await visibleLabels(page)).not.toContain("Totem");

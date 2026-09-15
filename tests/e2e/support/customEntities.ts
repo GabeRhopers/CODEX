@@ -16,6 +16,7 @@ declare global {
       save(def: CustomEntityDef): Promise<void>;
       remove(id: string): Promise<void>;
       invalidate(): void;
+      list(): Promise<CustomEntityDef[]>;
     };
   }
 }
@@ -40,6 +41,14 @@ export async function seedCustomEntities(page: Page, defs: CustomEntityDef[]): P
   await page.evaluate(async (defs: CustomEntityDef[]) => {
     for (const def of defs) await window.__debugCustomEntities!.save(def);
   }, defs);
+}
+
+/** Every definition currently stored, read through the real storage module
+ * rather than off a scene — so an assertion is about what got written, not
+ * about what one screen happened to be holding. */
+export async function listCustomEntities(page: Page): Promise<CustomEntityDef[]> {
+  await page.waitForFunction(() => !!window.__debugCustomEntities);
+  return page.evaluate(() => window.__debugCustomEntities!.list());
 }
 
 /** Removes a definition and drops the cache, so the next scene resolves the

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { clickByText, gotoApp, selectPaletteCategory, startEditorWithLevel } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, selectPaletteCategory, startEditorWithLevel } from "./support/coords";
 import { customDef, seedCustomEntities } from "./support/customEntities";
 import { makeArea, makeLevel } from "./support/levels";
 import { makeWorld, seedLevels, seedWorld, seedWorlds } from "./support/worlds";
@@ -84,22 +84,25 @@ test("the Editor is laid out soundly with a palette category that has to page", 
   await assertLayoutSound(page, "Editor");
 });
 
-test("the Thing Maker is laid out soundly, listing things and editing one", async ({ page }) => {
+test("the Things grid and the form behind a tile are both laid out soundly", async ({ page }) => {
   test.slow();
   await gotoApp(page);
   await seedCustomEntities(page, [
     customDef({ id: "custom:star", name: "Star Fruit" }),
     customDef({ id: "custom:zoom", name: "Zoom Ghost", category: "enemies", basedOn: "enemy-ghost" }),
   ]);
-  await clickByText(page, "Menu", "Thing Maker");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
-  await expect.poll(() => boxes(page, "ThingMaker").then((all) => all.some((b) => b.label === "Star Fruit"))).toBe(true);
-  await assertLayoutSound(page, "ThingMaker");
+
+  // One list: invented things sit among the built-ins rather than on a screen of
+  // their own. This used to open the Thing Maker's own list, which is gone.
+  await openThings(page);
+  await expect.poll(() => boxes(page, "SkinEditor").then((all) => all.some((b) => b.label === "Star Fruit"))).toBe(true);
+  await assertLayoutSound(page, "SkinEditor");
 
   // The form, on the widest family: Decor offers ten built-ins, which is what
   // made the "Acts like" grid wrap in the first place — at one row it ran under
   // the preview panel.
-  await clickByText(page, "ThingMaker", "Edit");
+  await clickIconWithLabel(page, "SkinEditor", "Star Fruit");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
   await clickByText(page, "ThingMaker", "Decoration");
   await assertLayoutSound(page, "ThingMaker");
 });
@@ -114,9 +117,7 @@ test("the Skin Creator's target grid is laid out soundly once it has to page", a
     customDef({ id: "custom:b", name: "Moon Fruit" }),
     customDef({ id: "custom:c", name: "Totem", category: "decor", basedOn: "decor-tree" }),
   ]);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await expect.poll(() => boxes(page, "SkinEditor").then((all) => all.some((b) => b.label === "Page 1 of 2"))).toBe(true);
   await assertLayoutSound(page, "SkinEditor");
 });

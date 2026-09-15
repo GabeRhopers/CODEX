@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, startEditorWithLevel, waitForSkinCanvas } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, startEditorWithLevel, waitForSkinCanvas } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 import { makeWorld, seedLevels, seedWorlds } from "./support/worlds";
 
@@ -164,9 +164,7 @@ test("a colour swatch in the Skin Creator is as big as its cell allows", async (
   // is 19.3 CSS px here — under half the 44px guideline, on the screen a child
   // spends the longest on, painting one pixel at a time.
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await waitForSkinCanvas(page);
 

@@ -392,7 +392,15 @@ export class MenuScene extends Phaser.Scene {
   private buildFooter(): void {
     const cx = GAME_WIDTH / 2;
 
-    // Skin Creator is a destination like the four cards above, and it was the
+    // One chip, not two. "Skin Creator" and "Thing Maker" sat side by side here
+    // until 2026-09-15, and the comment that used to be on the second one gave
+    // the game away: "the two are a pair: one invents what a thing *does*, the
+    // other what it *looks like*". That is a choice a child has to make before
+    // knowing which they need — Resnick & Silverman's "give people what they
+    // want, not what they ask for". There is one door now, and the grid behind
+    // it lists everything paintable, invented or built in.
+    //
+    // It is a destination like the four cards above, and it was the
     // only one that didn't look like one — a flat chip with no icon, no accent
     // and no chevron, reading as footer chrome next to them.
     //
@@ -414,7 +422,7 @@ export class MenuScene extends Phaser.Scene {
     const skinIcon = this.add.image(SIDE_MARGIN + ACCENT_WIDTH + 20, FOOTER_ROW_Y, "enemy-ghost-pillow").setOrigin(0.5);
     skinIcon.setScale(Math.min(1, 22 / skinIcon.width, 22 / skinIcon.height));
     const skinLabel = this.add
-      .text(SIDE_MARGIN + ACCENT_WIDTH + 38, FOOTER_ROW_Y, "Skin Creator", { fontSize: "13px", color: MUTED_TEXT })
+      .text(SIDE_MARGIN + ACCENT_WIDTH + 38, FOOTER_ROW_Y, "Things", { fontSize: "13px", color: MUTED_TEXT })
       .setOrigin(0, 0.5);
     const skinChevron = this.add
       .text(SIDE_MARGIN + chipWidth - 16, FOOTER_ROW_Y, "\u203a", { fontSize: "18px", color: CHEVRON_IDLE })
@@ -431,40 +439,10 @@ export class MenuScene extends Phaser.Scene {
       activate: () => this.scene.start("SkinEditor"),
     });
 
-    // The Thing Maker sits beside the Skin Creator because the two are a pair:
-    // one invents what a thing *does*, the other what it *looks like*, and the
-    // former hands straight off to the latter. Same chip language, the next
-    // free column on the footer row.
-    const thingChipX = SIDE_MARGIN + chipWidth + 14;
-    const thingChipBg = this.add
-      .rectangle(thingChipX, chipTop, chipWidth, chipHeight, CARD_FILL)
-      .setOrigin(0, 0)
-      .setStrokeStyle(1, CARD_STROKE)
-      .setInteractive({ useHandCursor: true });
-    this.add.rectangle(thingChipX, chipTop, ACCENT_WIDTH, chipHeight, 0x5ec4a0).setOrigin(0, 0);
-    const thingIcon = this.add.image(thingChipX + ACCENT_WIDTH + 20, FOOTER_ROW_Y, "item-coin").setOrigin(0.5);
-    thingIcon.setScale(Math.min(1, 22 / thingIcon.width, 22 / thingIcon.height));
-    const thingLabel = this.add
-      .text(thingChipX + ACCENT_WIDTH + 38, FOOTER_ROW_Y, "Thing Maker", { fontSize: "13px", color: MUTED_TEXT })
-      .setOrigin(0, 0.5);
-    const thingChevron = this.add
-      .text(thingChipX + chipWidth - 16, FOOTER_ROW_Y, "\u203a", { fontSize: "18px", color: CHEVRON_IDLE })
-      .setOrigin(0.5);
-    this.register(thingChipBg, {
-      row: ROW_FOOTER,
-      col: 1,
-      setHighlighted: (on) => {
-        thingChipBg.setFillStyle(on ? CARD_FILL_ACTIVE : CARD_FILL);
-        thingChipBg.setStrokeStyle(on ? 2 : 1, on ? CARD_STROKE_ACTIVE : CARD_STROKE);
-        thingLabel.setColor(on ? "#ffffff" : MUTED_TEXT);
-        thingChevron.setColor(on ? "#ffffff" : CHEVRON_IDLE);
-      },
-      activate: () => this.scene.start("ThingMaker"),
-    });
-
-    // The third chip goes to Grampa's *right*: the two to his left end at x=427
-    // and he occupies roughly 505-545, so a fourth column on that side would sit
-    // on him. Measured off the rendered menu rather than guessed.
+    // To Grampa's *right*: he occupies roughly 505-545, so a chip starting left
+    // of that would sit on him. Measured off the rendered menu rather than
+    // guessed. The gap where the second chip used to be is deliberate — it is
+    // Grampa's, and closing it would put a button on him.
     const gameChipX = GAME_WIDTH / 2 + 36;
     const gameChipBg = this.add
       .rectangle(gameChipX, chipTop, chipWidth, chipHeight, CARD_FILL)
@@ -482,7 +460,9 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.register(gameChipBg, {
       row: ROW_FOOTER,
-      col: 2,
+      // 1, not 2: the chip that held column 1 is gone, and a hole in the grid
+      // would make Right from Things skip past this one to nothing.
+      col: 1,
       setHighlighted: (on) => {
         gameChipBg.setFillStyle(on ? CARD_FILL_ACTIVE : CARD_FILL);
         gameChipBg.setStrokeStyle(on ? 2 : 1, on ? CARD_STROKE_ACTIVE : CARD_STROKE);

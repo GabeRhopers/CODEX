@@ -1,13 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import {
-  clickByText,
-  clickIconWithLabel,
-  gotoApp,
-  readSceneField,
-  selectPaletteCategory,
-  startEditorWithLevel,
-  waitForSkinCanvas,  pixelCanvasBox,
-} from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox, readSceneField, selectPaletteCategory, startEditorWithLevel, waitForSkinCanvas } from "./support/coords";
 import { makeLevel } from "./support/levels";
 import { hangSkinsRead } from "./support/mockDrive";
 import type { LevelArea, LevelData, LevelEntity } from "../../src/level/LevelSchema";
@@ -165,9 +157,7 @@ async function grassTilesetName(page: Page, sceneKey: string): Promise<string> {
  * indistinguishable from the built-in art in a screenshot.
  */
 async function paintSkinFor(page: Page, targetLabel: string): Promise<void> {
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
   await clickIconWithLabel(page, "SkinEditor", targetLabel);
   await waitForSkinCanvas(page);
 
@@ -211,9 +201,7 @@ test("the Skin Creator offers every block, and its grid still fits on screen", a
   // work — boot, open the Skin Creator, read the grid.
   test.slow();
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await openThings(page);
 
   const labels = await page.evaluate(() => {
     const scene = window.__debugGame!.scene.getScene("SkinEditor");

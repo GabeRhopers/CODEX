@@ -566,6 +566,29 @@ export async function readSceneField<T>(page: Page, sceneKey: string, field: str
  * how a CI-only failure here first surfaced. This reports the scene's mode and
  * its status line instead, so the next occurrence names itself.
  */
+/**
+ * Menu → the Things grid, which is every thing this app can paint.
+ *
+ * One helper rather than the three lines this replaced (`clickByText(Menu,
+ * "Skin Creator")`, wait, `clickByText(SkinEditor, "+ New Skin")`), which were
+ * copied into twenty spec files. When those two screens merged on 2026-09-15
+ * the Menu label changed and "+ New Skin" stopped existing, and twenty files
+ * each had to be told — which is the argument for the helper, not against the
+ * merge.
+ */
+export async function openThings(page: Page): Promise<void> {
+  await clickByText(page, "Menu", "Things");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+}
+
+/** Menu → Things → the canvas for one built-in, by its grid label. The path
+ * every skin test takes before it can paint anything. */
+export async function openPaintFor(page: Page, label: string): Promise<void> {
+  await openThings(page);
+  await clickIconWithLabel(page, "SkinEditor", label);
+  await waitForSkinCanvas(page);
+}
+
 export async function waitForSkinCanvas(page: Page, timeout = 20_000): Promise<void> {
   try {
     await page.waitForFunction(

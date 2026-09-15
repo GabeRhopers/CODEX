@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, startEditorWithLevel , pixelCanvasBox } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox, startEditorWithLevel } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 
 /**
@@ -58,10 +58,8 @@ test("a painted character skin replaces Grampa, animates, and cannot change his 
   test.slow(); // paints across two 48x48 frames, saves through mocked Drive, then plays a level
 
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await openThings(page);
 
-  await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Grampa");
   await page.waitForSelector("canvas");
 
@@ -144,10 +142,8 @@ test("a painted enemy skin loops through its frames", async ({ page }) => {
   test.slow();
 
   await gotoApp(page);
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await openThings(page);
 
-  await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector("canvas");
 

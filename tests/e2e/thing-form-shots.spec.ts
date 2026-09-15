@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { clickByText, gotoApp } from "./support/coords";
+import { clickByText, gotoApp, openThings } from "./support/coords";
 import { assertLayoutSound } from "./support/layout";
 
 /**
@@ -20,9 +20,9 @@ test("the edit form fits in every family", async ({ page }, testInfo) => {
   test.slow();
 
   await gotoApp(page);
-  await clickByText(page, "Menu", "Thing Maker");
+  await openThings(page);
+  await clickByText(page, "SkinEditor", "+ New Thing");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
-  await clickByText(page, "ThingMaker", "+ New Thing");
 
   for (const family of ["Item", "Enemy", "Decoration"] as const) {
     await clickByText(page, "ThingMaker", family);

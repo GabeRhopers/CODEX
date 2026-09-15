@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, gotoApp } from "./support/coords";
+import { clickByText, gotoApp, openThings } from "./support/coords";
 import { delaySkinsRead } from "./support/mockDrive";
 
 /**
@@ -21,12 +21,12 @@ import { delaySkinsRead } from "./support/mockDrive";
  * The fix is a build counter captured by the closure, so a chain can tell that
  * the screen it belongs to has been replaced. This test is what says so.
  *
- * Nothing needs to be saved first. The empty state — "No pixel skins yet" — is
+ * Nothing needs to be saved first. The empty state — "No skins yet" — is
  * appended by the same guarded branch as the rows, so it duplicates the same
  * way, and it needs no fixture.
  */
 
-const EMPTY_STATE = "No pixel skins yet — tap + New Skin to paint one.";
+const EMPTY_STATE = "No skins yet — go back and tap something to paint it.";
 
 /** How many Texts on the SkinEditor screen read exactly `text`. */
 async function countText(page: Page, text: string): Promise<number> {
@@ -60,8 +60,10 @@ test("leaving the browse list mid-load and coming back doesn't draw it twice", a
   // not the bulk of the test.
   await delaySkinsRead(page, 4000);
 
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  // The saved-skins list is a place you navigate to now: the Things grid is
+  // where this screen opens, and "My skins" is the list whose load this is about.
+  await openThings(page);
+  await clickByText(page, "SkinEditor", "My skins");
 
   // The chain is in flight exactly while this is on screen — buildBrowse
   // creates it synchronously and only the `.then` destroys it.
@@ -69,12 +71,12 @@ test("leaving the browse list mid-load and coming back doesn't draw it twice", a
 
   // Away and back, both screens built synchronously, both well inside the
   // outstanding read.
-  await clickByText(page, "SkinEditor", "+ New Skin");
+  await clickByText(page, "SkinEditor", "← Back");
   await page.waitForFunction(() => {
     const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { mode?: string };
     return scene.mode === "pick-brush";
   });
-  await clickByText(page, "SkinEditor", "← Back");
+  await clickByText(page, "SkinEditor", "My skins");
   await expect.poll(() => countText(page, "Loading…")).toBe(1);
 
   // Both chains resolve together — `loadCustomSkins` dedupes concurrent reads,

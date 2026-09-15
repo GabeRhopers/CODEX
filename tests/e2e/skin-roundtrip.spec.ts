@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, waitForSkinCanvas , pixelCanvasBox } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, pixelCanvasBox, waitForSkinCanvas } from "./support/coords";
 
 /**
  * A pixel skin is now stored only as its PNG — the editable cell grid it was
@@ -48,10 +48,8 @@ test("a painted skin survives save and reopen with every pixel intact", async ({
 
   await gotoApp(page);
 
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await openThings(page);
 
-  await clickByText(page, "SkinEditor", "+ New Skin");
   await clickIconWithLabel(page, "SkinEditor", "Ghost");
   await page.waitForSelector(overlaySelector());
   await expect.poll(() => readCells(page).then((c) => c.length)).toBe(GRID * GRID);
@@ -90,6 +88,9 @@ test("a painted skin survives save and reopen with every pixel intact", async ({
   // Back out to the browse list and reopen the skin we just saved. This is
   // the path that decodes the PNG back into cells.
   await clickByText(page, "SkinEditor", "← Back");
+  // Saved skins live behind "My skins" now: the Things grid is where this
+  // screen opens, and Back from the canvas returns there.
+  await clickByText(page, "SkinEditor", "My skins");
   await clickByText(page, "SkinEditor", "Edit");
   // Opening a saved skin decodes its PNG back into cells before the canvas
   // exists (see SkinEditorScene.openForEditing), so this genuinely has to

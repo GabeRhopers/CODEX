@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, gotoAppWithoutProfile, waitForGame } from "./support/coords";
+import { clickByText, gotoAppWithoutProfile, openThings, waitForGame } from "./support/coords";
 import { failSilentAuth } from "./support/mockDrive";
 import { makeWorld, seedLevels, seedWorld } from "./support/worlds";
 
@@ -225,7 +225,6 @@ test("skins are shared across profiles, unlike levels", async ({ page }) => {
   await waitForGame(page);
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));
 
-  await clickByText(page, "Menu", "Skin Creator");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await openThings(page);
   await expect.poll(() => textsOn(page, "SkinEditor")).toContain("Shared Ghost");
 });

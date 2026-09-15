@@ -381,9 +381,13 @@ test("a person can make a small game from the Menu to a link", async ({ page }, 
 
   // --- 1. Invent a thing ---------------------------------------------------
   run.begin("Thing Maker");
-  await hand.tap("Menu", "Thing Maker");
+  // One door: the Menu offers "Things", a grid of everything paintable, and
+  // inventing is an addition to that list rather than a separate destination
+  // you have to choose between before you know which you want.
+  await hand.tap("Menu", "Things");
+  await waitFor(page, "SkinEditor");
+  await hand.tap("SkinEditor", "+ New Thing");
   await waitFor(page, "ThingMaker");
-  await hand.tap("ThingMaker", "+ New Thing");
   await hand.type("Star Fruit", THING); // "Star Fruit" is the field's placeholder
   await hand.tap("ThingMaker", "Enemy");
   await hand.tap("ThingMaker", "Slow");
