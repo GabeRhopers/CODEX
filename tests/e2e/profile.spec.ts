@@ -225,6 +225,10 @@ test("skins are shared across profiles, unlike levels", async ({ page }) => {
   await waitForGame(page);
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));
 
+  // "My skins" rather than the Things grid: the grid lists what you can paint,
+  // by its own label ("Ghost"), while a *skin's* name is on the saved-skins
+  // list behind it. The assertion is about a skin, so it has to be there.
   await openThings(page);
+  await clickByText(page, "SkinEditor", "My skins");
   await expect.poll(() => textsOn(page, "SkinEditor")).toContain("Shared Ghost");
 });
