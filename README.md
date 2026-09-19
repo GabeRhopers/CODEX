@@ -140,6 +140,7 @@ appear under more than one heading if it belongs to both.
 
 - [Music](#music)
 - [Music upload (2026-08-28)](#music-upload-2026-08-28)
+- [Built-in tunes (2026-09-19)](#built-in-tunes-2026-09-19)
 
 **Testing and CI**
 
@@ -542,9 +543,11 @@ Open the dev server URL in a browser.
   picker itself).
 - **Music: \<name/None\> ▾**: same picker shape as Background — a level
   can have its own uploaded soundtrack, played during Test Play and actual
-  Play (not while painting); the submenu's **None** entry is always first
-  (there's no built-in track pool the way there is for backgrounds), then
-  every uploaded track, plus a **+ Upload** tile to add one. See "Music"
+  Play (not while painting); the submenu's **None** entry is always first,
+  then the four built-in tunes (see "Built-in tunes (2026-09-19)"), then
+  every uploaded track, plus a **+ Upload** tile to add one. The built-ins
+  carry no delete badge — they are arithmetic, not files anyone owns, so
+  there is nothing a delete could remove. See "Music"
   under Art for the size cap and why audio can't be downscaled the way a
   background image is, and "Skin/background/music libraries" under Art
   for the shared library itself, plus the shared mute/volume control (also
@@ -1596,8 +1599,10 @@ mute-toggle + draggable-volume-slider widget, `src/audio/VolumeControl.ts`.
   shared, game-wide `scene.cache.audio` at runtime, since a level's own
   upload can't be preloaded by `BootScene` the way `menu-theme.mp3` is;
   skip re-registering when the exact same data is already cached). A
-  level with no uploaded music just plays silently — there's no built-in
-  fallback track the way there is for backgrounds. `PlayScene` stops and
+  level that picks **None** plays silently — that is still a real,
+  explicit choice rather than a fallback, but since 2026-09-19 it is no
+  longer the only option for somebody with nothing uploaded; see "Built-in
+  tunes (2026-09-19)". `PlayScene` stops and
   destroys its `Sound` object on scene shutdown (Esc, win, lose, restart),
   since Sound objects aren't scene-scoped in Phaser any more than textures
   are — without that explicit cleanup, a level's music would keep playing
@@ -3536,6 +3541,81 @@ assertion was reading fields that had never been set. It now seeds a pre-rework
 level so the clearing is actually observable. Same wording caveat as backgrounds
 applies here too — a *store* failure reports "Couldn't load that file", so the
 test pins the substring, not the sentence.
+
+### Built-in tunes (2026-09-19)
+
+Music you did not have to find first.
+
+Everything above assumes you already had an audio file. The picker offered
+**None** and your own uploads, and nothing else — so somebody who had never gone
+looking for an MP3 had exactly one option, and every level they made was silent.
+The code said so in two places, the picker's own comment and `PlayScene`'s. That
+was the day-one experience, and it is the same shape of gap the cut-scene
+pictures had: a feature complete in every part except the one that makes it
+reachable without prior work.
+
+Four tunes now sit between "None" and your uploads: **Jolly**, **Spooky**,
+**Busy**, **Calm**. They are the audio counterpart of the four painted
+backgrounds, and they behave the same way — you pick one, it is the same one for
+everybody, and there is no Roll button (a roll would mean per-level tune *state*
+in the level schema and a control the picker grid has nowhere to put).
+
+**Synthesised, not shipped**, which is the argument `scripts/generate-sfx.py`
+already makes for the eight sound effects — arithmetic is ours outright, carries
+no licence line and no vendored blob, and stays editable. It weighs more here.
+A blip is a fifth of a second; a loop is eight, and four of them as WAV files
+would be about 1.4MB, more than sixteen times the entire existing sound set, in
+every clone of this repo forever. Rendered, they cost zero bytes on disk and a
+few milliseconds on first play.
+
+`src/audio/musicSynth.ts` is the synthesiser and `src/music/builtinTunes.ts` is
+the catalogue — the same split `soundSynth.ts` has from `SOUND_LABELS`, and the
+same one `staticBackgrounds.ts` has from the images. **A tune is a mood and a
+seed**, exactly the two numbers a thing's sound already stores, so there is one
+idea in this codebase rather than two. Three things keep the synthesis genuinely
+small: a **pentatonic scale**, in which no two degrees clash, so any sequence
+sounds musical and harmony stops being a problem at all; a fixed bar structure
+(one bass note per bar, one melody note per beat); and the seeded PRNG
+`soundSynth.ts` already uses, so a tune is reproducible forever.
+
+The id carries its own mood — `tune:jolly` — so playback parses rather than
+looks up. That matters for a published bundle, which may be opened by a build
+newer than the one that made it: an id that describes itself cannot be orphaned
+by a catalogue edit, and one naming a mood a build cannot render is still
+recognisably *a built-in* and falls back to silence.
+
+**The trap, which is the cut-scene picture bug again.** `referencedMusicIds` had
+to be taught to skip built-in ids, exactly as `cutSceneBackgroundIds` was six
+days earlier. Collecting one sends `collectGameBundle` hunting the library for a
+track that was never there, and `bundleProblems` then reports *"An uploaded
+track is missing (tune:calm); those areas play silently"* about a level that
+plays perfectly. That test was written against the old behaviour first and
+watched to fail with that exact sentence before the fix went in.
+
+Two defects in the synthesiser were found by measuring structure, neither by
+listening. A square wave whose duty is not 0.5 spends longer high than low and
+so carries a **DC offset** — "spooky" measured −0.053, a twentieth of the
+headroom spent on something nobody can hear and an audible thump on some
+speakers. And the **loop seam** ticked: the melody leaves its last beat as a
+rest, but the bass rings on, so "calm" ended at 0.065 rather than 0. The first
+fix for that was wrong in an instructive way — fading only the tail made the
+tail measure clean while `removeDc`, which lifts *every* sample including the
+silence before the first note, had moved the step to the *start* (+0.043). What
+a speaker jumps across once per repeat is `last → first`, so that is what
+`musicSynth.test.ts` measures, and `fadeEnds` ramps both ends.
+
+Covered by `src/audio/musicSynth.test.ts` (12), `src/music/builtinTunes.test.ts`
+(9) and `tests/e2e/builtin-music.spec.ts` (5) — the last walking the three
+things the cut-scene bug got wrong in the order it got them wrong: offered,
+played, published. `tests/e2e/music-upload.spec.ts` passes untouched, which was
+the condition on the whole change: needing to edit it would have meant the
+built-ins were wired in wrongly.
+
+What is deliberately *not* here: cut-scene music, world-map music, a tune
+editor, tempo or key controls, and any change to `menu-theme.mp3` — it works,
+and replacing it is a separate argument. And "None" is unchanged: a level that
+picks it is still silent, still explicitly, still clearing its legacy embedded
+fields. The built-ins are something you choose, not a fallback.
 
 ### The Profile gate (2026-08-28)
 

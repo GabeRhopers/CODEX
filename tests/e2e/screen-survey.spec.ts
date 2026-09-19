@@ -123,6 +123,15 @@ test("every authoring screen, on an iPad", async ({ page }, testInfo) => {
     await open("Menu");
     await startEditorWithLevel(page, LEVEL());
   });
+  // Lettered rather than renumbered, so adding a *state* of a screen already
+  // here does not shift the five names below it. This one earns a picture
+  // because it is a dropdown that grew by four rows on 2026-09-19 and the grid
+  // it draws into is fixed — five tiles where there was one is exactly the
+  // change that overflows a panel, and nothing asserts on its height.
+  await survey("06b-music-picker", async () => {
+    await clickByText(page, "Editor", "Music: None ▾");
+    await expect.poll(() => sceneHas(page, "Editor", "Spooky"), { timeout: 20_000 }).toBe(true);
+  });
   // One list of everything paintable, built-in and invented, since 2026-09-15 —
   // there is no second list of things to photograph any more.
   await survey("07-things", async () => {

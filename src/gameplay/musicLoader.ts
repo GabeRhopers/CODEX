@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { LevelData } from "../level/LevelSchema";
+import { builtinTuneDataUrl, isBuiltinTuneId } from "../music/builtinTunes";
 import { loadMusicLibrary } from "../music/musicLibraryStorage";
 
 /** Every scene that might play a level's uploaded music reuses this one
@@ -45,12 +46,19 @@ function loadCustomAudio(scene: Phaser.Scene, dataUrl: string): Promise<string |
 }
 
 /**
- * Resolves to the Phaser audio cache key holding this level's uploaded
- * music, or `null` if the level has none (silence is the correct default
- * — there's no built-in fallback track the way there is for backgrounds).
- * Registers the track into the shared audio cache at runtime, since it
- * can't be preloaded by BootScene like a built-in sound — it doesn't
- * exist until a level that has one is actually opened.
+ * Resolves to the Phaser audio cache key holding this level's music, or
+ * `null` if the level has none. Registers the track into the shared audio
+ * cache at runtime, since it can't be preloaded by BootScene like a
+ * built-in sound — it doesn't exist until a level that has one is
+ * actually opened.
+ *
+ * As of 2026-09-19 a `customMusicId` may name one of the four **built-in
+ * tunes** instead of a library upload, and that branch comes first. It has
+ * to: a built-in id is not in the library, so falling through would search
+ * for it, miss, and play silence. Note what it is *not* — this is not a
+ * fallback for a level with no music at all. Silence stays the correct
+ * default for "None", the same explicit state it has always been; the
+ * built-ins are something you pick.
  *
  * As of 2026-08-16, primarily resolves via `customMusicId` — a reference
  * into the shared music library (see music/musicLibraryStorage.ts) rather
@@ -65,6 +73,13 @@ export async function resolveLevelMusicKey(
   scene: Phaser.Scene,
   level: Pick<LevelData, "customMusicId" | "customMusicData">,
 ): Promise<string | null> {
+  if (level.customMusicId && isBuiltinTuneId(level.customMusicId)) {
+    const dataUrl = builtinTuneDataUrl(level.customMusicId);
+    // null when this build cannot render that mood — a level saved against a
+    // tune since removed. Silence, rather than searching the library for an id
+    // that was never an upload and reporting nothing.
+    return dataUrl ? loadCustomAudio(scene, dataUrl) : null;
+  }
   if (level.customMusicId) {
     const library = await loadMusicLibrary();
     const asset = library.find((item) => item.id === level.customMusicId);

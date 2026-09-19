@@ -98,6 +98,21 @@ describe("referenced assets", () => {
     expect(referencedMusicIds([level("l1")])).toEqual([]);
     expect(referencedCustomEntityIds([level("l1")])).toEqual([]);
   });
+
+  it("ignores a built-in tune, which is arithmetic rather than an asset", () => {
+    // The trap `cutSceneBackgroundIds` already had to be taught to avoid, in
+    // exactly the same shape. A built-in tune ships with the app and is
+    // rebuilt from its id, so there is nothing in the music library to collect
+    // for it — and collecting it anyway would make `bundleProblems` report a
+    // missing track for a level that plays perfectly.
+    const l = level("l1", { customMusicId: "tune:jolly", subArea: area({ customMusicId: "mus-real" }) });
+    expect(referencedMusicIds([l])).toEqual(["mus-real"]);
+  });
+
+  it("publishes a tune-only game with nothing missing and no tracks to carry", () => {
+    const b = bundle({ levels: [level("l1", { customMusicId: "tune:spooky" })], music: [] });
+    expect(bundleProblems(b)).toEqual([]);
+  });
 });
 
 describe("bundleProblems", () => {

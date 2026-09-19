@@ -130,12 +130,21 @@ export interface LevelArea {
    * — see backgroundLoader.ts. Every new upload sets customBackgroundId
    * instead; nothing writes this field anymore. */
   customBackgroundData?: string;
-  /** Which entry of the shared music library (music.json — see
-   * music/musicLibraryStorage.ts) this area plays, present only when it
-   * has music (there's no built-in pool the way there is for
-   * backgrounds; an area with none of these fields just plays silently).
-   * Same shared-library treatment as customBackgroundId above, replacing
-   * the old per-level embedded copy — see musicLoader.ts. */
+  /**
+   * What this area plays, present only when it plays something — an area
+   * with none of these fields is silent, which is a real choice ("None")
+   * rather than a fallback.
+   *
+   * **Two kinds of id, and they resolve differently.** A `tune:` id names
+   * one of the four built-in tunes, which are synthesised from a mood and
+   * a seed and ship no bytes (see music/builtinTunes.ts); anything else is
+   * an entry of the shared music library (music.json — see
+   * music/musicLibraryStorage.ts), the same shared-library treatment
+   * customBackgroundId gets above. `isBuiltinTuneId` is the one place that
+   * distinction is decided, and `resolveLevelMusicKey` checks it first
+   * because a built-in is not in the library and searching for it there
+   * would find nothing and play silence.
+   */
   customMusicId?: string;
   /** Legacy per-level embedded music (a data URL) and its original
    * filename, from before music moved into the shared library above.

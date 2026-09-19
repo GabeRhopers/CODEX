@@ -2,6 +2,7 @@ import { BackgroundAsset } from "../backgrounds/BackgroundLibrary";
 import { CustomEntityDef, CustomEntityId, isCustomEntityId } from "../entities/customEntity";
 import { cutSceneActorIds, cutSceneBackgroundIds } from "./CutScene";
 import { LevelArea, LevelData } from "../level/LevelSchema";
+import { isBuiltinTuneId } from "../music/builtinTunes";
 import { MusicAsset } from "../music/MusicLibrary";
 import { CustomSkinsFile } from "../skins/CustomSkins";
 import { WorldData } from "../world/WorldSchema";
@@ -80,10 +81,20 @@ export function referencedBackgroundIds(levels: readonly LevelData[]): string[] 
   return referencedIds(levels, (area) => area.customBackgroundId);
 }
 
-/** Which uploaded tracks these levels play. Legacy embedded `customMusicData`
- * is ignored for the same reason as backgrounds above. */
+/**
+ * Which **uploaded** tracks these levels play.
+ *
+ * Legacy embedded `customMusicData` is ignored for the same reason as
+ * backgrounds above. Built-in tunes are ignored for a different one: they are a
+ * mood and a seed rebuilt at runtime, so there is no library entry to collect
+ * and asking for one makes `bundleProblems` report a missing track for a level
+ * that plays fine. `cutSceneBackgroundIds` skips built-in pictures for exactly
+ * this reason; this is the same rule for audio.
+ */
 export function referencedMusicIds(levels: readonly LevelData[]): string[] {
-  return referencedIds(levels, (area) => area.customMusicId);
+  return referencedIds(levels, (area) =>
+    area.customMusicId && !isBuiltinTuneId(area.customMusicId) ? area.customMusicId : undefined,
+  );
 }
 
 /** Every invented type placed in these levels, whether or not a definition for

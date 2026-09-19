@@ -27,6 +27,7 @@ import { CANVAS_BACKGROUND_COLOR, GroundSkin, GROUND_SKINS } from "../level/grou
 import { cloneLevel } from "../level/LevelSerializer";
 import { AreaKey, createEmptyArea, createEmptyLevel, DEFAULT_ENEMY_SIZE, EMPTY_TILE, EnemySize, EntityType, LevelArea, LevelData } from "../level/LevelSchema";
 import { backgroundDisplayLabel, resolveStaticBackground, STATIC_BACKGROUNDS, StaticBackgroundId } from "../level/staticBackgrounds";
+import { BUILTIN_TUNES, builtinTuneLabel, isBuiltinTuneId } from "../music/builtinTunes";
 import { MusicAsset } from "../music/MusicLibrary";
 import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musicLibraryStorage";
 import { getLevelStorage } from "../persistence/storage";
@@ -63,6 +64,27 @@ const AUTOSAVE_DEBOUNCE_MS = 2000;
  * for a different reason than their siblings: the teleport pairing (see
  * PlayScene) only makes sense with at most one of each per area. */
 const MARKER_TYPES = new Set<EntityType>(["player-spawn", "goal", "chest", "basket-sub", "basket-up"]);
+
+/**
+ * The music label that can be known *without* a Drive read.
+ *
+ * Three kinds of music, and only one of them needs the network. A built-in
+ * tune's name is in the app, and a legacy embedded track carries its name on
+ * the level — both are on hand immediately. A library upload's real name lives
+ * in music.json, so it is `null` here and pops in a moment later via
+ * `resolveAreaLabels`, the same tolerance every other Drive-backed value gets.
+ *
+ * One function rather than the expression repeated at each of the three places
+ * that need it, because the built-in case is the one that reads as a bug when
+ * it is missed: the trigger sits blank, or says "Custom", for a tune that is
+ * playing correctly and has a perfectly good name.
+ */
+function immediateMusicLabel(area: Pick<LevelArea, "customMusicId" | "customMusicName">): string | null {
+  if (area.customMusicId) {
+    return isBuiltinTuneId(area.customMusicId) ? builtinTuneLabel(area.customMusicId) : null;
+  }
+  return area.customMusicName ?? null;
+}
 
 export class EditorScene extends Phaser.Scene {
   private initialLevel?: LevelData;
@@ -217,13 +239,7 @@ export class EditorScene extends Phaser.Scene {
     this.ui = new EditorUI(
       this,
       backgroundDisplayLabel(this.backgroundId),
-      // A library-backed track's real name lives in music.json, not on the
-      // level — leave the initial label blank and let it pop in a moment
-      // later (see resolveAreaLabels below), same tolerance as every other
-      // Drive-backed value here. A level with only the legacy embedded
-      // field (no customMusicId) still has its name on hand already, so
-      // shows it immediately.
-      this.level.customMusicId ? null : this.level.customMusicName ?? null,
+      immediateMusicLabel(this.level),
       this.level.name,
       this.level.width,
       this.level.height,
@@ -361,7 +377,9 @@ export class EditorScene extends Phaser.Scene {
         if (asset) this.ui.setBackgroundLabel(asset.name);
       });
     }
-    if (area.customMusicId) {
+    // Built-ins deliberately excluded: there is nothing in the library to find,
+    // and `immediateMusicLabel` has already named them.
+    if (area.customMusicId && !isBuiltinTuneId(area.customMusicId)) {
       const wantedId = area.customMusicId;
       void loadMusicLibrary().then((library) => {
         if (this.area() !== area) return;
@@ -409,7 +427,7 @@ export class EditorScene extends Phaser.Scene {
     this.rebuildVisualsFromLevel();
 
     this.ui.setBackgroundLabel(this.backgroundId === "custom" ? "Custom" : backgroundDisplayLabel(this.backgroundId));
-    this.ui.setMusicLabel(area.customMusicId ? null : area.customMusicName ?? null);
+    this.ui.setMusicLabel(immediateMusicLabel(area));
     this.resolveAreaLabels(area, this.backgroundId);
     this.ui.setAreaState({ sub: !!this.level.subArea, up: !!this.level.upArea }, key);
     this.ui.setEntityCount(area.entities.length);
@@ -939,13 +957,22 @@ export class EditorScene extends Phaser.Scene {
   }
 
   /** Called by EditorUI when the music picker opens — resolves the shared
-   * library (a Drive read) and prepends the "None" option, right when the
-   * user is about to see it. */
+   * library (a Drive read) and prepends the "None" option and the four
+   * built-in tunes, right when the user is about to see it.
+   *
+   * The built-ins sit before the uploads and are **not** `deletable`: they are
+   * arithmetic in `music/builtinTunes.ts`, not files anybody owns, so there is
+   * nothing a delete could remove. Same arrangement as
+   * `onBackgroundPickerOpen`, which prepends STATIC_BACKGROUNDS. Before this,
+   * the list was "None" plus whatever you had uploaded — so anybody who had
+   * never gone looking for an audio file had exactly one option, and every
+   * level they made was silent. */
   private onMusicPickerOpen(): void {
     void loadMusicLibrary().then((tracks) => {
       this.musicLibrary = tracks;
       const items: AssetPickerItem[] = [
         { id: NO_MUSIC_ID, label: "None", textureKey: "music-note-muted" },
+        ...BUILTIN_TUNES.map((tune) => ({ id: tune.id, label: tune.label, textureKey: "music-note" })),
         ...tracks.map((t) => ({ id: t.id, label: t.name, textureKey: "music-note", deletable: true })),
       ];
       const activeId = this.area().customMusicId ?? NO_MUSIC_ID;
@@ -956,9 +983,11 @@ export class EditorScene extends Phaser.Scene {
   /** Called by EditorUI once a music picker item is picked — `null` (from
    * the "None" option, see EditorUI's own NO_MUSIC_ID -> null mapping)
    * clears every music field on whichever area is currently being edited
-   * (there's no built-in fallback track the way backgrounds have, so
-   * "None" is a real, explicit state, not just "point at nothing and fall
-   * back"); otherwise points that area at the chosen library entry. */
+   * (there's no built-in *fallback* track the way backgrounds have — the
+   * four built-in tunes are something you pick, not somewhere a level
+   * lands — so "None" is a real, explicit state, not just "point at
+   * nothing and fall back"); otherwise points that area at the chosen
+   * built-in tune or library entry. */
   private onSelectMusic(id: string | null): void {
     const area = this.area();
     if (id === null) {
@@ -970,9 +999,19 @@ export class EditorScene extends Phaser.Scene {
       this.ui.setStatus("Music removed");
       return;
     }
-    const asset = this.musicLibrary.find((track) => track.id === id);
     area.customMusicId = id;
-    this.ui.setMusicLabel(asset?.name ?? "Custom");
+    if (isBuiltinTuneId(id)) {
+      // Clear the legacy embedded copy too. A level that had an old inline
+      // upload and then picks a tune must not keep both: `resolveLevelMusicKey`
+      // would take the built-in branch and play the tune, but the stale data URL
+      // would still be carried into every save and every published bundle.
+      area.customMusicData = undefined;
+      area.customMusicName = undefined;
+      this.ui.setMusicLabel(builtinTuneLabel(id));
+    } else {
+      const asset = this.musicLibrary.find((track) => track.id === id);
+      this.ui.setMusicLabel(asset?.name ?? "Custom");
+    }
     this.markDirty();
   }
 
