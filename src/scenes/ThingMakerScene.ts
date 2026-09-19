@@ -1,21 +1,9 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
-import { GameRect } from "../editor/domOverlay";
 import { LevelNameInput } from "../editor/LevelNameInput";
-import { fitWithinTile } from "../editor/spriteFit";
-import { builtinTextureKey } from "../entities/builtins";
-import {
-  clonableTypes,
-  CustomEntityCategory,
-  CustomEntityDef,
-  DEFAULT_SPEED_SCALE,
-  makeCustomEntityId,
-  newCustomEntityDef,
-  validationError,
-  withCategory,
-} from "../entities/customEntity";
+import { drawThingFields } from "../editor/thingFields";
+import { CustomEntityDef, makeCustomEntityId, newCustomEntityDef, validationError } from "../entities/customEntity";
 import { loadCustomEntities, removeCustomEntity, saveCustomEntity } from "../entities/customEntityStorage";
-import { PALETTE } from "../editor/Palette";
 import { PixelCanvasOverlay, type PixelTool } from "../editor/PixelCanvasOverlay";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PALETTE_SWATCH_NAME } from "../skins/pixelPalettes";
 import { cellsFromPngDataUrl, cellsToPngDataUrl, hasPaintedCells } from "../skins/pixelSkinCells";
@@ -25,7 +13,7 @@ import { loadActiveProfile } from "../profile/Profile";
 import { cellHitArgs } from "../ui/touchTarget";
 import { playSoundKey } from "../audio/sfx";
 import { registerSound, soundKeyFor } from "../audio/soundLoader";
-import { rollSeed, SOUND_PRESETS, type SoundPreset, type SoundSpec } from "../audio/soundSynth";
+import { type SoundSpec } from "../audio/soundSynth";
 import { ConfirmButton } from "../ui/confirmButton";
 import { BUTTON_COLOR, BUTTON_HOVER_COLOR, MUTED_COLOR, SELECTED_COLOR, SELECTED_HOVER_COLOR } from "../ui/theme";
 
@@ -93,53 +81,7 @@ const SPRITE_SIZE = 296;
 const SWATCH_SIZE = 24;
 const SWATCH_STEP = 28;
 const SWATCH_COLS = 6;
-/** Sound buttons are stepped rather than fixed at the old 76 so the row's last
- * button ("▶ Play", the eighth) finishes clear of the tool column at 630. */
-const SOUND_STEP = 62;
 const SWATCH_TOP = SPRITE_TOP + SPRITE_SIZE + 10;
-
-/** The three families, in the order the form offers them. */
-const CATEGORIES: { id: CustomEntityCategory; label: string }[] = [
-  { id: "items", label: "Item" },
-  { id: "enemies", label: "Enemy" },
-  { id: "decor", label: "Decoration" },
-];
-
-/**
- * What each preset is called on screen.
- *
- * Named for the *event*, not the waveform — "what does this thing do?" is a
- * question a child can answer, "what waveform is it?" is not. Kept here rather
- * than in soundSynth.ts so the synthesiser stays free of anything user-facing.
- */
-const SOUND_LABELS: Record<SoundPreset, string> = {
-  pickup: "Pickup",
-  power: "Power",
-  hit: "Hit",
-  blip: "Blip",
-  thud: "Thud",
-};
-
-/**
- * Speed as a few named choices rather than a free number.
- *
- * The stored range is continuous (MIN_SPEED_SCALE..MAX_SPEED_SCALE) but nobody
- * making a game wants to reason about 1.37. These are the ends and the middle,
- * all inside the bounds validation already enforces, so a picked value can
- * never be one validation would refuse.
- */
-const SPEED_CHOICES: { value: number; label: string }[] = [
-  { value: 0.5, label: "Slow" },
-  { value: DEFAULT_SPEED_SCALE, label: "Normal" },
-  { value: 1.5, label: "Fast" },
-  { value: 2, label: "Very fast" },
-];
-
-/** What a built-in is called, for the "Acts like" row — the palette's own label,
- * so a thing is described here exactly as it is in the editor. */
-function builtinLabel(type: string): string {
-  return PALETTE.find((brush) => brush.entityType === type)?.label ?? type;
-}
 
 export class ThingMakerScene extends Phaser.Scene {
   /** Which thing the Things grid sent us to, if any. */
@@ -341,141 +283,25 @@ export class ThingMakerScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, 24, this.draftIsNew ? "New Thing" : "Edit Thing", { fontSize: "20px", color: "#ffffff" })
       .setOrigin(0.5, 0);
 
-    // --- name
-    this.add.text(60, 78, "Name", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
-    const nameRect: GameRect = { x: 110, y: 64, width: 260, height: 28 };
-    this.nameInput = new LevelNameInput(
-      this,
-      nameRect,
-      draft.name,
-      (value) => {
+    // The fields themselves live in editor/thingFields.ts, drawn into this
+    // scene rather than owned by it — the Skin Creator's canvas wants the same
+    // block behind a "What it does" tab, and two copies of a form is how they
+    // drift.
+    const fields = drawThingFields({
+      scene: this,
+      x: 60,
+      y: 78,
+      draft,
+      onChange: (update, redraw) => {
         if (!this.draft) return;
-        this.draft = { ...this.draft, name: value };
+        this.draft = update(this.draft);
         this.saveError = undefined;
+        if (redraw) this.rebuild();
       },
-      // No fallback: an unnamed thing must fail validation and say so, rather
-      // than quietly becoming "Untitled" — you are naming something you invented.
-      { fallback: "", placeholder: "Star Fruit" },
-    );
-
-    // --- category
-    this.add.text(60, 124, "Is a", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
-    CATEGORIES.forEach((category, i) => {
-      this.makeButton(
-        110 + i * 96,
-        124,
-        category.label,
-        () => {
-          if (!this.draft) return;
-          // withCategory, not a field assignment: switching family has to reset
-          // basedOn or the draft becomes exactly the cross-family definition
-          // validationError refuses.
-          this.draft = withCategory(this.draft, category.id);
-          this.saveError = undefined;
-          this.rebuild();
-        },
-        () => this.draft?.category === category.id,
-      );
+      onPreviewSound: (sound) => void this.previewSound(sound),
     });
-
-    // --- acts like
-    //
-    // Seven to a row, not ten: at ten the widest family (Decor) ran to x=882
-    // and straight under the preview panel at x=830. Rows are counted rather
-    // than assumed so everything below sits directly under the last one — with
-    // a fixed offset, Items and Enemies (one row each) left an obviously
-    // unintended empty band.
-    const ACTS_TOP = 190;
-    const ACTS_PER_ROW = 7;
-    const ACTS_ROW_H = 62;
-    this.add.text(60, ACTS_TOP - 12, "Acts like", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
-    const options = clonableTypes(draft.category);
-    options.forEach((type, i) => {
-      const x = 110 + (i % ACTS_PER_ROW) * 78;
-      const y = ACTS_TOP + Math.floor(i / ACTS_PER_ROW) * ACTS_ROW_H;
-      const selected = draft.basedOn === type;
-      const cell = this.add
-        .rectangle(x, y, 70, 54, selected ? 0x8a6d1f : 0x0f1830)
-        .setOrigin(0, 0)
-        .setInteractive({ useHandCursor: true });
-      const art = builtinTextureKey(type);
-      if (art) fitWithinTile(this.add.image(x + 35, y + 18, art), 28);
-      this.add
-        .text(x + 35, y + 34, builtinLabel(type), { fontSize: "10px", color: "#eeeeee", align: "center" })
-        .setOrigin(0.5, 0);
-      cell.on("pointerdown", () => {
-        if (!this.draft) return;
-        this.draft = { ...this.draft, basedOn: type };
-        this.saveError = undefined;
-        this.rebuild();
-      });
-    });
-    let y = ACTS_TOP + Math.ceil(options.length / ACTS_PER_ROW) * ACTS_ROW_H + 22;
-
-    // --- speed (enemies only)
-    if (draft.category === "enemies") {
-      this.add.text(60, y, "Speed", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
-      const current = draft.params?.speedScale ?? DEFAULT_SPEED_SCALE;
-      const speedY = y;
-      SPEED_CHOICES.forEach((choice, i) => {
-        this.makeButton(
-          110 + i * 92,
-          speedY,
-          choice.label,
-          () => {
-            if (!this.draft) return;
-            this.draft = { ...this.draft, params: { ...this.draft.params, speedScale: choice.value } };
-            this.rebuild();
-          },
-          () => current === choice.value,
-        );
-      });
-      y += 56;
-    }
-
-    // --- sound
-    //
-    // Items and enemies only. Decor is skipped because nothing in the game ever
-    // touches a decoration, so there is no moment at which its sound could
-    // play — offering the control anyway would be a button that does nothing.
-    // `soundSpecFor` refuses decor for the same reason, so the two cannot drift.
-    if (draft.category !== "decor") {
-      this.add.text(60, y, "Sound", { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
-      const soundY = y;
-      const current = draft.sound;
-
-      const setSound = (sound: SoundSpec | undefined): void => {
-        if (!this.draft) return;
-        this.draft = { ...this.draft, sound };
-        this.saveError = undefined;
-        this.rebuild();
-        if (sound) void this.previewSound(sound);
-      };
-
-      this.makeButton(110, soundY, "None", () => setSound(undefined), () => !current);
-      SOUND_PRESETS.forEach((preset, i) => {
-        this.makeButton(
-          172 + i * SOUND_STEP,
-          soundY,
-          SOUND_LABELS[preset],
-          // Picking a kind with no seed yet rolls one, so a single tap is always
-          // enough to hear something — asking a child to press two buttons
-          // before anything happens is how a feature goes unused.
-          () => setSound({ preset, seed: current?.seed ?? rollSeed() }),
-          () => current?.preset === preset,
-        );
-      });
-      // Roll is how you get a *different* noise of the same kind: the seed is
-      // the only variation mechanism, deliberately, instead of a panel of
-      // sliders nobody wants on a game canvas.
-      this.makeButton(172 + SOUND_PRESETS.length * SOUND_STEP, soundY, "🎲 Roll", () => {
-        if (current) setSound({ preset: current.preset, seed: rollSeed() });
-      });
-      this.makeButton(172 + (SOUND_PRESETS.length + 1) * SOUND_STEP, soundY, "▶ Play", () => {
-        if (current) void this.previewSound(current);
-      });
-      y += 56;
-    }
+    this.nameInput = fields.nameInput;
+    let y = fields.bottomY;
 
     this.buildSpritePanel();
 
