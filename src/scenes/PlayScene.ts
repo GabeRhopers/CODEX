@@ -716,9 +716,12 @@ export class PlayScene extends Phaser.Scene {
       this.background = new StaticBackground(this, area.width * TILE_SIZE, textureKey);
     });
 
-    // A level with no uploaded music (the common case — there's no
-    // built-in fallback track the way there is for backgrounds) resolves
-    // to null and this is simply a no-op.
+    // A level whose music is "None" resolves to null and this is simply a
+    // no-op. That used to be the common case for want of anything to pick —
+    // the picker offered uploads and nothing else — which is what the four
+    // built-in tunes fixed on 2026-09-19. It is still a real choice, though,
+    // and still not a fallback: nothing lands here by default the way a
+    // background lands on Meadow.
     this.music?.stop();
     this.music?.destroy();
     this.music = undefined;

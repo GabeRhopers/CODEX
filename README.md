@@ -3604,12 +3604,23 @@ silence before the first note, had moved the step to the *start* (+0.043). What
 a speaker jumps across once per repeat is `last → first`, so that is what
 `musicSynth.test.ts` measures, and `fadeEnds` ramps both ends.
 
+**The published half is where it pays off.** In a published game
+`loadMusicLibrary` returns `bundle.music`, which for a tune-only game is empty —
+but `resolveLevelMusicKey` takes the built-in branch first and never reaches it,
+so the visitor hears the tune from a file carrying no audio at all. Four WAVs
+in every published bundle would be the same feature and a far worse link, and
+that is the point of storing two numbers instead of a waveform.
+
 Covered by `src/audio/musicSynth.test.ts` (12), `src/music/builtinTunes.test.ts`
-(9) and `tests/e2e/builtin-music.spec.ts` (5) — the last walking the three
-things the cut-scene bug got wrong in the order it got them wrong: offered,
-played, published. `tests/e2e/music-upload.spec.ts` passes untouched, which was
-the condition on the whole change: needing to edit it would have meant the
-built-ins were wired in wrongly.
+(9) and `tests/e2e/builtin-music.spec.ts` (6) — the last walking the three
+things the cut-scene bug got wrong in the order it got them wrong (offered,
+played, published) and then opening the published file in a context with no
+mocked Drive, no profile and no token, where anything that plays can only have
+been rebuilt from the id. Both playback tests were checked by mutation: stubbing
+the built-in branch out of `resolveLevelMusicKey` fails each of them on its own.
+`tests/e2e/music-upload.spec.ts` passes untouched, which was the condition on
+the whole change: needing to edit it would have meant the built-ins were wired
+in wrongly.
 
 What is deliberately *not* here: cut-scene music, world-map music, a tune
 editor, tempo or key controls, and any change to `menu-theme.mp3` — it works,

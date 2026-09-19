@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { clickByText, clickIconWithLabel, gotoApp, startEditorWithLevel } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, startEditorWithLevel, waitForGame } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 import { makeWorld, seedWorlds } from "./support/worlds";
 import type { GameBundle } from "../../src/game/gameBundle";
@@ -23,6 +23,17 @@ import type { LevelArea, LevelData } from "../../src/level/LevelSchema";
  * bundler hunted the library for it and reported a track missing that was
  * perfectly fine). Each of those was invisible to the layer above it.
  */
+
+/**
+ * Serial, for one reason: the last test opens the *same file* the one before it
+ * published. Producing that file costs a whole editor session, and re-exporting
+ * it would make them two different questions rather than two halves of one.
+ * Safe at module scope because this project runs Playwright with a single
+ * worker — the same arrangement `published-game.spec.ts` uses and documents.
+ */
+test.describe.configure({ mode: "serial" });
+
+let publishedBundle: GameBundle | null = null;
 
 const plainLevel = (name: string): LevelData => ({
   ...makeLevel(
@@ -226,4 +237,80 @@ test("a tune-only game publishes with no tracks to carry and nothing reported mi
   });
   expect(status).not.toContain("missing");
   expect(status).toMatch(/^Saved 1 world, 1 level, /);
+
+  publishedBundle = bundle;
+});
+
+test("a visitor with nothing plays the tune, rebuilt from a bundle carrying no audio", async ({ browser }) => {
+  test.slow();
+  expect(publishedBundle, "the publish test must run first").not.toBeNull();
+  const bundle = publishedBundle!;
+
+  /**
+   * **A context of its own, and that is the whole test.** `route` handlers and
+   * `addInitScript` survive navigation, so reusing the authoring page would
+   * leave the mocked Drive and the seeded profile installed — and a tune that
+   * was secretly still reading the library would pass anyway. Here there is no
+   * Drive, no token and no profile; anything that plays came from the file, and
+   * the file has `music: []`.
+   */
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.addInitScript(() => localStorage.clear());
+    await page.route("**/game.json", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(bundle) }),
+    );
+    await page.goto("/");
+    await waitForGame(page);
+    await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameTitle"), undefined, { timeout: 20_000 });
+
+    await clickByText(page, "GameTitle", "Play ▶");
+    await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMap"));
+
+    // The one open node on the map — the level that picked "Calm".
+    const node = await page.evaluate(() => {
+      const scene = window.__debugGame!.scene.getScene("WorldMap");
+      for (const child of scene.children.list) {
+        const o = child as unknown as { type?: string; radius?: number; x?: number; y?: number };
+        if (o.type === "Arc" && o.radius === 18) return { x: o.x!, y: o.y! };
+      }
+      return null;
+    });
+    expect(node, "no level node on the published map").not.toBeNull();
+    const point = await page.evaluate(
+      ({ x, y }) => {
+        const game = window.__debugGame!;
+        const rect = game.canvas.getBoundingClientRect();
+        const scale = game.scale.displayScale;
+        return { x: rect.left + x / scale.x, y: rect.top + y / scale.y };
+      },
+      node!,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
+
+    // The end of the chain the whole design exists for: the bundle carried no
+    // audio at all, and the tune is here anyway because `tune:calm` is a mood
+    // and a seed that musicSynth rebuilds on this machine. A published game
+    // with four WAVs in it would be the same feature and a far worse link.
+    expect(bundle.music).toEqual([]);
+    await expect
+      .poll(() => page.evaluate(() => window.__debugGame!.cache.audio.exists("level-custom-music")), {
+        timeout: 20_000,
+      })
+      .toBe(true);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const scene = window.__debugGame!.scene.getScene("Play") as unknown as { music?: { key: string } };
+            return scene.music?.key ?? null;
+          }),
+        { timeout: 20_000 },
+      )
+      .toBe("level-custom-music");
+  } finally {
+    await context.close();
+  }
 });
