@@ -131,6 +131,7 @@ appear under more than one heading if it belongs to both.
 - [The letterbox stopped looking like a bug](#the-letterbox-stopped-looking-like-a-bug-2026-09-13)
 - [Cut-scene pictures nobody could reach, and characters to stand in them](#cut-scene-pictures-nobody-could-reach-and-characters-to-stand-in-them-2026-09-13)
 - [One list of everything you can paint](#one-list-of-everything-you-can-paint-2026-09-15)
+- [One screen for a thing, with two tabs](#one-screen-for-a-thing-with-two-tabs-2026-09-19)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5637,6 +5638,75 @@ built-in tile opens the canvas, an invented tile opens a form with its own
 canvas, so `PixelCanvasOverlay` is still hosted twice. Folding the form's fields
 into the canvas screen, gated on the id being a `custom:` one, is phase 2.
 
+*Closed 2026-09-19.* See "One screen for a thing, with two tabs".
+
+### One screen for a thing, with two tabs (2026-09-19)
+
+Phase 2, and the end of the merge. `ThingMakerScene` is gone — 519 lines — and
+with it the **second `PixelCanvasOverlay`**, which was the concrete cost of the
+two rooms Phase 1 left behind one door.
+
+**The fields do not fit beside the canvas, and that was measured before anything
+was built.** The painting window is a fixed 384² at x 333..717, leaving two rails
+of about 300px, and this file already recorded both as tight — the right one's
+own note says PALETTE, DRAWING, REFERENCE and THIS SKIN "have to finish above
+the footer at y=421, and at 22/16 the last button ended at 426, measurably on
+top of ↶ Undo". The form runs y=78→490 across x=60..610: about **550×410**. No
+rail holds that, and shrinking the canvas cannot buy 550px. Measuring first is
+the lesson from the UI week's "the canvas can grow to 46%" claim, which was
+wrong because height bound rather than width.
+
+**So: tabs, which is Scratch's own answer.** Scratch does not show a sprite's
+properties and its paint editor at once — *Code*, *Costumes* and *Sounds* are
+tabs on one sprite. Ours are **Draw** and **What it does**, and the strip exists
+only for an invented thing: a built-in brush has nothing to put behind a second
+tab, which is progressive disclosure rather than a screen that is the union of
+two. The strip sits where FRAMES sits for a built-in with more than one pose —
+free exactly when it is wanted, since `framePlanFor` returns null for a `custom:`
+id, and the two answer the same question: which view of this thing am I on.
+
+**One Save writes both halves**, definition and drawing, because a child who
+renamed it on one tab and painted on the other pressed Save once. The definition
+goes first: it is the half that cannot be redrawn from memory.
+
+**The half that needed no code at all.** `onSave` already branched on
+`framePlanFor`, took the single-frame path for a `custom:` id and called
+`savePixelSkin` with it — byte-for-byte what the deleted scene's `saveSprite`
+did. The canvas could always paint and save an invented thing's sprite; Phase 1
+merely routed them elsewhere.
+
+**The bug worth recording.** `openCanvasFor` starts a *new* skin. That is right
+for a built-in, which can wear any number, and wrong for a thing, which has
+exactly one — so re-opening a thing you had drawn showed a blank canvas over
+your own artwork and would have written the blank back on the next Save. It is
+the exact failure the deleted `loadSprite`'s docstring warned about, reintroduced
+by deleting it. `activeSkinFor` loads the skin the thing is actually wearing, and
+`thing-maker.spec.ts` now walks the round trip: draw, save, leave, come back,
+count the pixels.
+
+**Three more found by looking rather than by asserting**, which is the running
+score for this project: Save under the fields collided with `← Back` at Enemy's
+height, because the family changes the block's height and Enemy has a Speed row
+Item does not — so Save moved to the footer line, where the Draw tab already
+puts it and where it no longer moves between tabs. An invented thing showed two
+names, its own and a separate "Grumble Bug 1" skin name; it is one object with
+one name now, and `onSave` writes the thing's name through as the skin's. And
+"Set as default" was offered for a thing with exactly one skin, already adopted
+by `adoptsFirstSkin` — a question with one answer, already given.
+
+**The gesture count went up, 121 → 123.** The plan for this work said it "should
+fall", and that a merge which does not move it has not simplified anything, so
+the honest thing is to report the rise rather than drop the metric. The two are a
+tap on **Draw** — a new thing opens on its fields, because Save refuses one with
+no name — and one more `← Back`, now that the grid sits between the thing and
+the Menu. That is the price of the 550×410 measurement above. What the phase
+actually buys is one screen instead of two, one canvas host instead of two, one
+name instead of two, and one Save that writes both halves.
+
+`editor/thingFields.ts` (extracted in the phase before this one, deliberately as
+a no-op) is what made the move cheap: the form draws into a caller's scene, the
+way `ui/savedList.ts` already does for My Levels and My Worlds.
+
 ## Project layout
 
 See `docs/spellbound-editor-implementation-plan.md` §4 for the intended
@@ -5660,7 +5730,6 @@ src/
 │   ├── WorldMakerScene.ts    build/edit a World's level order
 │   ├── GameMakerScene.ts     title + worlds in order + an ending, and Play Game — see "A game" under Art
 │   ├── EndingScene.ts        the screen after the last world: the author's own words over the trophy
-│   ├── ThingMakerScene.ts    the form behind one tile of the Things grid: name it, say what it acts like, draw it — see "The Thing Maker" under Art
 │   ├── PublishScene.ts       download the file, put it in public/games/, send the link — see "Publishing a game"
 │   ├── CutSceneMakerScene.ts one panel at a time: its picture, its words, and the stage you drag characters around in — see "Cut scenes"
 │   └── CutSceneScene.ts      plays a cut scene, and knows nothing about games — Next, Skip, then whatever comes after

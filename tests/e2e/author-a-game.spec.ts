@@ -9,6 +9,7 @@ import {
   readStatusText,
   selectPaletteCategory,
   tileCenter,
+  waitForSkinCanvas,
 } from "./support/coords";
 import type { GameBundle } from "../../src/game/gameBundle";
 
@@ -317,14 +318,14 @@ const PUPILS: [x: number, y: number][] = [
 
 const GRID = 32;
 
-/** Clicks the swatch of a given colour, on the Thing Maker's own palette row.
+/** Clicks the swatch of a given colour, on the Draw tab's palette row.
  * Found by its fill rather than its position, so a relayout does not silently
  * start painting in some other colour — the failure mode a coordinate would
  * have. */
 async function pickColor(page: Page, run: Run, hex: string): Promise<void> {
   run.count();
   const at = await page.evaluate((wanted) => {
-    const scene = window.__debugGame!.scene.getScene("ThingMaker");
+    const scene = window.__debugGame!.scene.getScene("SkinEditor");
     const target = parseInt(wanted.slice(1), 16);
     for (const child of scene.children.list) {
       const o = child as unknown as { name?: string; x?: number; y?: number; width?: number; fillColor?: number };
@@ -360,12 +361,14 @@ async function paintRow(page: Page, run: Run, y: number, x0: number, x1: number)
   await page.mouse.up();
 }
 
+/** Read off the live canvas, the way every skin spec does. The Thing Maker kept
+ * its own `spriteCells` copy; there is one canvas now and it holds them. */
 const paintedCells = (page: Page): Promise<number> =>
   page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("ThingMaker") as unknown as {
-      spriteCells?: (string | null)[];
+    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
+      pixelCanvas?: { getCells(): (string | null)[] };
     };
-    return (scene.spriteCells ?? []).filter((c) => c !== null).length;
+    return (scene.pixelCanvas?.getCells() ?? []).filter((c) => c !== null).length;
   });
 
 // --- The walk --------------------------------------------------------------
@@ -387,17 +390,19 @@ test("a person can make a small game from the Menu to a link", async ({ page }, 
   await hand.tap("Menu", "Things");
   await waitFor(page, "SkinEditor");
   await hand.tap("SkinEditor", "+ New Thing");
-  await waitFor(page, "ThingMaker");
   await hand.type("Star Fruit", THING); // "Star Fruit" is the field's placeholder
-  await hand.tap("ThingMaker", "Enemy");
-  await hand.tap("ThingMaker", "Slow");
-  await hand.tap("ThingMaker", "Thud");
+  await hand.tap("SkinEditor", "Enemy");
+  await hand.tap("SkinEditor", "Slow");
+  await hand.tap("SkinEditor", "Thud");
   await shot(page, "01-thing");
 
   // --- 2. Draw it, on the same screen --------------------------------------
-  // Not a second stage any more. Until 2026-09-12 this was "Save & draw
-  // sprite →", a trip to the Skin Creator and back; the drawing is now beside
-  // the fields that say what the thing does, so the walk never leaves.
+  // Still one screen, now two tabs of it. A new thing opens on "What it does",
+  // because Save refuses one with no name; "Draw" is the other half of the same
+  // screen rather than a trip somewhere. That tab tap is the one gesture this
+  // merge costs, and it buys one canvas instead of two.
+  await hand.tap("SkinEditor", "Draw");
+  await waitForSkinCanvas(page);
   await pickColor(page, run, BODY);
   for (const [y, x0, x1] of BUG_ROWS) await paintRow(page, run, y, x0, x1);
   await pickColor(page, run, EYE);
@@ -410,8 +415,11 @@ test("a person can make a small game from the Menu to a link", async ({ page }, 
   expect(await paintedCells(page), "the sprite came out empty").toBeGreaterThan(100);
   await shot(page, "02-sprite");
 
-  await hand.tap("ThingMaker", "Save");
-  await hand.tap("ThingMaker", "← Back");
+  await hand.tap("SkinEditor", "Save");
+  // Out through the grid: it is the one list of everything paintable, and the
+  // thing just made is now on it.
+  await hand.tap("SkinEditor", "← Back");
+  await hand.tap("SkinEditor", "← Back");
   await waitFor(page, "Menu");
 
   // --- 3. Two levels -------------------------------------------------------

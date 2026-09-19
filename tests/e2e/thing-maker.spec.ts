@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, openThings, pixelCanvasBox, readSceneField, selectPaletteCategory, startEditorWithLevel, tileCenter } from "./support/coords";
+import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, openThings, pixelCanvasBox, readSceneField, selectPaletteCategory, startEditorWithLevel, tileCenter, waitForSkinCanvas } from "./support/coords";
 import { makeArea, makeLevel } from "./support/levels";
 import { customDef, listCustomEntities, seedCustomEntities } from "./support/customEntities";
 import type { PlayerStats } from "../../src/gameplay/PlayerStats";
@@ -23,28 +23,39 @@ const NAME_FIELD = "Star Fruit"; // the field's placeholder, and the name we typ
 /**
  * Menu → Things → invent a new one.
  *
- * There is no "Thing Maker" on the Menu any more. Since 2026-09-15 there is one
- * door — the Things grid — listing everything paintable, built-in or invented,
- * and this screen is the form behind one of its tiles.
+ * One door and, since 2026-09-19, one screen: the Things grid lists everything
+ * paintable, and an invented thing opens with two tabs — **Draw** for its
+ * pixels and **What it does** for its name, family, speed and sound. A new one
+ * opens on the fields, because Save refuses a thing with no name.
  */
 async function openNewThing(page: Page): Promise<void> {
   await openThings(page);
   await clickByText(page, "SkinEditor", "+ New Thing");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
+  await expect.poll(() => sceneMode(page)).toBe("thing");
 }
 
-/** Menu → Things → the tile for an existing thing, which opens its form. */
+/** Which mode the one screen is in: the grid, the drawing, or the fields. */
+function sceneMode(page: Page): Promise<string | undefined> {
+  return page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { mode?: string };
+    return scene.mode;
+  });
+}
+
+/** Menu → Things → the tile for an existing thing, then its fields tab. */
 async function openThing(page: Page, label: string): Promise<void> {
   await openThings(page);
   await pickThing(page, label);
 }
 
-/** The tile, when the Things grid is already on screen — which it is straight
- * after a Save, since saving returns there. */
+/** The tile, when the Things grid is already on screen. A tile opens the Draw
+ * tab; the fields are one tap further, which is the shape of the merge. */
 async function pickThing(page: Page, label: string): Promise<void> {
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  await expect.poll(() => sceneMode(page)).toBe("pick-brush");
   await clickIconWithLabel(page, "SkinEditor", label);
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
+  await expect.poll(() => sceneMode(page)).toBe("canvas");
+  await clickByText(page, "SkinEditor", "What it does");
+  await expect.poll(() => sceneMode(page)).toBe("thing");
 }
 
 /** Fills the name field and commits it, the way LevelNameInput expects. */
@@ -74,18 +85,19 @@ test("a thing invented here can be placed, and scores as what it copies", async 
   await typeName(page, "Star Fruit");
   // Items is the category a new thing opens on, and Coin the built-in it opens
   // pointed at — so this is the shortest real path to a custom coin.
-  await clickByText(page, "ThingMaker", "Save");
+  await clickByText(page, "SkinEditor", "Save");
   await expect.poll(() => storedThings(page)).toEqual([
     { name: "Star Fruit", category: "items", basedOn: "item-coin" },
   ]);
 
   // Now the half that matters: what the maker wrote is what the editor offers.
-  // Saving already returned us to the Things grid — one list, and the place a
-  // thing you just made appears — so this leaves from there. Left via the Back
-  // button rather than scene.start from the test: Phaser's global ScenePlugin
-  // starts a scene without stopping the current one, and a still-live scene
-  // draws its own full-screen background over whatever comes next.
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+  // Save stays where you pressed it — one screen, and leaving is a thing you
+  // choose — so this walks out: fields → grid → Menu. Left via the Back button
+  // rather than scene.start from the test: Phaser's global ScenePlugin starts a
+  // scene without stopping the current one, and a still-live scene draws its
+  // own full-screen background over whatever comes next.
+  await clickByText(page, "SkinEditor", "← Back");
+  await expect.poll(() => sceneMode(page)).toBe("pick-brush");
   await clickByText(page, "SkinEditor", "← Back");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));
   await startEditorWithLevel(page, RUNWAY());
@@ -111,8 +123,8 @@ test("a thing with no name is refused, with the reason validation gives", async 
 
   // Saving a blank one must not write anything, and must say why rather than
   // inventing an "Untitled" the way a level name would.
-  await clickByText(page, "ThingMaker", "Save");
-  await clickByText(page, "ThingMaker", "Give it a name.");
+  await clickByText(page, "SkinEditor", "Save");
+  await clickByText(page, "SkinEditor", "Give it a name.");
   expect(await storedThings(page)).toEqual([]);
 });
 
@@ -125,9 +137,9 @@ test("switching family never leaves it copying something from the old one", asyn
   // Items/Coin is where it starts. Switching to Enemy has to abandon the coin —
   // an enemy based on one is exactly what validationError refuses, so without
   // the reset this save would either fail or store nonsense.
-  await clickByText(page, "ThingMaker", "Enemy");
-  await clickByText(page, "ThingMaker", "Fast");
-  await clickByText(page, "ThingMaker", "Save");
+  await clickByText(page, "SkinEditor", "Enemy");
+  await clickByText(page, "SkinEditor", "Fast");
+  await clickByText(page, "SkinEditor", "Save");
 
   await expect.poll(() => storedThings(page)).toEqual([
     { name: "Zoom Ghost", category: "enemies", basedOn: "enemy-ghost" },
@@ -141,17 +153,18 @@ test("editing one changes it, and deleting one takes two taps", async ({ page })
   await expect.poll(() => storedThings(page).then((t) => t.length)).toBe(1);
   await openThing(page, "Star Fruit");
   await typeName(page, "Moon Fruit");
-  await clickByText(page, "ThingMaker", "Save");
+  await clickByText(page, "SkinEditor", "Save");
   await expect.poll(() => storedThings(page).then((t) => t.map((d) => d.name))).toEqual(["Moon Fruit"]);
 
-  // Delete lives on the form now rather than on a per-row button, because the
-  // one list also holds built-ins and those cannot be deleted.
+  // Delete lives on the "What it does" tab rather than on a per-row button,
+  // because the one list also holds built-ins and those cannot be deleted.
+  await clickByText(page, "SkinEditor", "← Back");
   await pickThing(page, "Moon Fruit");
   // One tap only arms it — the same discipline every other destructive action
   // in this app follows.
-  await clickByText(page, "ThingMaker", "Delete");
+  await clickByText(page, "SkinEditor", "Delete");
   expect(await storedThings(page)).toHaveLength(1);
-  await clickByText(page, "ThingMaker", "Delete? Tap again");
+  await clickByText(page, "SkinEditor", "Delete? Tap again");
   await expect.poll(() => storedThings(page)).toEqual([]);
 });
 
@@ -165,6 +178,11 @@ test("the sprite is drawn on the same screen, and saving keeps it", async ({ pag
   await openNewThing(page);
   await typeName(page, "Star Fruit");
 
+  // Over to the drawing. A new thing opens on its fields, because Save refuses
+  // one with no name; the pixels are the other tab of the same screen.
+  await clickByText(page, "SkinEditor", "Draw");
+  await expect.poll(() => sceneMode(page)).toBe("canvas");
+
   // The canvas is a real DOM <canvas>, sized one buffer pixel per cell, so the
   // 32x32 one is the drawing surface — see pixelCanvasBox's own note.
   const box = await pixelCanvasBox(page, 32);
@@ -177,7 +195,7 @@ test("the sprite is drawn on the same screen, and saving keeps it", async ({ pag
     await page.mouse.click(box.left + (x + 0.5) * cell, box.top + (y + 0.5) * cell);
   }
 
-  await clickByText(page, "ThingMaker", "Save");
+  await clickByText(page, "SkinEditor", "Save");
   await expect.poll(() => storedThings(page).then((t) => t.map((d) => d.name))).toEqual(["Star Fruit"]);
 
   // The load-bearing half: the drawing was saved *as this thing's skin*, and is
@@ -206,21 +224,30 @@ test("re-opening a thing shows the sprite already drawn for it", async ({ page }
   await gotoApp(page);
   await openNewThing(page);
   await typeName(page, "Star Fruit");
+  await clickByText(page, "SkinEditor", "Draw");
+  await expect.poll(() => sceneMode(page)).toBe("canvas");
   const box = await pixelCanvasBox(page, 32);
   const cell = box.width / 32;
   await page.mouse.click(box.left + 10.5 * cell, box.top + 10.5 * cell);
-  await clickByText(page, "ThingMaker", "Save");
+  await clickByText(page, "SkinEditor", "Save");
   await expect.poll(() => storedThings(page).then((t) => t.length)).toBe(1);
 
-  await pickThing(page, "Star Fruit");
+  // Out to the grid and back in through the tile. This is the path that would
+  // have opened a blank canvas over the artwork — `openCanvasFor` starts a
+  // *new* skin, which is right for a built-in (many skins per brush) and wrong
+  // for a thing (exactly one) — and written the blank back on the next Save.
+  await clickByText(page, "SkinEditor", "← Back");
+  await expect.poll(() => sceneMode(page)).toBe("pick-brush");
+  await clickIconWithLabel(page, "SkinEditor", "Star Fruit");
+  await waitForSkinCanvas(page);
   await expect
     .poll(
       () =>
         page.evaluate(() => {
-          const scene = window.__debugGame!.scene.getScene("ThingMaker") as unknown as {
-            spriteCells?: (string | null)[];
+          const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
+            pixelCanvas?: { getCells(): (string | null)[] };
           };
-          return (scene.spriteCells ?? []).filter((c) => c !== null).length;
+          return (scene.pixelCanvas?.getCells() ?? []).filter((c) => c !== null).length;
         }),
       { timeout: 20_000 },
     )

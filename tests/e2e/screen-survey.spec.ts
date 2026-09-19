@@ -131,8 +131,8 @@ test("every authoring screen, on an iPad", async ({ page }, testInfo) => {
   });
   await survey("08-thing-form", async () => {
     await clickByText(page, "SkinEditor", "+ New Thing");
-    await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
-    await expect.poll(() => sceneHas(page, "ThingMaker", "Save"), { timeout: 20_000 }).toBe(true);
+    await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+    await expect.poll(() => sceneHas(page, "SkinEditor", "Save"), { timeout: 20_000 }).toBe(true);
   });
   await survey("09-skin-browse", async () => {
     await open("SkinEditor");

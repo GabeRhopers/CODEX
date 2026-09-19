@@ -3,7 +3,13 @@ import { GAME_WIDTH } from "../config/gameConfig";
 import { GameRect } from "../editor/domOverlay";
 import { AssetPickerItem, AssetPickerMenu } from "../editor/AssetPickerMenu";
 import { Brush, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "../editor/Palette";
-import { CustomEntityDef, isCustomEntityId } from "../entities/customEntity";
+import { CustomEntityDef, isCustomEntityId, makeCustomEntityId, newCustomEntityDef, validationError } from "../entities/customEntity";
+import { removeCustomEntity, saveCustomEntity } from "../entities/customEntityStorage";
+import { drawThingFields } from "../editor/thingFields";
+import { ConfirmButton } from "../ui/confirmButton";
+import { registerSound, soundKeyFor } from "../audio/soundLoader";
+import { playSoundKey } from "../audio/sfx";
+import type { SoundSpec } from "../audio/soundSynth";
 import { customBrushes } from "../entities/entityRegistry";
 import { loadCustomEntities } from "../entities/customEntityStorage";
 import { makePagerControls } from "../ui/PagerControls";
@@ -104,7 +110,12 @@ const HEADING_GAP = 18;
 /** Between one labelled group and the next heading. */
 const GROUP_GAP = 12;
 
-type Mode = "browse" | "pick-brush" | "canvas";
+type Mode = "browse" | "pick-brush" | "canvas" | "thing";
+
+/** The two tabs an *invented* thing has. A built-in has only its drawing, so it
+ * gets no strip at all — there is nothing to put behind a second tab. */
+const TAB_DRAW = "Draw";
+const TAB_THING = "What it does";
 
 /** Which brush/skin the canvas mode is currently working on.
  * `existingId` set means Save overwrites that library entry in place
@@ -133,6 +144,15 @@ interface EditingTarget {
   frameCells: Record<string, (string | null)[] | undefined>;
   /** Which frame the canvas is currently showing. */
   activeFrame: string;
+  /**
+   * The invented thing this target *is*, when its id is a `custom:` one.
+   *
+   * Absent for every built-in brush, which is what makes the second tab appear
+   * only where it means something. Held on the target for the same reason
+   * `frameCells` and `name` are: switching tab or palette rebuilds the whole
+   * scene, and an edit made on one tab must survive a trip to the other.
+   */
+  draft?: CustomEntityDef;
 }
 
 /** The frame name a single-frame skin's cells live under — an internal
@@ -196,10 +216,11 @@ function skinTargets(customDefs: readonly CustomEntityDef[] = []): Brush[] {
  * reconstruct" pattern for infrequent, full-screen mode switches (e.g.
  * EditorScene's own rebuildVisualsFromLevel).
  *
- * An invented tile hands off to `ThingMakerScene`, which holds the fields a
- * built-in has no use for (family, acts-like, speed, sound). Folding those into
- * `canvas` behind an `isCustomEntityId` check is what would make this one room
- * as well as one door.
+ * - `thing` — "What it does": the name, family, acts-like, speed and sound an
+ *   invented thing has and a built-in brush does not. Reached by the tab strip,
+ *   which exists only when the target carries a `draft`. Until 2026-09-19 this
+ *   was a scene of its own with a second `PixelCanvasOverlay` in it; one door
+ *   led to two rooms. Now one screen holds both, and one Save writes both.
  */
 export class SkinEditorScene extends Phaser.Scene {
   private mode: Mode = "browse";
@@ -269,6 +290,13 @@ export class SkinEditorScene extends Phaser.Scene {
   private customDefs: CustomEntityDef[] = [];
   /** Which page of the pick-brush grid is showing. */
   private pickPage = 0;
+  /** Why the last Save was refused, shown on the "What it does" tab. Its words
+   * are `validationError`'s verbatim, so what this screen refuses and what
+   * storage would refuse cannot drift. */
+  private saveError?: string;
+  /** Whether the open thing has been written yet — only Delete reads it, since
+   * there is nothing to delete about a draft that was never saved. */
+  private draftIsNew = false;
 
   constructor() {
     super("SkinEditor");
@@ -315,6 +343,15 @@ export class SkinEditorScene extends Phaser.Scene {
       event.preventDefault();
       this.onceThisFrame("redo", () => this.performRedo());
     });
+  }
+
+  /** Decodes a sound and plays it once, so you can hear what you picked.
+   * Degrades to silence rather than an error: `registerSound` returns null when
+   * the decode fails or there is no Web Audio, and `playSoundKey` no-ops on a
+   * key that is not cached. */
+  private async previewSound(sound: SoundSpec): Promise<void> {
+    const key = await registerSound(this, soundKeyFor(`${this.target?.brush.id ?? "preview"}-preview`), sound);
+    if (key) playSoundKey(this, key);
   }
 
   private onceThisFrame(action: string, fn: () => void): void {
@@ -373,6 +410,7 @@ export class SkinEditorScene extends Phaser.Scene {
 
     if (this.mode === "browse") this.buildBrowse();
     else if (this.mode === "pick-brush") this.buildPickBrush();
+    else if (this.mode === "thing") this.buildThing();
     else this.buildCanvas();
   }
 
@@ -691,9 +729,7 @@ export class SkinEditorScene extends Phaser.Scene {
 
     // Inventing is an addition to this list, so it sits with the list rather
     // than on a screen you have to choose first.
-    this.makeSmallButton(GAME_WIDTH - 24 - 108, 30, "+ New Thing", () =>
-      this.scene.start("ThingMaker"),
-    ).setOrigin(0, 0.5);
+    this.makeSmallButton(GAME_WIDTH - 24 - 108, 30, "+ New Thing", () => this.startNewThing()).setOrigin(0, 0.5);
     this.makeSmallButton(24 + 86, 30, "My skins", () => this.goTo("browse")).setOrigin(0, 0.5);
 
     const skinnable = skinTargets(this.customDefs);
@@ -734,13 +770,9 @@ export class SkinEditorScene extends Phaser.Scene {
       if (brush.id === "basket-up") icon.setTint(UP_BASKET_TINT_COLOR);
       const label = this.add.text(cx, cy + 46, brush.label, { fontSize: "11px", color: "#c8c8e0" }).setOrigin(0.5, 0);
 
-      // An invented thing opens its own form, where its name, family, speed and
-      // sound live alongside its drawing; a built-in has none of those, so it
-      // opens straight onto the canvas. One tile, one tap, two rooms — the rooms
-      // become one when the form folds into the canvas (phase 2).
-      const onClick = isCustomEntityId(brush.id)
-        ? () => this.scene.start("ThingMaker", { id: brush.id })
-        : () => void this.openCanvasFor(brush);
+      // Every tile opens the same screen. An invented one arrives with a second
+      // tab for what it *does*; a built-in has nothing to put behind one.
+      const onClick = () => void this.openCanvasFor(brush);
       icon.on("pointerdown", onClick);
       label.setInteractive({ useHandCursor: true }).on("pointerdown", onClick);
     });
@@ -765,6 +797,41 @@ export class SkinEditorScene extends Phaser.Scene {
     });
   }
 
+  /** The skin a brush is currently wearing, if it has one. Its *active* skin
+   * rather than its first: that is what the game draws, so it is what opening
+   * the thing should show you. */
+  private async activeSkinFor(brushId: string): Promise<SkinAsset | undefined> {
+    const entry = await loadCustomSkins()
+      .then((skins) => skins[brushId])
+      .catch(() => undefined);
+    if (!entry) return undefined;
+    return entry.items.find((item) => item.id === entry.activeId) ?? entry.items[0];
+  }
+
+  /**
+   * Invents a thing and opens it on the tab that asks what it is.
+   *
+   * Not the drawing tab: a new thing has no name yet, and naming it is the one
+   * field Save refuses to do without. The brush it becomes is built the same
+   * way `customBrushes` builds the grid's, so the tile it will appear as and
+   * the target being edited cannot disagree.
+   */
+  private startNewThing(): void {
+    const draft = newCustomEntityDef(makeCustomEntityId(crypto.randomUUID()), "items");
+    this.draftIsNew = true;
+    this.saveError = undefined;
+    this.target = {
+      brush: { id: draft.id, category: "items", kind: "entity", label: draft.name, textureKey: "", entityType: draft.id },
+      existingId: undefined,
+      name: draft.name,
+      paletteId: DEFAULT_PIXEL_PALETTE_ID,
+      frameCells: {},
+      activeFrame: SINGLE_FRAME,
+      draft,
+    };
+    this.goTo("thing");
+  }
+
   /**
    * Starts a *new* skin for `brush` and opens the canvas on it.
    *
@@ -780,15 +847,143 @@ export class SkinEditorScene extends Phaser.Scene {
     // way — existingNamesFor swallows a failed read.
     const name = await this.nextDefaultName(brush);
     if (!this.scene.isActive()) return;
+    // An invented thing carries its definition along, which is what gives it a
+    // second tab. `customDefs` is already loaded for the grid, so this costs no
+    // read; a built-in simply has none.
+    const draft = isCustomEntityId(brush.id) ? this.customDefs.find((def) => def.id === brush.id) : undefined;
+    this.draftIsNew = false;
+    this.saveError = undefined;
+
+    // **An invented thing re-opens the skin it already has**, rather than
+    // starting a blank one the way a built-in does. A built-in can wear any
+    // number of skins and this is how you add another; a thing has exactly one,
+    // so "new" would mean opening an empty canvas over your own artwork and
+    // writing the blank back on the next Save. That is the failure
+    // `loadSprite`'s docstring warned about on the screen this replaces.
+    let existingId: string | undefined;
+    let frameCells: EditingTarget["frameCells"] = {};
+    if (draft) {
+      const existing = await this.activeSkinFor(brush.id);
+      if (!this.scene.isActive()) return;
+      if (existing) {
+        existingId = existing.id;
+        const cells = await cellsFromPngDataUrl(existing.imageData, gridSizeFor(brush.id)).catch(() => null);
+        if (!this.scene.isActive()) return;
+        if (cells) frameCells = { [SINGLE_FRAME]: cells };
+      }
+    }
+
     this.target = {
       brush,
-      existingId: undefined,
+      existingId,
       name,
       paletteId: DEFAULT_PIXEL_PALETTE_ID,
-      frameCells: {},
+      frameCells,
       activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
+      draft,
     };
     this.goTo("canvas");
+  }
+
+  // --- mode: thing ---------------------------------------------------------
+
+  /**
+   * What an invented thing *is*, on the same screen as its drawing.
+   *
+   * The second of the two tabs a `custom:` target has. The fields themselves
+   * are `editor/thingFields.ts`, shared with nothing else now that the Thing
+   * Maker is gone — kept as a module because a form drawn into a scene is
+   * easier to place than a form that owns one, and because this file is long
+   * enough already.
+   */
+  private buildThing(): void {
+    const target = this.target;
+    const draft = target?.draft;
+    if (!target || !draft) {
+      this.goTo("pick-brush");
+      return;
+    }
+
+    this.drawTabs(target);
+    this.statusText = this.add.text(GAME_WIDTH / 2, 44, "", { fontSize: "12px", color: "#4ade80" }).setOrigin(0.5, 0);
+
+    const fields = drawThingFields({
+      scene: this,
+      x: 60,
+      y: 96,
+      draft,
+      onChange: (update, redraw) => {
+        if (!this.target?.draft) return;
+        this.target = { ...this.target, draft: update(this.target.draft) };
+        this.saveError = undefined;
+        if (redraw) this.rebuild();
+      },
+      onPreviewSound: (sound) => void this.previewSound(sound),
+    });
+    this.nameInput = fields.nameInput;
+
+    if (this.saveError) {
+      this.add.text(60, fields.bottomY, this.saveError, { fontSize: "12px", color: "#ff9d9d" }).setOrigin(0, 0.5);
+    }
+
+    // Save sits on the footer line at the right, exactly where the Draw tab
+    // puts it, so it does not move when you change tab. It also cannot be
+    // placed under the fields: the block's height depends on the family — an
+    // Enemy has a Speed row an Item does not — and at Enemy's height a Save
+    // under the fields landed on top of "← Back".
+    const save = this.makeSmallButton(GAME_WIDTH - 24 - 60, FOOTER_Y, "Save", () => this.onSave());
+
+    // Deleting a thing deletes the thing, not the drawing — so it belongs on
+    // this tab and not beside Save on the canvas. Absent for one that has never
+    // been saved: there is nothing to delete, and leaving a draft needs no
+    // cleanup.
+    if (!this.draftIsNew) {
+      new ConfirmButton({
+        scene: this,
+        x: save.x - 12 - 96,
+        y: FOOTER_Y,
+        label: "Delete",
+        armedLabel: "Delete? Tap again",
+        onConfirm: () => void this.deleteThing(draft),
+      });
+    }
+
+    this.addBackButton(() => this.goTo("pick-brush"), FOOTER_Y - 13);
+  }
+
+  /**
+   * The tab strip, for an invented thing only.
+   *
+   * It sits where FRAMES sits on a built-in with more than one pose — the top
+   * of the second left column — because the two answer the same question:
+   * which view of this thing am I looking at. A `custom:` id has no frame plan
+   * (`framePlanFor` returns null), so the slot is free exactly when the strip
+   * is needed, and the strip never moves between the two tabs.
+   */
+  private drawTabs(target: EditingTarget): void {
+    if (!target.draft) return;
+    const tabs: { label: string; mode: Mode }[] = [
+      { label: TAB_DRAW, mode: "canvas" },
+      { label: TAB_THING, mode: "thing" },
+    ];
+    let x = LEFT_COL2_X;
+    for (const tab of tabs) {
+      const button = this.makeSmallButton(x, RAIL_TOP_Y + SMALL_BUTTON_H / 2, tab.label, () => {
+        if (this.mode === tab.mode) return;
+        // Capture before leaving: the canvas holds the only copy of the strokes
+        // made since the last rebuild, and switching tab destroys it.
+        if (this.mode === "canvas" && this.pixelCanvas) this.target = this.captureActiveFrame();
+        this.goTo(tab.mode);
+      });
+      this.refreshButton(button, this.mode === tab.mode);
+      x += button.width + 6;
+    }
+  }
+
+  private async deleteThing(draft: CustomEntityDef): Promise<void> {
+    await removeCustomEntity(draft.id);
+    this.customDefs = this.customDefs.filter((def) => def.id !== draft.id);
+    this.goTo("pick-brush");
   }
 
   // --- mode: canvas --------------------------------------------------------
@@ -846,24 +1041,34 @@ export class SkinEditorScene extends Phaser.Scene {
     // the skin's own name, and they only coincide while the name is still the
     // default. On a skin called "Blue Ghost" deleting it would lose the only
     // thing on screen saying it is a ghost.
-    this.add
-      .text(GAME_WIDTH / 2 - 128, footerMidY, "Name", { fontSize: "12px", color: "#8a8ab0" })
-      .setOrigin(1, 0.5);
+    //
+    // **An invented thing has no skin name of its own.** It is one thing with
+    // one name, and that name lives on the "What it does" tab where you gave it
+    // — showing a second, differently-worded "Grumble Bug 1" here would be two
+    // names for one object, and the one the child typed would not be either of
+    // them. `onSave` writes the thing's name through as the skin's.
+    if (!target.draft) {
+      this.add
+        .text(GAME_WIDTH / 2 - 128, footerMidY, "Name", { fontSize: "12px", color: "#8a8ab0" })
+        .setOrigin(1, 0.5);
+    }
 
     // The name field. Reuses LevelNameInput rather than a second DOM input of
     // its own: that class carries the capture-phase blur that makes clicking
     // Save commit an in-progress edit (rather than saving the previous name),
     // and the keydown stopPropagation that stops a space in a name reaching
     // Phaser's shortcuts. Both were found the hard way; a copy would lose them.
-    this.nameInput = new LevelNameInput(
-      this,
-      { x: GAME_WIDTH / 2 - 120, y: footerMidY - 13, width: 240, height: 26 },
-      target.name,
-      (value) => {
-        if (this.target) this.target.name = value;
-      },
-      { fallback: target.name, placeholder: "Skin name" },
-    );
+    if (!target.draft) {
+      this.nameInput = new LevelNameInput(
+        this,
+        { x: GAME_WIDTH / 2 - 120, y: footerMidY - 13, width: 240, height: 26 },
+        target.name,
+        (value) => {
+          if (this.target) this.target.name = value;
+        },
+        { fallback: target.name, placeholder: "Skin name" },
+      );
+    }
 
     // In the band between the drawing and the footer, not on the footer itself.
     // The footer's own free space is the ~247px between the name field and
@@ -947,8 +1152,15 @@ export class SkinEditorScene extends Phaser.Scene {
     railY += GROUP_GAP;
 
     // FRAMES heads the second left column when the skin has more than one pose;
-    // buildFrameStrip returns where it finished so COLOURS follows it.
-    left2Y = this.buildFrameStrip(target, LEFT_COL2_X, left2Y, heading);
+    // buildFrameStrip returns where it finished so COLOURS follows it. An
+    // invented thing has no frame plan, so the slot is free for its tab strip —
+    // the two answer the same question, which view of this thing am I on.
+    if (target.draft) {
+      this.drawTabs(target);
+      left2Y += SMALL_BUTTON_H + GROUP_GAP;
+    } else {
+      left2Y = this.buildFrameStrip(target, LEFT_COL2_X, left2Y, heading);
+    }
 
     // --- TOOLS ---------------------------------------------------------------
     // Declared before the swatches below, since a swatch click resumes Paint
@@ -1359,6 +1571,13 @@ export class SkinEditorScene extends Phaser.Scene {
     // there, and without this a painted character could be saved and never
     // worn by anything. Two-tap confirmed, same as Clear, since it reaches
     // every level that hasn't chosen for itself.
+    //
+    // Not offered for an invented thing. A default is "which of this brush's
+    // skins do levels that have not chosen wear" — and an invented thing has
+    // exactly one skin, adopted as its default the moment it is first saved
+    // (`adoptsFirstSkin`). The button would be asking a question with one
+    // answer, already given.
+    if (target.draft) return;
     this.defaultButton = this.makeSmallButton(railX, railY + SMALL_BUTTON_H / 2, "Set as default", () =>
       this.onSetDefaultClicked(),
     );
@@ -1631,8 +1850,44 @@ export class SkinEditorScene extends Phaser.Scene {
     this.goTo("canvas");
   }
 
+  /**
+   * One Save for the whole thing.
+   *
+   * For an invented thing that means the definition *and* the drawing: a child
+   * who renamed it on one tab and painted on the other pressed Save once, and
+   * expects one thing saved. The definition goes first because it is the half
+   * that cannot be redrawn from memory, and `validationError`'s words are used
+   * verbatim so what this refuses and what storage would refuse cannot drift.
+   *
+   * Reachable from both tabs, which is why it does not require a live canvas
+   * any more — on the "What it does" tab there is none.
+   */
   private onSave(): void {
-    if (!this.target || !this.pixelCanvas) return;
+    if (!this.target) return;
+    const draft = this.target.draft;
+    if (draft) {
+      const reason = validationError(draft);
+      if (reason) {
+        this.saveError = reason;
+        this.goTo("thing");
+        return;
+      }
+      this.saveError = undefined;
+      void saveCustomEntity(draft).then(() => {
+        this.draftIsNew = false;
+        // The grid reads labels off these, so a rename has to reach it.
+        this.customDefs = this.customDefs.some((def) => def.id === draft.id)
+          ? this.customDefs.map((def) => (def.id === draft.id ? draft : def))
+          : [...this.customDefs, draft];
+      });
+    }
+
+    // Nothing has been painted yet — which is a perfectly good state for a
+    // thing, since it wears the art of whatever it copies until you draw it.
+    if (!this.pixelCanvas) {
+      this.statusText?.setText(draft ? `Saved "${draft.name}".` : "").setColor("#4ade80");
+      return;
+    }
     const target = this.captureActiveFrame();
     this.target = target;
     const plan = framePlanFor(target.brush.id);
@@ -1672,7 +1927,9 @@ export class SkinEditorScene extends Phaser.Scene {
     // a blank should fall back to for *this* skin (its own current name, or the
     // brush's default), the same way LevelNameInput knows about "Untitled
     // Level". Storage just persists what it is handed.
-    const name = sanitizeSkinName(target.name, defaultSkinName(target.brush.label, []));
+    // An invented thing's skin is named after the thing, not separately: one
+    // object, one name, wherever you look at it.
+    const name = sanitizeSkinName(target.draft?.name ?? target.name, defaultSkinName(target.brush.label, []));
 
     void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId }, uploadedBy, frames, name)
       .then((id) => {

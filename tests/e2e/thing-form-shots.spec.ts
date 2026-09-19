@@ -22,10 +22,10 @@ test("the edit form fits in every family", async ({ page }, testInfo) => {
   await gotoApp(page);
   await openThings(page);
   await clickByText(page, "SkinEditor", "+ New Thing");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
 
   for (const family of ["Item", "Enemy", "Decoration"] as const) {
-    await clickByText(page, "ThingMaker", family);
+    await clickByText(page, "SkinEditor", family);
     await page.waitForTimeout(300);
 
     const name = `thing-form-${family.toLowerCase()}`;
@@ -35,7 +35,7 @@ test("the edit form fits in every family", async ({ page }, testInfo) => {
     // Nothing may run off the bottom. This is the assertion the arithmetic in
     // the plan was a guess at; Enemy is the case it was closest on.
     const overflow = await page.evaluate(() => {
-      const scene = window.__debugGame!.scene.getScene("ThingMaker");
+      const scene = window.__debugGame!.scene.getScene("SkinEditor");
       const height = window.__debugGame!.scale.height;
       const over: string[] = [];
       for (const child of scene.children.list) {
@@ -47,6 +47,6 @@ test("the edit form fits in every family", async ({ page }, testInfo) => {
     });
     expect(overflow, `${family}: something runs off the bottom of the canvas`).toEqual([]);
 
-    await assertLayoutSound(page, "ThingMaker");
+    await assertLayoutSound(page, "SkinEditor");
   }
 });

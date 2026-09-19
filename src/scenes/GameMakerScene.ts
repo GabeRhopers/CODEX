@@ -123,7 +123,7 @@ export class GameMakerScene extends Phaser.Scene {
   private rebuild(): void {
     // DOM inputs are not Phaser children, so they need tearing down explicitly
     // or they float over whatever is drawn next — the same care SkinEditorScene
-    // and ThingMakerScene take with theirs.
+    // and SkinEditorScene take with theirs.
     for (const input of this.inputs) input.destroy();
     this.inputs = [];
     this.removeButtons = [];

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { clickByText, clickIconWithLabel, gotoApp, openThings, selectPaletteCategory, startEditorWithLevel } from "./support/coords";
+import { clickByText, clickIconWithLabel, gotoApp, openThings, selectPaletteCategory, startEditorWithLevel, waitForSkinCanvas } from "./support/coords";
 import { customDef, seedCustomEntities } from "./support/customEntities";
 import { makeArea, makeLevel } from "./support/levels";
 import { makeWorld, seedLevels, seedWorld, seedWorlds } from "./support/worlds";
@@ -101,10 +101,17 @@ test("the Things grid and the form behind a tile are both laid out soundly", asy
   // The form, on the widest family: Decor offers ten built-ins, which is what
   // made the "Acts like" grid wrap in the first place — at one row it ran under
   // the preview panel.
+  // A tile opens the Draw tab; the fields are the other tab of the same screen.
   await clickIconWithLabel(page, "SkinEditor", "Star Fruit");
-  await page.waitForFunction(() => window.__debugGame!.scene.isActive("ThingMaker"));
-  await clickByText(page, "ThingMaker", "Decoration");
-  await assertLayoutSound(page, "ThingMaker");
+  await waitForSkinCanvas(page);
+  await assertLayoutSound(page, "SkinEditor");
+
+  // The widest family: Decor offers ten built-ins, which is what made the
+  // "Acts like" grid wrap in the first place — at one row it ran under the
+  // drawing panel.
+  await clickByText(page, "SkinEditor", "What it does");
+  await clickByText(page, "SkinEditor", "Decoration");
+  await assertLayoutSound(page, "SkinEditor");
 });
 
 test("the Skin Creator's target grid is laid out soundly once it has to page", async ({ page }) => {
