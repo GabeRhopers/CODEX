@@ -132,6 +132,7 @@ appear under more than one heading if it belongs to both.
 - [Cut-scene pictures nobody could reach, and characters to stand in them](#cut-scene-pictures-nobody-could-reach-and-characters-to-stand-in-them-2026-09-13)
 - [One list of everything you can paint](#one-list-of-everything-you-can-paint-2026-09-15)
 - [One screen for a thing, with two tabs](#one-screen-for-a-thing-with-two-tabs-2026-09-19)
+- [A walk cycle for the things you invent (2026-09-20)](#a-walk-cycle-for-the-things-you-invent-2026-09-20)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -5809,6 +5810,70 @@ canvas, so `PixelCanvasOverlay` is still hosted twice. Folding the form's fields
 into the canvas screen, gated on the id being a `custom:` one, is phase 2.
 
 *Closed 2026-09-19.* See "One screen for a thing, with two tabs".
+
+### A walk cycle for the things you invent (2026-09-20)
+
+A ghost, a spike crawler, a bat and a golem each walked on a timer. A creature
+you invented, named and painted yourself stood frozen forever. That was the
+last place an invented thing was visibly a lesser copy of a built-in one, in a
+tool whose whole argument is the opposite.
+
+**One condition.** `framePlanFor` decided what frames a target had from two
+explicit sets and a `custom:` id was in neither, so it came back null — the
+Skin Creator offered no frames to paint and the runtime never animated one.
+Adding `|| isCustomEntityId(targetId)` is the entire behavioural change.
+
+A *prefix test* there against explicit lists for the rest, deliberately: those
+lists exist so a brush merely **named** like an enemy cannot silently acquire a
+second frame, and a future "enemy-statue" prop must stay still. `custom:` is a
+namespace nobody stumbles into — every id in it was minted for something a
+person deliberately invented.
+
+**Everything downstream was already built for it.** `PlayScene` gates its
+animation loops on exactly that function and tracks an invented enemy under its
+own `custom:` id, so `resolveFrameTextureKeys`, `resolveLoopLength` and
+`updateEnemyAnimation` picked it up unchanged. `onSave` already branched on the
+plan. Skins travel whole in a published bundle, so frames ship with no
+collector change.
+
+**Four frames, not two, because the column was measured rather than guessed.**
+The Draw / "What it does" tabs live where FRAMES lives, and the two had been
+*alternatives* — `drawTabs` said so: *"a `custom:` id has no frame plan, so the
+slot is free exactly when the strip is needed."* Stacking them puts the bottom
+of that column at y≈326 against a floor of 421, and the character's own
+five-frame strip already reaches 318 with no tabs at all. So this is 8px taller
+than something that already ships, and an invented enemy gets exactly what a
+built-in one does — no second shape to explain.
+
+**Two real bugs, both of the same kind, and both found by tests that had to
+keep passing untouched.** Each was a hardcoded `SINGLE_FRAME` that was correct
+only for as long as an invented thing had no frame plan:
+
+- `startNewThing` opened a new thing on `SINGLE_FRAME`, so the first stroke
+  landed in a slot the loop does not contain, `onSave` found frame `0` empty
+  and refused with *"Paint the 0 frame first"* — art drawn and silently not
+  kept.
+- `openCanvasFor` restored a re-opened thing's artwork into `SINGLE_FRAME`
+  while the canvas now opened on `0`, giving a blank canvas over the drawing —
+  the exact failure that branch already existed to prevent, arriving by a new
+  route.
+
+Fixing the second properly meant restoring **every** frame rather than the
+representative one. It had decoded only `imageData`, which was right while a
+thing had one pose and is a way to lose three now that it can have four:
+re-open a walk cycle, see pose one, Save, and the rest are gone with nothing
+said. That one is covered by its own test, confirmed by mutation, because
+nothing else would have noticed.
+
+**Nothing already saved changes**, which is the assertion that matters most —
+every invented thing in every saved game has exactly one frame. A one-frame
+skin reports a `loopLength` of 1 and `advanceLoop` holds frame 0 below a count
+of two, so it renders identically and does not animate. That was already
+guaranteed by code; `custom-walk-cycle.spec.ts` (6 tests) pins it, along with
+the texture actually changing during a level, a Large invented enemy staying
+Large once its loop runs, and the frame round trip. Stubbing the `custom:`
+branch out fails four of the six; the two that survive are the ones asserting
+an *absence* of animation, which is exactly right.
 
 ### One screen for a thing, with two tabs (2026-09-19)
 

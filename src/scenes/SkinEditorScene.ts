@@ -820,13 +820,21 @@ export class SkinEditorScene extends Phaser.Scene {
     const draft = newCustomEntityDef(makeCustomEntityId(crypto.randomUUID()), "items");
     this.draftIsNew = true;
     this.saveError = undefined;
+    // Which frame the first stroke lands in, asked of the plan rather than
+    // assumed — the same question `openCanvasFor` and the browse path already
+    // ask. This said SINGLE_FRAME outright until 2026-09-20, which was correct
+    // only for as long as an invented thing had no frame plan. Once it gained
+    // one, the first stroke went to a slot the loop does not contain, `onSave`
+    // found frame "0" empty and refused the save with "Paint the 0 frame
+    // first" — art drawn and silently not kept.
+    const plan = framePlanFor(draft.id);
     this.target = {
       brush: { id: draft.id, category: "items", kind: "entity", label: draft.name, textureKey: "", entityType: draft.id },
       existingId: undefined,
       name: draft.name,
       paletteId: DEFAULT_PIXEL_PALETTE_ID,
       frameCells: {},
-      activeFrame: SINGLE_FRAME,
+      activeFrame: plan ? baseFrameOf(plan) : SINGLE_FRAME,
       draft,
     };
     this.goTo("thing");
@@ -867,9 +875,23 @@ export class SkinEditorScene extends Phaser.Scene {
       if (!this.scene.isActive()) return;
       if (existing) {
         existingId = existing.id;
-        const cells = await cellsFromPngDataUrl(existing.imageData, gridSizeFor(brush.id)).catch(() => null);
-        if (!this.scene.isActive()) return;
-        if (cells) frameCells = { [SINGLE_FRAME]: cells };
+        // **Every frame, not just the representative one.** This decoded only
+        // `imageData` into a single slot until 2026-09-20, which was right
+        // while a thing had exactly one pose. Now it can have four, and
+        // restoring one of them would mean re-opening a walk cycle, seeing its
+        // first pose, and writing that back over the rest on the next Save —
+        // the same shape of quiet data loss this branch already exists to
+        // prevent, one level down.
+        //
+        // The `?? { [base]: imageData }` is what keeps every thing saved before
+        // today readable: no `frames` map at all reads as a one-pose skin.
+        const base = plan ? baseFrameOf(plan) : SINGLE_FRAME;
+        const painted = existing.frames ?? { [base]: existing.imageData };
+        for (const [frame, dataUrl] of Object.entries(painted)) {
+          const cells = await cellsFromPngDataUrl(dataUrl, gridSizeFor(brush.id)).catch(() => null);
+          if (!this.scene.isActive()) return;
+          if (cells) frameCells[frame] = cells;
+        }
       }
     }
 
@@ -954,11 +976,16 @@ export class SkinEditorScene extends Phaser.Scene {
   /**
    * The tab strip, for an invented thing only.
    *
-   * It sits where FRAMES sits on a built-in with more than one pose — the top
-   * of the second left column — because the two answer the same question:
-   * which view of this thing am I looking at. A `custom:` id has no frame plan
-   * (`framePlanFor` returns null), so the slot is free exactly when the strip
-   * is needed, and the strip never moves between the two tabs.
+   * It heads the second left column, above FRAMES, because the two are the
+   * same kind of question one level apart: which *view* of this thing am I on,
+   * and then which *pose* am I painting. Coarser choice first.
+   *
+   * It used to sit exactly where FRAMES sits, on the reasoning that a `custom:`
+   * id had no frame plan so the slot was free precisely when the tabs needed
+   * it. That stopped being true on 2026-09-20, when invented things gained a
+   * walk cycle — so the two stack now, which the column has comfortable room
+   * for (see the measurement where they are drawn). Anchored at `RAIL_TOP_Y`
+   * rather than taking a y, so the strip never moves between the two tabs.
    */
   private drawTabs(target: EditingTarget): void {
     if (!target.draft) return;
@@ -1151,16 +1178,22 @@ export class SkinEditorScene extends Phaser.Scene {
     }
     railY += GROUP_GAP;
 
-    // FRAMES heads the second left column when the skin has more than one pose;
-    // buildFrameStrip returns where it finished so COLOURS follows it. An
-    // invented thing has no frame plan, so the slot is free for its tab strip —
-    // the two answer the same question, which view of this thing am I on.
+    // The second left column, top down: the tab strip if this is an invented
+    // thing, then FRAMES if it has more than one pose, then COLOURS — each
+    // returning where it finished so the next follows it.
+    //
+    // These used to be alternatives, because an invented thing had no frame
+    // plan and the slot was therefore free exactly when the tabs wanted it. As
+    // of 2026-09-20 an invented thing has four frames like any other enemy, so
+    // both are drawn and they stack. Measured before it was written: tabs plus
+    // a four-row strip plus the colour block ends at y=326 against a floor of
+    // 421, and the character's own five-row strip already reaches 318 with no
+    // tabs at all — so this is 8px taller than something that already ships.
     if (target.draft) {
       this.drawTabs(target);
       left2Y += SMALL_BUTTON_H + GROUP_GAP;
-    } else {
-      left2Y = this.buildFrameStrip(target, LEFT_COL2_X, left2Y, heading);
     }
+    left2Y = this.buildFrameStrip(target, LEFT_COL2_X, left2Y, heading);
 
     // --- TOOLS ---------------------------------------------------------------
     // Declared before the swatches below, since a swatch click resumes Paint

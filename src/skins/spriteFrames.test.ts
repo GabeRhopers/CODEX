@@ -48,6 +48,35 @@ describe("framePlanFor", () => {
     expect(framePlanFor("enemy-statue")).toBeNull();
   });
 
+  it("gives an invented thing the same four-frame loop a shipped enemy gets", () => {
+    // The point of the change: a thing you invent and paint should be able to
+    // walk, exactly like the four enemies that came with the game. Same frames
+    // and same grid, so there is no second shape to explain to anyone.
+    const plan = framePlanFor("custom:8f14e45f-ceea-467a-9c30-6b01c1ee3f4b");
+    expect(plan?.kind).toBe("loop");
+    expect(plan?.frames).toEqual(["0", "1", "2", "3"]);
+    expect(plan?.gridSize).toBe(ENTITY_GRID_SIZE);
+  });
+
+  it("animates every invented thing, whatever family it belongs to", () => {
+    // Not restricted to the enemies family, and deliberately: this function is
+    // handed an id and nothing else, so filtering by category would mean
+    // threading the definition list through three modules that need only a
+    // string. An invented item that shimmers is a feature.
+    for (const id of ["custom:a", "custom:bug", "custom:star-fruit"]) {
+      expect(framePlanFor(id)?.kind, id).toBe("loop");
+    }
+  });
+
+  it("is not fooled by a bare prefix that names no thing", () => {
+    // isCustomEntityId requires something after the colon — "custom:" alone is
+    // not an id anything could have been saved under, and treating it as one
+    // would invent a frame plan for a target that cannot exist.
+    expect(framePlanFor("custom:")).toBeNull();
+    expect(framePlanFor("customary")).toBeNull();
+    expect(framePlanFor("not-custom:thing")).toBeNull();
+  });
+
   it("reports the painting grid for animated and single-frame targets alike", () => {
     expect(gridSizeFor(CHARACTER_SKIN_ID)).toBe(48);
     expect(gridSizeFor("enemy-bat")).toBe(32);

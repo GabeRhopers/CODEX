@@ -152,6 +152,17 @@ test("every authoring screen, on an iPad", async ({ page }, testInfo) => {
     await clickIconWithLabel(page, "SkinEditor", "Ghost");
     await waitForSkinCanvas(page);
   });
+  // The same screen for an *invented* thing, which is a different shape: since
+  // 2026-09-20 its second column carries the Draw / "What it does" tabs **and**
+  // a four-frame strip, where those used to be alternatives. Photographed
+  // because that is a column of controls that moved, and the layout invariants
+  // cannot see it — they compare only interactive Text, and everything in that
+  // column below the tabs is a plain label on a Rectangle.
+  await survey("10b-thing-canvas", async () => {
+    await open("SkinEditor");
+    await clickIconWithLabel(page, "SkinEditor", "Grumble Bug");
+    await waitForSkinCanvas(page);
+  });
 
   // The last two need a game that exists, so they are walked to rather than
   // started: the Game Maker saves and hands the game over, and neither screen

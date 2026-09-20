@@ -1,3 +1,5 @@
+import { isCustomEntityId } from "../entities/customEntity";
+
 /**
  * Which frames a skinnable thing has, and which frame stands in when one
  * hasn't been painted. Pure data and rules — no Phaser, no DOM — so the
@@ -105,12 +107,34 @@ export function frameLabel(plan: FramePlan, name: string): string {
  * The frame plan for a skin target, or null when it's an ordinary
  * single-frame skin — which is most of them, and is the unchanged path every
  * skin saved before this feature took.
+ *
+ * **Invented things animate too, and get the same four frames a built-in enemy
+ * does.** Until 2026-09-20 a `custom:` id fell past every branch here and came
+ * back null, so a creature you invented, named and painted yourself stood
+ * frozen while the four shipped enemies walked — the last place an invented
+ * thing was visibly a lesser copy of a built-in one.
+ *
+ * **A prefix test for those, against explicit lists for the rest, deliberately.**
+ * Those lists exist so a brush merely *named* like an enemy cannot silently
+ * acquire a second frame — a future "enemy-statue" prop has to stay still. That
+ * reasoning does not transfer: `custom:` is a namespace nobody stumbles into,
+ * every id in it was minted by `makeCustomEntityId` for something a person
+ * deliberately invented, and `isCustomEntityId` is already this codebase's one
+ * answer to "is this an invented thing".
+ *
+ * **Every invented thing, not only the enemies family.** This function is given
+ * an id and nothing else; filtering by category would mean threading the
+ * definition list through skinLoader, PlayScene and the editor — three modules
+ * that need only a string — to buy a restriction worth little, since an
+ * invented item that shimmers is a feature. Nothing already saved starts
+ * moving either: a one-frame skin reports a `loopLength` of 1, and
+ * `advanceLoop` holds frame 0 for any count below two.
  */
 export function framePlanFor(targetId: string): FramePlan | null {
   if (targetId === CHARACTER_SKIN_ID) {
     return { kind: "character", gridSize: CHARACTER_GRID_SIZE, frames: CHARACTER_FRAMES };
   }
-  if (LOOP_BRUSH_IDS.has(targetId)) {
+  if (LOOP_BRUSH_IDS.has(targetId) || isCustomEntityId(targetId)) {
     return { kind: "loop", gridSize: ENTITY_GRID_SIZE, frames: LOOP_FRAMES };
   }
   if (TILE_BRUSH_IDS.has(targetId)) {
