@@ -16,6 +16,8 @@ import {
 } from "../gameplay/EnemyBehaviors";
 import { createBolt, isBoltExpired } from "../gameplay/Bolt";
 import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from "../gameplay/characterState";
+import { currentPad, mergePad } from "../gameplay/gamepad";
+import { installPadNavigation } from "../gameplay/padNavigation";
 import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
 import { resolveLevelMusicKey } from "../gameplay/musicLoader";
@@ -600,6 +602,26 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-ESC", () => this.backToEditor());
     this.input.keyboard?.on("keydown-R", () => this.restart());
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
+
+    // The same four actions on a controller. Moving and jumping are not here —
+    // those ride along with the on-screen controls via `mergePad` in update(),
+    // because they are held rather than pressed. These are the opposite: one
+    // press, one action, which is what `installPadNavigation` edge-detects.
+    //
+    // Confirm is deliberately overloaded and deliberately unambiguous: while
+    // you are playing it is jump (handled in update, and this scene's update
+    // returns early once the run is over, so the two can never both fire), and
+    // once the run is over it is whatever the overlay is offering — forward on
+    // a win, another go on a loss. That is the console convention, and it means
+    // a whole world can be played without ever reaching for the mouse.
+    installPadNavigation(this, {
+      onPause: () => this.togglePause(),
+      onBack: () => this.backToEditor(),
+      onConfirm: () => {
+        if (this.outcome === "won") void this.nextLevel();
+        else if (this.outcome === "lost") this.restart();
+      },
+    });
 
     // Console palette, passed in rather than baked into VolumeControl: the same
     // control is the home page's, and restyling it there was not the ask. The
@@ -1192,7 +1214,14 @@ export class PlayScene extends Phaser.Scene {
     this.touchedLatchedBasket = false;
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
-    const touch = this.touch.get();
+    // A controller joins the on-screen buttons rather than replacing them, the
+    // same way those already join the keyboard — so there is no input mode to
+    // be in and nothing has to guess which device you meant. This one line is
+    // the whole of gameplay pad support: everything below reads `touch`, so
+    // walking, jumping, swimming and the shock attack all come along. `mergePad`
+    // returns a new object; writing into this one would leave an on-screen
+    // button lit after the pad let go.
+    const touch = mergePad(this.touch.get(), currentPad());
     const jumpDown = isJumpPressed(this.input$, touch);
     const justPressedJump = jumpDown && !this.jumpWasDown;
     this.jumpWasDown = jumpDown;

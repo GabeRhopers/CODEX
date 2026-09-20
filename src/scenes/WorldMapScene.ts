@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH, HEADER_HEIGHT } from "../config/gameConfig";
 import { LevelData } from "../level/LevelSchema";
 import { resolveWorldBackground, staticBackgroundDef } from "../level/staticBackgrounds";
+import { installPadNavigation } from "../gameplay/padNavigation";
 import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
@@ -79,6 +80,30 @@ export class WorldMapScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text;
   private titleText!: Phaser.GameObjects.Text;
 
+  /**
+   * Which node a controller is pointing at.
+   *
+   * **The marker is the cursor.** The wizard already stands on the level you
+   * are up to (see `drawMarker`), so moving him *is* the selection feedback —
+   * no focus ring to invent, and nothing new for a player to learn. This is
+   * the one screen that needed solving for a pad: its nodes were reachable
+   * only by pointer, so without it you could start a game and never pick a
+   * level.
+   *
+   * A plain integer works because `isUnlocked` is `index <= completed` — the
+   * playable set is always the contiguous range `0..cursorMax`, so moving is a
+   * clamp rather than a walk over a graph of what is open.
+   */
+  private cursor = 0;
+  private cursorMax = 0;
+  private cursorPoints: { x: number; y: number }[] = [];
+  private cursorWorld?: WorldData;
+  /** The green "Next world →" / "Finish →" action, when this world is finished
+   * inside a game. Held so a controller can press the same thing the button
+   * does — and so confirm means *forward* on a finished world, which is what
+   * that button being the loudest thing on screen already says. */
+  private continueAction?: () => void;
+
   constructor() {
     super("WorldMap");
   }
@@ -89,6 +114,13 @@ export class WorldMapScene extends Phaser.Scene {
     this.gameRun = data.game;
     this.levelNames = new Map();
     this.marker = undefined;
+    // Rebuilt by every build(); cleared here so a world reached after a
+    // finished one cannot inherit its continue action or its cursor bounds.
+    this.cursor = 0;
+    this.cursorMax = 0;
+    this.cursorPoints = [];
+    this.cursorWorld = undefined;
+    this.continueAction = undefined;
   }
 
   create(): void {
@@ -108,6 +140,17 @@ export class WorldMapScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.input.keyboard?.on("keydown-ESC", () => this.leave());
+
+    // A controller walks the map. Left/right slide the marker between the
+    // levels that are open, confirm plays the one it is standing on, and back
+    // is Esc. Press-not-hold (see installPadNavigation) or a single nudge of
+    // the d-pad would run the length of the world in a frame.
+    installPadNavigation(this, {
+      onLeft: () => this.moveCursor(-1),
+      onRight: () => this.moveCursor(1),
+      onConfirm: () => this.confirmCursor(),
+      onBack: () => this.leave(),
+    });
 
     void this.build();
   }
@@ -278,15 +321,71 @@ export class WorldMapScene extends Phaser.Scene {
       });
     }
 
+    // The controller cursor starts where the marker does — the level you are
+    // up to — so confirming without touching anything plays the obvious one.
+    // `cursorMax` mirrors isUnlocked's `index <= completed`, clamped to the
+    // last real node so a finished world cannot point past its own end.
+    this.cursor = index;
+    this.cursorMax = Math.min(completed, world.levelIds.length - 1);
+    this.cursorPoints = points;
+    this.cursorWorld = world;
+
     const complete = isWorldComplete(completed, world.levelIds.length);
     this.statusText.setText(
       complete
         ? this.gameRun
           ? `World ${this.gameRun.index + 1} of ${this.gameRun.worldIds.length} complete!`
-          : "World complete! Click any node to replay it."
-        : `Level ${index + 1} of ${world.levelIds.length} — click the lit node to play.`,
+          // "Choose" rather than "Click", on both lines, because as of
+          // 2026-09-20 there are three ways to do it and only one of them is a
+          // click: a pointer, a finger, and the A button with the marker
+          // already standing on the node. A screen that says "click" to
+          // somebody holding a controller is the feature telling them it does
+          // not cover them.
+          : "World complete! Choose any node to replay it."
+        : `Level ${index + 1} of ${world.levelIds.length} — choose the lit node to play.`,
     );
     if (complete) this.drawGameContinue();
+  }
+
+  /**
+   * Slides the controller cursor along the open levels, marker and all.
+   *
+   * Clamped rather than wrapped: running off the end of a world and reappearing
+   * at the start is disorienting on a map you are reading as a path, and the
+   * marker stopping is honest feedback that there is nothing further open.
+   *
+   * Any walk-in tween is killed first. `drawMarker` animates the wizard in from
+   * the level you just beat, and a tween still running would drag him back off
+   * whichever node you had moved to — a fight between two things moving the
+   * same sprite, which reads as the cursor ignoring you.
+   */
+  private moveCursor(delta: number): void {
+    if (!this.cursorWorld || this.cursorPoints.length === 0) return;
+    const next = Phaser.Math.Clamp(this.cursor + delta, 0, this.cursorMax);
+    if (next === this.cursor) return;
+    this.cursor = next;
+
+    const point = this.cursorPoints[next];
+    if (!point || !this.marker) return;
+    this.tweens.killTweensOf(this.marker);
+    this.marker.setPosition(point.x, point.y - NODE_RADIUS - 14);
+  }
+
+  /**
+   * What confirm does, which depends on whether there is anywhere forward to go.
+   *
+   * On a finished world inside a game, forward means the *next world* — that is
+   * what the big green button offers and it is the only way a run continues, so
+   * a controller has to be able to press it. Otherwise confirm plays the level
+   * under the cursor. Replaying a level on a finished world stays a pointer
+   * action; the run mattering more than the rerun is the right way round.
+   */
+  private confirmCursor(): void {
+    if (this.continueAction) {
+      this.continueAction();
+      return;
+    }
+    if (this.cursorWorld) void this.playLevel(this.cursorWorld, this.cursor);
   }
 
   private async playLevel(world: WorldData, index: number): Promise<void> {
@@ -333,7 +432,12 @@ export class WorldMapScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     button.on("pointerover", () => button.setStyle({ backgroundColor: "#3f9d44" }));
     button.on("pointerout", () => button.setStyle({ backgroundColor: "#2e7d32" }));
-    button.on("pointerdown", () => {
+
+    // One action, two ways to reach it. Held on the scene as well as bound to
+    // the button so a controller presses the same thing rather than a second
+    // copy of it — two copies of "what finishing a world means" is exactly how
+    // the pad path and the pointer path would drift.
+    this.continueAction = () => {
       if (isLast) {
         // The closing cut scene, then the ending — or straight to the ending
         // when there is no closing. Which of those it is lives in `gameRun.ts`
@@ -347,6 +451,7 @@ export class WorldMapScene extends Phaser.Scene {
         worldId: game.worldIds[game.index + 1],
         game: { ...game, index: game.index + 1 },
       });
-    });
+    };
+    button.on("pointerdown", () => this.continueAction?.());
   }
 }

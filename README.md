@@ -142,6 +142,10 @@ appear under more than one heading if it belongs to both.
 - [Music upload (2026-08-28)](#music-upload-2026-08-28)
 - [Built-in tunes (2026-09-19)](#built-in-tunes-2026-09-19)
 
+**Controls**
+
+- [A controller, with nothing to install (2026-09-20)](#a-controller-with-nothing-to-install-2026-09-20)
+
 **Testing and CI**
 
 - [Committed Playwright e2e suite (2026-08-20)](#committed-playwright-e2e-suite-2026-08-20)
@@ -3627,6 +3631,81 @@ editor, tempo or key controls, and any change to `menu-theme.mp3` — it works,
 and replacing it is a separate argument. And "None" is unchanged: a level that
 picks it is still silent, still explicitly, still clearing its legacy embedded
 fields. The built-ins are something you choose, not a fallback.
+
+### A controller, with nothing to install (2026-09-20)
+
+Plug a gamepad into the machine, open the link, play. No extension, no native
+build, no library: browsers ship the **Gamepad API**, and an ordinary page can
+read `navigator.getGamepads()`.
+
+**Gameplay cost one line**, which is a fact about the code that was already
+there rather than about this change. Every input decision goes through
+`PlayerController`'s three predicates — `left`/`right`, `isJumpPressed`,
+`isAttackPressed` — and each already OR'd the keyboard with the on-screen touch
+controls. `PlayScene.update()` builds that second half on a single line, so:
+
+```ts
+const touch = mergePad(this.touch.get(), currentPad());
+```
+
+is the whole of it. Walking, jumping, swimming and the shock attack all came
+along, because they all read that one value. A pad *joins* the keyboard the way
+touch already does rather than switching it off, so there is no controller mode
+to enter and nothing has to detect which device you meant.
+
+**The world map was the only real gap.** Its level nodes were reachable by
+pointer alone, so a controller could start a game and then never pick a level —
+the same shape of hole as the cut-scene pictures and the silent music picker: a
+feature complete in every part except the one that makes it reachable.
+
+Two things already in the codebase made it small. `isUnlocked` is
+`index <= completed`, so the playable set is always a contiguous range and a
+cursor is a clamped integer rather than a walk over a graph of what is open. And
+`drawMarker` already stands the wizard on the level you are up to — **so the
+marker is the cursor**, and moving him is the selection feedback. No focus ring
+was invented and there is nothing new to learn.
+
+**Read directly rather than through Phaser's gamepad plugin, because of
+testing.** Phaser builds its pad list from `gamepadconnected` events, which a
+test would have to forge; replacing `navigator.getGamepads` is one line in an
+init script. That was verified with a throwaway probe *before* the approach was
+chosen, not assumed afterwards. `tests/e2e/gamepad.spec.ts` therefore plays a
+published game from title to level **clicking nothing** — every step a button
+press, in a context with no Drive, no profile and no token. Stubbing the pad out
+fails five of its six cases; the sixth is the one asserting the keyboard still
+works, which is exactly right.
+
+Polling every frame rather than subscribing also deleted a whole category of
+work: a pad that appears halfway through simply starts working. That is not a
+tidy-up-later edge case — browsers deliberately hide gamepads until a button is
+pressed on one, so "appears late" is the normal path.
+
+Three bugs were designed out rather than discovered, each with a test naming it:
+
+- **Stick drift.** A worn stick rests off centre and reports ~0.1 forever.
+  Without a deadzone that is a held direction nobody is touching, so the player
+  walks into a wall by themselves and the *game* looks broken. Half travel.
+- **The stuck button.** `TouchControls.get()` returns its internal state by
+  reference, so merging in place would leave an on-screen button lit after the
+  pad let go — nothing clears a flag the touch handlers never set. `mergePad`
+  returns a new object, and the test freezes the input to prove it.
+- **Pause flicker.** Menu actions are edge-triggered, or Start toggles pause
+  sixty times a second and one nudge of the d-pad runs the length of the map.
+  `padEdges` is the rule, and it lives in `gamepad.ts` rather than beside the
+  scene glue because that file imports Phaser, which cannot load without a
+  `window` — so a rule parked there could not be unit-tested at all. That was
+  learned by doing it wrong first.
+
+The map's status line now says **"choose the lit node"** rather than "click" —
+there are three ways to do it now and only one is a click, and a screen that
+says "click" to somebody holding a controller is the feature telling them it
+does not cover them. That copy change is the one existing assertion this work
+edited (`game-maker.spec.ts`).
+
+**Not covered: the editor.** A pad is a poor fit for a paint canvas, and every
+authoring screen is hand-positioned buttons with no focus model, so it would
+mean inventing menu navigation across a dozen dense screens. Playing is the part
+you hand to somebody else.
 
 ### The Profile gate (2026-08-28)
 

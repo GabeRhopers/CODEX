@@ -258,7 +258,7 @@ test("playing a world outside a game still returns to the world browser", async 
   await beatCurrentWorld(page);
   // Polled, not read once: the map redraws from an async load, so a bare read
   // can catch it with only the header on screen.
-  await expect.poll(() => labels(page, "WorldMap")).toContain("World complete! Click any node to replay it.");
+  await expect.poll(() => labels(page, "WorldMap")).toContain("World complete! Choose any node to replay it.");
   const shown = await labels(page, "WorldMap");
   expect(shown).not.toContain("Next world →");
   expect(shown).not.toContain("Finish →");

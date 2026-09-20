@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { DEFAULT_ENDING_HEADLINE, DEFAULT_ENDING_MESSAGE, GameEnding } from "../game/GameSchema";
 import { isPlayOnly } from "../game/contentSource";
+import { installPadNavigation } from "../gameplay/padNavigation";
 
 /**
  * The screen after the last world.
@@ -86,5 +87,12 @@ export class EndingScene extends Phaser.Scene {
     back.on("pointerover", () => back.setStyle({ backgroundColor: "#3a5a9c" }));
     back.on("pointerout", () => back.setStyle({ backgroundColor: "#0f3460" }));
     this.input.keyboard?.on("keydown-ESC", () => this.scene.start(backScene));
+    // Both buttons go the same place, because there is only one thing left to
+    // do here — a "back" that did nothing would read as the pad having stopped
+    // working on the very last screen.
+    installPadNavigation(this, {
+      onConfirm: () => this.scene.start(backScene),
+      onBack: () => this.scene.start(backScene),
+    });
   }
 }

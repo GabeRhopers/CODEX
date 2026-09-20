@@ -2,6 +2,13 @@ import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { activeBundle } from "../game/contentSource";
 import { firstSceneOfGame } from "../game/gameRun";
+import { padConnected } from "../gameplay/gamepad";
+import { installPadNavigation } from "../gameplay/padNavigation";
+
+/** The controls line under the Play button. Held as a constant because the
+ * controller notice is appended to it rather than replacing it — a pad joins
+ * the keyboard here exactly as it does in gameplay. */
+const KEYBOARD_HINT = "Arrow keys or WASD to move, Space to jump";
 
 /**
  * The front door of a published game.
@@ -61,13 +68,31 @@ export class GameTitleScene extends Phaser.Scene {
     play.on("pointerdown", () => this.start());
     this.input.keyboard?.on("keydown-SPACE", () => this.start());
     this.input.keyboard?.on("keydown-ENTER", () => this.start());
+    installPadNavigation(this, { onConfirm: () => this.start() });
 
-    this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 42, "Arrow keys or WASD to move, Space to jump", {
-        fontSize: "12px",
-        color: "#a6a6c8",
-      })
+    const hint = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 42, KEYBOARD_HINT, { fontSize: "12px", color: "#a6a6c8" })
       .setOrigin(0.5);
+
+    /**
+     * Tell the player their controller was seen.
+     *
+     * **Cannot be answered once in `create()`.** Browsers deliberately hide
+     * gamepads until a button is pressed on one, so a pad plugged in before the
+     * page loaded is invisible until the player touches it — checking at build
+     * time would say "no controller" to somebody holding one.
+     *
+     * Watching instead turns that constraint into the feature: the line
+     * changing under your thumb *is* the confirmation that the press
+     * registered, which is the one thing a player cannot otherwise tell before
+     * committing to a level.
+     */
+    const watchPad = (): void => {
+      const text = padConnected() ? `${KEYBOARD_HINT} · Controller ready` : KEYBOARD_HINT;
+      if (hint.text !== text) hint.setText(text);
+    };
+    this.events.on(Phaser.Scenes.Events.UPDATE, watchPad);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off(Phaser.Scenes.Events.UPDATE, watchPad));
   }
 
   private start(): void {
