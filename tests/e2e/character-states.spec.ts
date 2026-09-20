@@ -83,39 +83,50 @@ function sawCastPose(page: Page): Promise<boolean> {
 }
 
 /**
- * Every colour the character wears, recorded per frame from inside the page.
+ * The colours the character wears **in order**, recorded per frame inside the
+ * page, with consecutive repeats collapsed.
  *
  * The same reasoning as `startCastPoseLatch` above, applied to the one test
- * that was still polling for a transient from the test side. `HURT_FLASH_MS`
- * is 220ms, and a poll from here samples over a round trip into the browser:
- * on a loaded machine two samples can straddle the whole red window and land
- * either side of it, in the much longer cyan grace period that follows. That
- * is not a hypothetical — it is how this test failed on CI on 2026-09-20,
- * reporting the shield cyan as though the flash had never happened.
+ * that was still polling for transients from the test side. `HURT_FLASH_MS` is
+ * 220ms, and a poll from here samples over a round trip into the browser: on a
+ * loaded machine two samples can straddle the whole red window and land either
+ * side of it, in the much longer cyan grace period that follows. That is how
+ * this test failed on CI on 2026-09-20, reporting the shield cyan as though the
+ * flash had never happened.
  *
- * The game itself was measured innocent before this was changed: at 6x CPU
- * throttling it still shows the red on every run. What was wrong was the
- * observer, so the observer is what moved — and a set of every colour actually
- * worn is a *stronger* claim than one lucky sample, because it can assert the
- * red and the cyan were both shown and were different.
+ * The game was measured innocent before any of this moved: at 6x CPU throttling
+ * it still shows the red on every run. The observer was what was wrong.
+ *
+ * **A sequence rather than a set, and that is the second lesson.** The first
+ * fix here recorded an unordered set, which made the *earlier* assertion
+ * reliable and quietly broke the last one: a set says "red happened at some
+ * point", so the poll could return after the whole grace period had already
+ * ended, leaving the final live-tint check waiting on a colour that was never
+ * coming back. Order is what the test actually claims — flash first, then the
+ * longer invincibility tint — so order is what gets recorded, and every
+ * assertion reads this instead of the live sprite.
  */
 async function startTintLatch(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const seen = new Set<number>();
-    (window as unknown as { __tints?: Set<number> }).__tints = seen;
+    const seq: number[] = [];
+    (window as unknown as { __tintSeq?: number[] }).__tintSeq = seq;
     const tick = (): void => {
       const scene = window.__debugGame?.scene.getScene("Play") as unknown as
         | { player?: { tintTopLeft: number } }
         | undefined;
-      if (scene?.player) seen.add(scene.player.tintTopLeft);
+      const tint = scene?.player?.tintTopLeft;
+      // Consecutive repeats collapsed: a colour held for a second is one
+      // entry, so the list stays a readable account of what happened rather
+      // than sixty identical numbers per second of it.
+      if (tint !== undefined && seq[seq.length - 1] !== tint) seq.push(tint);
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   });
 }
 
-function tintsSeen(page: Page): Promise<number[]> {
-  return page.evaluate(() => [...((window as unknown as { __tints?: Set<number> }).__tints ?? [])]);
+function tintSequence(page: Page): Promise<number[]> {
+  return page.evaluate(() => [...((window as unknown as { __tintSeq?: number[] }).__tintSeq ?? [])]);
 }
 
 async function testPlay(page: Page): Promise<void> {
@@ -272,27 +283,34 @@ test("a survived hit flashes a different colour than a Shield", async ({ page })
   const HURT_TINT = 0xff6b6b;
   const SHIELD_TINT = 0x66e0ff;
 
-  // The bug this closes: an absorbed hit only set invincibleUntil, so being
-  // hurt showed the *same* cyan as holding a Shield for over a second. So the
-  // claim is not "red appeared" on its own — it is that **both** colours were
-  // worn and they were different, which is the thing a player would notice and
-  // the thing the old behaviour could not do.
+  /**
+   * The whole claim, as one assertion on what was actually worn and when.
+   *
+   * The bug this closes: an absorbed hit only set `invincibleUntil`, so being
+   * hurt showed the *same* cyan as holding a Shield for over a second. So it is
+   * not enough that red appeared — the red has to come first and the cyan has
+   * to follow it, which is exactly what the old behaviour could not produce and
+   * exactly what a player sees.
+   *
+   * Polled on the recorded sequence rather than the live sprite, so nothing
+   * here depends on a sample landing inside a 220ms window.
+   */
   await expect
-    .poll(() => tintsSeen(page), { timeout: OUTCOME_TIMEOUT, intervals: [100] })
-    .toContain(HURT_TINT);
+    .poll(
+      async () => {
+        const seq = await tintSequence(page);
+        const flash = seq.indexOf(HURT_TINT);
+        return flash >= 0 && seq.indexOf(SHIELD_TINT, flash + 1) > flash;
+      },
+      { timeout: OUTCOME_TIMEOUT, intervals: [100] },
+    )
+    .toBe(true);
   await page.keyboard.up("ArrowRight");
 
-  expect(await tintsSeen(page), "the post-hit grace period should still be cyan").toContain(SHIELD_TINT);
   expect(HURT_TINT).not.toBe(SHIELD_TINT);
 
   const after = await readPlayer(page);
   expect(after.outcome).toBe("playing");
   expect(after.bodyWidth).toBe(22);
   expect(after.bodyHeight).toBe(40);
-
-  // Once the flash ends the ordinary invincibility tint takes over for the
-  // rest of the grace period — the two states are now distinguishable.
-  await expect
-    .poll(async () => (await readPlayer(page)).tintTopLeft, { timeout: 3000, intervals: [40] })
-    .toBe(SHIELD_TINT);
 });
