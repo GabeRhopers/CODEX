@@ -82,6 +82,42 @@ function sawCastPose(page: Page): Promise<boolean> {
   return page.evaluate(() => (window as unknown as { __sawCastPose?: boolean }).__sawCastPose === true);
 }
 
+/**
+ * Every colour the character wears, recorded per frame from inside the page.
+ *
+ * The same reasoning as `startCastPoseLatch` above, applied to the one test
+ * that was still polling for a transient from the test side. `HURT_FLASH_MS`
+ * is 220ms, and a poll from here samples over a round trip into the browser:
+ * on a loaded machine two samples can straddle the whole red window and land
+ * either side of it, in the much longer cyan grace period that follows. That
+ * is not a hypothetical — it is how this test failed on CI on 2026-09-20,
+ * reporting the shield cyan as though the flash had never happened.
+ *
+ * The game itself was measured innocent before this was changed: at 6x CPU
+ * throttling it still shows the red on every run. What was wrong was the
+ * observer, so the observer is what moved — and a set of every colour actually
+ * worn is a *stronger* claim than one lucky sample, because it can assert the
+ * red and the cyan were both shown and were different.
+ */
+async function startTintLatch(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen = new Set<number>();
+    (window as unknown as { __tints?: Set<number> }).__tints = seen;
+    const tick = (): void => {
+      const scene = window.__debugGame?.scene.getScene("Play") as unknown as
+        | { player?: { tintTopLeft: number } }
+        | undefined;
+      if (scene?.player) seen.add(scene.player.tintTopLeft);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+function tintsSeen(page: Page): Promise<number[]> {
+  return page.evaluate(() => [...((window as unknown as { __tints?: Set<number> }).__tints ?? [])]);
+}
+
 async function testPlay(page: Page): Promise<void> {
   await clickByText(page, "Editor", "Test Play (Space)");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
@@ -223,6 +259,9 @@ test("a survived hit flashes a different colour than a Shield", async ({ page })
   await gotoApp(page);
   await startEditorWithLevel(page, level);
   await testPlay(page);
+  // Before anything moves: the flash is 220ms and must be watched from inside
+  // the page, not sampled from out here. See startTintLatch.
+  await startTintLatch(page);
 
   await page.keyboard.down("ArrowRight");
   // Bank the heart so the spike is survivable rather than instantly fatal.
@@ -230,19 +269,20 @@ test("a survived hit flashes a different colour than a Shield", async ({ page })
     .poll(async () => readSceneField<{ extraHits: number }>(page, "Play", "stats").then((s) => s.extraHits), { timeout: OUTCOME_TIMEOUT })
     .toBe(1);
 
-  // Poll for the flash colour itself, tightly. The window is deliberately
-  // short (HURT_FLASH_MS = 220), so polling for "the heart was spent" first
-  // and *then* reading the tint samples too late and catches the longer cyan
-  // grace period instead — which is what the first draft of this test did.
   const HURT_TINT = 0xff6b6b;
-  await expect
-    .poll(async () => (await readPlayer(page)).tintTopLeft, { timeout: 8000, intervals: [40] })
-    .toBe(HURT_TINT);
-  await page.keyboard.up("ArrowRight");
+  const SHIELD_TINT = 0x66e0ff;
 
   // The bug this closes: an absorbed hit only set invincibleUntil, so being
-  // hurt showed the *same* cyan as holding a Shield for over a second.
-  const SHIELD_TINT = 0x66e0ff;
+  // hurt showed the *same* cyan as holding a Shield for over a second. So the
+  // claim is not "red appeared" on its own — it is that **both** colours were
+  // worn and they were different, which is the thing a player would notice and
+  // the thing the old behaviour could not do.
+  await expect
+    .poll(() => tintsSeen(page), { timeout: OUTCOME_TIMEOUT, intervals: [100] })
+    .toContain(HURT_TINT);
+  await page.keyboard.up("ArrowRight");
+
+  expect(await tintsSeen(page), "the post-hit grace period should still be cyan").toContain(SHIELD_TINT);
   expect(HURT_TINT).not.toBe(SHIELD_TINT);
 
   const after = await readPlayer(page);
