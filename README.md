@@ -88,6 +88,7 @@ appear under more than one heading if it belongs to both.
 - [Multi-frame sprite editor: a paintable character and animated enemies (2026-08-22)](#multi-frame-sprite-editor-a-paintable-character-and-animated-enemies-2026-08-22)
 - [The palette gets shades, and a place for your own colours (2026-08-26)](#the-palette-gets-shades-and-a-place-for-your-own-colours-2026-08-26)
 - [The drawing got the middle of the screen (2026-09-05)](#the-drawing-got-the-middle-of-the-screen-2026-09-05)
+- [The palette became a dropdown, above the colours it fills (2026-09-22)](#the-palette-became-a-dropdown-above-the-colours-it-fills-2026-09-22)
 - [The background didn't match the pixels you painted (2026-09-05)](#the-background-didnt-match-the-pixels-you-painted-2026-09-05)
 - [Skin storage: one cache and one copy (2026-08-21)](#skin-storage-one-cache-and-one-copy-2026-08-21)
 - [Skin/background/music libraries (2026-08-16)](#skinbackgroundmusic-libraries-2026-08-16)
@@ -4633,6 +4634,66 @@ rather than stretching; a plain scale-to-fill widened him by more than half
 again. And the first version listed every skinnable brush: the screenshot
 showed ~30 entries running off the bottom of the canvas with their labels
 colliding, so the list became the animated cast plus whatever you're editing.
+
+### The palette became a dropdown, above the colours it fills (2026-09-22)
+
+Which palette you are painting from was five stacked rows on the right rail.
+The colours that palette *provides* were in a different column, on the other
+side of the drawing. Two halves of one idea, as far apart as the layout allows.
+
+Now the palette is a chip — `Palette: PICO-8 ▾` — standing exactly where the
+"COLOUR" heading used to be, with the swatches directly beneath it. One control
+heads the group and names what is in it, so the heading it replaced was a word
+the chip already carried.
+
+**Which column, decided by measurement.** Moving the swatches *to* the rail was
+the more literal reading of the request, and it does not fit: the rail's last
+control lands about 3px above the footer, which is the overflow the constants
+already record happening once ("the last button ended at 426, measurably on top
+of ↶ Undo"). Bringing the chip to the swatches instead costs the second left
+column ~20px against 79px of slack, and the rail simply gets shorter. The
+swatch grid, the shade ramp and every test that reads them never move.
+
+**The thumbnail is what pays for the dropdown.** Five always-visible rows
+became one click, which is a straight loss unless the menu shows something the
+list never did — and the old rows were names only, so "DawnBringer 16" told you
+nothing about what you were choosing. Each row now carries a mini-grid of that
+palette's actual colours. Square, and a grid rather than a strip, because
+`AssetPickerMenu` draws every tile at `setDisplaySize(itemSize, itemSize)` and
+sixteen colours in a row would be sixteen two-pixel smears. Two across, because
+that is what fits "DawnBringer 16" on one line.
+
+`AssetPickerMenu` rather than a bespoke dropdown: it is already in this scene,
+200px away, as `Trace: None ▾`. A hand-rolled one would have put two different
+dropdown behaviours on a single screen. The two now close each other on open,
+as EditorUI's three already do.
+
+**The thumbnail keys are content-derived** — `palette-thumb-<id>-<colours>` —
+because "Yours" changes the moment you sample a colour. Keyed by id alone it
+would cache whatever that palette held the first time the scene opened and show
+it ever after.
+
+**One test changed, and it was asking its question the wrong way.** "Game Boy
+is gone and Yours takes its place" read every `Text` on screen and required
+"Yours" and "PICO-8" simultaneously — which worked only while all five were
+permanently visible. It opens the menu and reads the rows now, which is what it
+was really asking all along. Everything else passed untouched: `skin-erase`
+(the real layout guard — 17 swatches, then `assertLayoutSound`), `skin-grid`,
+`skin-grid-alignment`, `phone-landscape`, `author-a-game`, `layout-invariants`.
+
+**And one behaviour nothing was watching.** Switching palette rebuilds canvas
+mode, and a rebuild reloads the frame's *original* cells — so without folding
+the live drawing back in first, changing palette halfway through a sprite threw
+away every stroke since the last frame change. The old row handler called
+`captureActiveFrame()`; `selectPalette` does too. That was untested, which is
+exactly how a rewrite drops it in silence, so it has a test now — and removing
+the call fails it.
+
+**Looked at, three times**, because none of this is visible to an assertion:
+the menu open, the built-in and invented-thing column heights, and an empty
+"Yours" — one ✕ swatch, the two-line hint, then the ramp. That last arrangement
+is the one recorded as having broken before, and `assertLayoutSound` is blind
+to it because both are plain labels rather than interactive ones.
 
 ### The drawing got the middle of the screen (2026-09-05)
 

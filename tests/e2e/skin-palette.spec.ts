@@ -25,8 +25,11 @@ const storedCustomColors = (page: Page): Promise<string[]> =>
     return raw ? (JSON.parse(raw) as string[]) : [];
   });
 
-/** The three shade swatches, left of the palette row. Read off the display
- * list so the test follows the layout rather than pinning coordinates. */
+/** The three shade swatches, wherever they are. Read off the display list by
+ * name so the test follows the layout rather than pinning coordinates — the
+ * prose here used to say "left of the palette row", which stopped being true
+ * twice over: the row moved in 2026-09-05 and stopped being a row at all in
+ * 2026-09-20. The name is the only part that has survived both. */
 async function shadeSwatches(page: Page): Promise<{ x: number; y: number; visible: boolean; color: number }[]> {
   return page.evaluate(() => {
     const scene = window.__debugGame!.scene.getScene("SkinEditor");
@@ -73,20 +76,42 @@ async function openGhostCanvas(page: Page): Promise<void> {
   await page.waitForSelector("canvas");
 }
 
+/** Every Text on the scene, however deeply nested — the dropdown puts its rows
+ * in a container, so a flat pass over `children.list` cannot see them. */
+async function sceneTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("SkinEditor");
+    type O = { type?: string; text?: string; list?: O[] };
+    const out: string[] = [];
+    const walk = (l: O[]): void => {
+      for (const c of l) {
+        if (c.type === "Text" && c.text) out.push(c.text);
+        if (c.list) walk(c.list);
+      }
+    };
+    walk((scene.children.list as unknown as O[]) ?? []);
+    return out;
+  });
+}
+
 test("Game Boy is gone and Yours takes its place", async ({ page }) => {
   test.slow();
   await openGhostCanvas(page);
 
-  const tabs = await page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("SkinEditor");
-    return scene.children.list
-      .map((c) => (c as unknown as { type?: string; text?: string }))
-      .filter((o) => o.type === "Text")
-      .map((o) => o.text ?? "");
-  });
-  expect(tabs).not.toContain("Game Boy");
-  expect(tabs).toContain("Yours");
-  expect(tabs).toContain("PICO-8");
+  // The palettes on offer live behind the chip since 2026-09-20, so the
+  // question this test asks — which palettes can I choose? — is now asked by
+  // opening the menu. It used to read the flat display list, which happened to
+  // work only while all five were permanently on screen.
+  //
+  // Asserting the closed state first, because "the chip names the one in use"
+  // is half of what replaced that list and would otherwise go unchecked.
+  expect(await sceneTexts(page), "the chip should name the palette in use").toContain("Palette: PICO-8 ▾");
+
+  await clickByText(page, "SkinEditor", "Palette: PICO-8 ▾");
+  const offered = await sceneTexts(page);
+  expect(offered).not.toContain("Game Boy");
+  expect(offered).toContain("Yours");
+  expect(offered).toContain("PICO-8");
 });
 
 test("the shade ramp offers a lighter and darker neighbour, and hides a step that would do nothing", async ({ page }) => {
@@ -159,4 +184,45 @@ test("an off-palette colour survives a frame switch instead of being discarded",
   await clickByText(page, "SkinEditor", "Frame 2 ·");
   await page.waitForTimeout(200);
   expect(await currentColor(page), "the sampled colour should survive a rebuild").toBe(picked);
+});
+
+test("switching palette keeps the strokes you have already made", async ({ page }) => {
+  test.slow();
+  // **The one behaviour the 2026-09-20 dropdown could have dropped in silence.**
+  // Switching palette rebuilds canvas mode, and a rebuild reloads the frame's
+  // *original* cells — so unless the live drawing is folded back in first
+  // (`captureActiveFrame`), changing palette halfway through throws away every
+  // stroke since the last frame change. The old row handler did that; the
+  // dropdown's onSelect has to as well, and nothing was watching.
+  await openGhostCanvas(page);
+
+  const painted = (): Promise<number> =>
+    page.evaluate(() => {
+      const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
+        pixelCanvas?: { getCells(): (string | null)[] };
+      };
+      return (scene.pixelCanvas?.getCells() ?? []).filter((c) => c !== null).length;
+    });
+
+  const box = await page.evaluate(() => {
+    const el = [...document.querySelectorAll("canvas")].find((c) => c.width === 32 && c.height === 32);
+    const r = el!.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  });
+  const cell = box.width / 32;
+  for (const [x, y] of [
+    [8, 8],
+    [9, 8],
+    [8, 9],
+  ]) {
+    await page.mouse.click(box.left + (x + 0.5) * cell, box.top + (y + 0.5) * cell);
+  }
+  expect(await painted(), "three cells should be painted before the switch").toBe(3);
+
+  await clickByText(page, "SkinEditor", "Palette: PICO-8 ▾");
+  await clickByText(page, "SkinEditor", "Sweetie 16");
+  await page.waitForTimeout(300);
+
+  expect(await sceneTexts(page), "the chip should follow the switch").toContain("Palette: Sweetie 16 ▾");
+  expect(await painted(), "the drawing should survive a palette switch").toBe(3);
 });

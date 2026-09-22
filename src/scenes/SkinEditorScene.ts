@@ -280,6 +280,10 @@ export class SkinEditorScene extends Phaser.Scene {
   private referenceDataUrl: string | null = null;
   private referencePicker?: AssetPickerMenu;
   private referenceSources: ReferenceSource[] = [];
+  /** The palette chip above the swatches. A second AssetPickerMenu on one
+   * screen, so the two have to know about each other — see buildPalettePicker
+   * for why, and rebuild() for the teardown neither can skip. */
+  private palettePicker?: AssetPickerMenu;
   // Phaser's keyboard queue can re-emit one physical keydown more than
   // once within a single rendered frame under frame stalls — see
   // EditorScene's onceThisFrame for the same guard and why.
@@ -377,6 +381,8 @@ export class SkinEditorScene extends Phaser.Scene {
     // is what actually unhooks them.
     this.referencePicker?.destroy();
     this.referencePicker = undefined;
+    this.palettePicker?.destroy();
+    this.palettePicker = undefined;
     this.nameInput?.destroy();
     this.nameInput = undefined;
     this.clearArmTimer?.remove(false);
@@ -1111,9 +1117,13 @@ export class SkinEditorScene extends Phaser.Scene {
     // --- the three regions -------------------------------------------------
     //
     //   left column 1 (x=16)    VIEW, then TOOLS
-    //   left column 2 (x=120)   FRAMES, COLOURS, SHADES
+    //   left column 2 (x=120)   [tabs], FRAMES, the palette chip, its colours
     //   the drawing (x=333)     384x384, dead centre
-    //   right rail (x=766)      PALETTE, DRAWING, REFERENCE, THIS SKIN
+    //   right rail (x=766)      THIS SKIN
+    //
+    // The rail used to open with five stacked palette rows, a whole column away
+    // from the swatches they fill. They are one group under one chip now (see
+    // buildPalettePicker), which is what leaves the rail as short as it looks.
     //
     // Each column is a running y rather than a list of literals, so inserting a
     // control is one line and cannot silently land on top of its neighbour. The
@@ -1138,45 +1148,24 @@ export class SkinEditorScene extends Phaser.Scene {
      * that edge and add the space between groups. */
     const endGroup = (y: number): number => y - (STACK_STEP - SMALL_BUTTON_H) + GROUP_GAP;
 
-    // --- PALETTE -------------------------------------------------------------
+    // --- WHICH PALETTE -------------------------------------------------------
     // "Yours" is offered alongside the presets rather than as a separate
     // control: it *is* a palette, it just fills itself from the colours you
     // used that no preset had (see customPalette.ts). Built fresh here because
     // canvas mode is rebuilt on every frame and palette switch, so it always
-    // reflects the latest picks.
+    // reflects the latest picks — a cached list would show yesterday's colours.
     //
-    // A stacked column on the rail rather than the centred row of five it used
-    // to be. Full width of the rail, so "DawnBringer 16" fits at 11px with room
-    // to spare — the old 110px row was sized to that name and had none.
+    // Resolved here but *drawn* further down, with the colours it produces:
+    // until 2026-09-20 this was five stacked rows on the right rail, a whole
+    // column away from the swatches they fill. One idea, at opposite edges of
+    // the screen. It is a dropdown above the swatches now.
     this.customColors = loadCustomColors();
     const yours: PixelPalette = { id: CUSTOM_PALETTE_ID, name: "Yours", colors: this.customColors };
     const paletteChoices = [...PIXEL_PALETTES, yours];
+    // The ternary is load-bearing: `findPalette` answers PIXEL_PALETTES[0] for
+    // any id it does not know, and it does not know "yours" — so without this,
+    // picking your own palette would silently paint from PICO-8.
     const palette = target.paletteId === CUSTOM_PALETTE_ID ? yours : findPalette(target.paletteId);
-    railY = heading(railX, railY, "Palette");
-    for (const p of paletteChoices) {
-      const activePalette = p.id === palette.id;
-      const bg = this.add
-        .rectangle(railX, railY, REFERENCE_WIDTH, 24, activePalette ? SELECTED_FILL : BUTTON_COLOR_NUM)
-        .setOrigin(0, 0)
-        .setInteractive({ useHandCursor: true });
-      // The open palette gets the same ring the armed tool and the chosen
-      // colour get, rather than the hover blue it used to wear — which made the
-      // open palette indistinguishable from one you were merely pointing at.
-      if (activePalette) bg.setStrokeStyle(2, SELECTED_RING_COLOR);
-      this.add
-        .text(railX + 10, railY + 12, p.name, { fontSize: "11px", color: "#ffffff" })
-        .setOrigin(0, 0.5);
-      bg.on("pointerdown", () => {
-        if (!this.target || !this.pixelCanvas || p.id === this.target.paletteId) return;
-        // Capture the live in-progress drawing before switching, so
-        // changing which palette is offered doesn't discard unsaved strokes
-        // the way reloading the frame's *original* (pre-edit) cells would.
-        this.target = { ...this.captureActiveFrame(), paletteId: p.id };
-        this.goTo("canvas");
-      });
-      railY += 28;
-    }
-    railY += GROUP_GAP;
 
     // The second left column, top down: the tab strip if this is an invented
     // thing, then FRAMES if it has more than one pose, then COLOURS — each
@@ -1273,7 +1262,11 @@ export class SkinEditorScene extends Phaser.Scene {
     const swatchStep = swatchSize + swatchGap;
     const SWATCH_COLS = 6;
     const swatchColors: (string | null)[] = [...palette.colors, null];
-    left2Y = heading(LEFT_COL2_X, left2Y, "Colour");
+    // The palette chip heads this group instead of a "COLOUR" label, because it
+    // says the same thing and more: these are the colours, and *that* is where
+    // they came from. A label above a chip above the swatches would have spent
+    // a heading on a word the chip already carries.
+    left2Y = this.buildPalettePicker(paletteChoices, palette, left2Y);
     const swatchTop = left2Y;
     let sx = LEFT_COL2_X;
     let sy = swatchTop;
@@ -1675,6 +1668,100 @@ export class SkinEditorScene extends Phaser.Scene {
   }
 
   /**
+   * A square thumbnail of a palette's own colours, for its row in the dropdown.
+   *
+   * **The thumbnail is what pays for the dropdown.** Five always-visible rows
+   * became one chip, which trades seeing every choice for a click — a plain
+   * loss unless the menu shows something the list never did. The old rows were
+   * names alone, so "DawnBringer 16" told you nothing about what you were
+   * choosing. These show the actual colours.
+   *
+   * Square, and a grid rather than a strip, because AssetPickerMenu draws every
+   * tile with `setDisplaySize(itemSize, itemSize)` — sixteen colours in a row
+   * squashed to 30px would be sixteen two-pixel smears.
+   *
+   * **Keyed by content, not by id.** "Yours" changes the moment you sample a
+   * colour (see rememberColor), so `palette-thumb-yours` would be a cache of
+   * whatever it held the first time this scene opened, shown ever after. Keying
+   * by the colours themselves means a changed palette is simply a different
+   * texture, and `exists` keeps each one generated once.
+   */
+  private paletteThumbnail(palette: PixelPalette): string {
+    const key = `palette-thumb-${palette.id}-${palette.colors.join("")}`;
+    if (this.textures.exists(key)) return key;
+
+    // An empty "Yours" has nothing to draw: one flat cell, so the row reads as
+    // a palette with no colours yet rather than as a failed image.
+    const cols = Math.max(1, Math.ceil(Math.sqrt(palette.colors.length)));
+    const cell = 8;
+    const size = cols * cell;
+    const g = this.make.graphics({ x: 0, y: 0 }, false);
+    g.fillStyle(0x222634, 1).fillRect(0, 0, size, size);
+    palette.colors.forEach((color, i) => {
+      g.fillStyle(Phaser.Display.Color.HexStringToColor(color).color, 1);
+      g.fillRect((i % cols) * cell, Math.floor(i / cols) * cell, cell, cell);
+    });
+    g.generateTexture(key, size, size);
+    // Never on the display list (`make`, not `add`), so nothing else will free
+    // it — the same reason drawBackdrop's mask graphics is destroyed by hand.
+    g.destroy();
+    return key;
+  }
+
+  /**
+   * The palette chip, and the colours it chooses between.
+   *
+   * Returns the top edge of the next thing in the column, like `heading` did
+   * before it — it stands in for that heading rather than sitting above one.
+   *
+   * Two AssetPickerMenus now share this screen, so each closes the other on
+   * open: two dropdowns hanging open at once would overlap, and the second
+   * would take clicks meant for the first. EditorUI does the same for its three.
+   */
+  private buildPalettePicker(choices: PixelPalette[], active: PixelPalette, y: number): number {
+    // Clear of the canvas's left edge at 333, with the column's own margin.
+    const width = 190;
+    const height = 26;
+
+    this.palettePicker = new AssetPickerMenu({
+      scene: this,
+      trigger: { x: LEFT_COL2_X, y, width, height },
+      // Two across: one column made the panel tall enough to run off the
+      // bottom of a screen this chip already sits low on, and three left
+      // "DawnBringer 16" wrapping to three lines in a 60px cell.
+      columns: 2,
+      itemSize: 30,
+      triggerDepth: 10,
+      dropdownDepth: 20,
+      onToggleOpen: (open) => {
+        if (open) this.referencePicker?.close();
+      },
+      onSelect: (id) => this.selectPalette(id),
+    });
+    this.palettePicker.setTriggerLabel(`Palette: ${active.name} ▾`);
+    this.palettePicker.setItems(
+      choices.map((p) => ({ id: p.id, label: p.name, textureKey: this.paletteThumbnail(p) })),
+      active.id,
+    );
+    return y + height + GROUP_GAP;
+  }
+
+  /**
+   * Switches palette, keeping whatever is on the canvas.
+   *
+   * `captureActiveFrame` first, and that is the whole reason this is not a
+   * one-liner: canvas mode is rebuilt on palette switch, and rebuilding reloads
+   * the frame's *original* cells — so without folding the live drawing back in,
+   * changing palette halfway through would throw away every stroke since the
+   * last frame change. Inherited verbatim from the row handler this replaced.
+   */
+  private selectPalette(id: string): void {
+    if (!this.target || !this.pixelCanvas || id === this.target.paletteId) return;
+    this.target = { ...this.captureActiveFrame(), paletteId: id };
+    this.goTo("canvas");
+  }
+
+  /**
    * The tracing controls: a picker of everything available to trace, and a
    * button that stamps the chosen one in as a starting point.
    *
@@ -1697,6 +1784,12 @@ export class SkinEditorScene extends Phaser.Scene {
       itemSize: 30,
       triggerDepth: 10,
       dropdownDepth: 20,
+      // The other half of the pair — see buildPalettePicker. Both directions,
+      // or opening this one while the palette menu is down leaves two panels
+      // overlapping and the click going to whichever drew last.
+      onToggleOpen: (open) => {
+        if (open) this.palettePicker?.close();
+      },
       onSelect: (id) => void this.selectReference(id),
     });
     this.setReferenceLabel();
