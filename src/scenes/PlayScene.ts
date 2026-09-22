@@ -49,7 +49,7 @@ import {
 } from "../gameplay/PlayerStats";
 import { HandheldShell, LEFT_BAND, makeConsoleButton, SCREEN_RECT, VOLUME_CONTROL } from "../gameplay/HandheldShell";
 import { recordCompletion } from "../world/worldProgress";
-import { TouchControls } from "../gameplay/TouchControls";
+import { TouchControls, TouchControlState } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
 import { buildEdgeGrid, EDGE_GID_BASE, GROUND_EDGE_TEXTURE_KEY } from "../level/groundEdges";
@@ -83,7 +83,7 @@ const SWIM_SINK_VELOCITY = 80;
 const SWIM_SPEED_MULTIPLIER = 0.6;
 // Green reads as "good/active" against every one of this game's built-in
 // backgrounds and the bell's own cyan/blue art, matching the existing
-// buff-tint convention (see updateBuffVisuals) of a flat setTint rather
+// buff-tint convention (see updateCharacterVisuals) of a flat setTint rather
 // than a second baked texture — cheap, and it survives a user-uploaded
 // skin of any color scheme instead of needing an "activated" variant of
 // whatever image they chose.
@@ -122,6 +122,25 @@ const WARNING_TOAST_COLOR = "#facc15";
 // overlap check after landing, short enough that using a different basket
 // right after arriving never feels blocked.
 const TELEPORT_COOLDOWN_MS = 500;
+
+// How far apart two characters are placed when they arrive somewhere together
+// — a fresh start, and every basket teleport. Stacking them on the identical
+// pixel is not merely ugly: two Arcade bodies at the same point get pushed
+// apart by the separation pass in whichever direction rounding happens to
+// favour, which reads as one of them being flung. Half a tile is enough to
+// avoid that and still small enough that both are plainly at the same door.
+// With one player it multiplies by zero and changes nothing.
+const SPAWN_SPACING_X = TILE_SIZE / 2;
+
+// What a character who is not holding the console reads from the on-screen
+// controls: nothing. Frozen rather than built per frame so it cannot be
+// written into by accident — `mergePad` returns a fresh object anyway.
+const NO_TOUCH: TouchControlState = Object.freeze({ left: false, right: false, jump: false, attack: false });
+
+// Player one's `baseTint`. Not a colour so much as the absence of one: see
+// updateCharacterVisuals, which turns this exact value back into `clearTint()`
+// rather than a white tint, so the solo character is untouched by co-op.
+const UNTINTED = 0xffffff;
 
 // PJ Thunder Hat's shock — see Bolt.ts for the projectile itself.
 // Launch position is roughly the wizard's chest/hand height, offset ahead
@@ -218,6 +237,45 @@ interface PlaySceneData {
   checkpoint?: CheckpointCoord;
 }
 
+/**
+ * One playable character, and everything that is genuinely *theirs*.
+ *
+ * Everything a character does was already written to take the sprite as an
+ * argument — `updatePlayerMovement`, `updateWizardAnimation`, `registerHit`,
+ * `applyStompBounce`. What was singular was never the rules, only this scene's
+ * bookkeeping: one sprite field, one animation state, one pair of edge-detect
+ * flags. This record is that bookkeeping made plural.
+ *
+ * **Score, hearts and the key are deliberately not here.** They stay on the
+ * scene as one shared pool, which is what leaves `collectItem`, `tryOpenChest`,
+ * the checkpoint and the entire HUD untouched — and it makes a power-up
+ * something the *team* picked up, which is the friendlier reading for a game
+ * two people in one room are playing together.
+ */
+interface CoopPlayer {
+  sprite: Phaser.Physics.Arcade.Sprite;
+  input: PlayerInputKeys;
+  anim: WizardAnimState;
+  /** Worn whenever no buff tint is showing. `UNTINTED` for player one, which
+   * means literally no tint — see updateCharacterVisuals. */
+  baseTint: number;
+  /** Which connected pad drives this character. */
+  padIndex: number;
+  /** The on-screen D-pad belongs to player one; there is only one cluster and
+   * two people cannot share a phone. */
+  usesTouch: boolean;
+  jumpWasDown: boolean;
+  attackWasDown: boolean;
+  /** See CAST_FLASH_MS. Per character rather than per scene, because the pose
+   * belongs to whoever pulled the trigger — the *cooldown* behind it lives in
+   * the shared `stats` and is deliberately team-wide, like every other buff. */
+  castFlashUntil: number;
+  /** Accessory sprites follow their own character across a basket teleport,
+   * the same way the buff tint does. */
+  slipper: Phaser.GameObjects.Image;
+  hat: Phaser.GameObjects.Image;
+}
+
 export class PlayScene extends Phaser.Scene {
   private level!: LevelData;
   private world?: WorldPlayContext;
@@ -225,15 +283,52 @@ export class PlayScene extends Phaser.Scene {
   private get levelStorage(): StorageAdapter {
     return getLevelStorage();
   }
-  private player!: Phaser.Physics.Arcade.Sprite;
+  /**
+   * Everyone playing, in join order. Exactly one entry today.
+   *
+   * Plural before there is anything plural to hold, deliberately: making the
+   * scene's ~30 `this.player` sites name *which* character they mean is the
+   * whole risk of two-player support, and doing it while there is still only
+   * one player means every existing test is a check on the refactor rather
+   * than on a new feature at the same time.
+   *
+   * Nothing in this scene reads `players[0]` any more: every rule takes the
+   * character that actually did the thing — the one the collider handed over,
+   * the one whose turn of the loop this is. That is the point. A site that
+   * silently meant "player one" when it meant "this player" is exactly the bug
+   * `onGroundCollide` had.
+   */
+  private players: CoopPlayer[] = [];
+
+  /**
+   * Player one's sprite, **for the e2e specs and nothing else.**
+   *
+   * Eight spec files reach into the live scene through this name to ask where
+   * the character is, what it is wearing and how fast it is going — they drive
+   * the arrow keys, so player one is unambiguously the character they mean. It
+   * is kept as a getter rather than deleted because those specs are the phase
+   * gate for this refactor: they have to pass *untouched*, or the refactor
+   * changed something it had no business changing.
+   *
+   * Public, and not because anything in the app calls it — it is public so the
+   * compiler stops telling the truth about an unused private member, and so
+   * that "this name exists for the harness" is stated rather than implied.
+   *
+   * **No production code in this file may use it.** Undefined before the first
+   * area is built, exactly as the old field was, so `scene.player?.x` in a spec
+   * still reads undefined rather than throwing on a scene that is still loading.
+   */
+  get player(): Phaser.Physics.Arcade.Sprite | undefined {
+    return this.players[0]?.sprite;
+  }
   // Which of Main/Sub/Up the player is currently in — see "Sub/Up areas"
   // under Art. Set once up front (see startingAreaKey) and again on every
   // basket teleport (see enterArea); everything below that used to
   // describe "the level" (groundLayer/background/music/every spawned
   // sprite) now describes "whichever area is current," torn down and
   // rebuilt by enterArea each time this changes — unlike a fresh Test
-  // Play/restart, `stats` (score/hearts/buffs) and `player` itself are
-  // deliberately *not* part of that teardown, so a teleport reads as
+  // Play/restart, `stats` (score/hearts/buffs) and the `players` themselves
+  // are deliberately *not* part of that teardown, so a teleport reads as
   // walking through a door in the same level, not starting over.
   private currentAreaKey: AreaKey = "main";
   // Guards enterArea's teardown block (and its player-reuse-vs-create
@@ -242,7 +337,7 @@ export class PlayScene extends Phaser.Scene {
   // *instance* rather than constructing a fresh one, same reason
   // spritesByBrushId gets explicitly reset in init() rather than relying
   // on a field initializer. Left alone, `groundLayer`/`groundCollider`/
-  // `background`/`player` would carry over as stale references to
+  // `background`/the `players` would carry over as stale references to
   // GameObjects Phaser already destroyed tearing down the previous run —
   // e.g. a destroyed TilemapLayer nulls out its own `.tilemap` property,
   // so `this.groundLayer.tilemap.destroy()` throws reading `.destroy` off
@@ -292,23 +387,13 @@ export class PlayScene extends Phaser.Scene {
   // physics step process a collider referencing an already-destroyed
   // GameObject.
   private areaColliders: Phaser.Physics.Arcade.Collider[] = [];
-  private input$!: PlayerInputKeys;
   private touch!: TouchControls;
-  private wizardAnim: WizardAnimState = createWizardAnimState();
   private enemies: ActiveEnemy[] = [];
   // PJ Thunder Hat's live shock bolts — see Bolt.ts and updateBolts(). Not
   // tracked via spritesByBrushId/areaColliders (those are for the area's
   // own fixed-at-build-time content); a bolt is spawned dynamically mid-
   // play and checked/expired manually every frame instead.
   private bolts: Phaser.Physics.Arcade.Sprite[] = [];
-  // Edge-detection for the attack input, same shape as jumpWasDown below —
-  // the shock should fire once per press, not repeat every frame the key/
-  // touch button stays held (the cooldown alone isn't enough: without this,
-  // holding the key would still queue a shot the instant the cooldown
-  // clears rather than requiring a fresh press).
-  private attackWasDown = false;
-  // See CAST_FLASH_MS.
-  private castFlashUntil = 0;
   private outcome: "playing" | "won" | "lost" = "playing";
   /** Start-button pause. Separate from `outcome` because it is reversible
    * and does not end the run — update() short-circuits on either. */
@@ -319,7 +404,6 @@ export class PlayScene extends Phaser.Scene {
   private restartButton!: Phaser.GameObjects.Text;
   private nextButton!: Phaser.GameObjects.Text;
   private stats: PlayerStats = createPlayerStats();
-  private jumpWasDown = false;
   // Optional (not `!`) — a "custom" background's texture is registered
   // async (see backgroundLoader.ts), so update() must not assume this
   // exists on the very first frame or two.
@@ -329,15 +413,6 @@ export class PlayScene extends Phaser.Scene {
   private music?: Phaser.Sound.BaseSound;
   private hud!: Phaser.GameObjects.Text;
   private trophy!: Phaser.GameObjects.Image;
-  // Chicken Slipper / PJ Thunder Hat equipped-accessory sprites — created
-  // once in create() (like hud/toast/trophy above) and repositioned every
-  // frame onto the player in updateAccessoryVisuals(), shown only once the
-  // matching PlayerStats flag is set. Unlike the item sprites in
-  // spritesByBrushId these aren't area-scoped: they follow the same player
-  // sprite across a basket teleport, same as the buff tint in
-  // updateBuffVisuals.
-  private slipperAccessory!: Phaser.GameObjects.Image;
-  private hatAccessory!: Phaser.GameObjects.Image;
   // Tile coords of the last-touched checkpoint this play session, or
   // undefined for "no checkpoint touched yet, respawn at Spawn" — see
   // CheckpointCoord's docstring. Reset fresh (from `data.checkpoint`,
@@ -412,12 +487,14 @@ export class PlayScene extends Phaser.Scene {
     this.activeCheckpointSprite = undefined;
     this.outcome = "playing";
     this.paused = false;
-    this.wizardAnim = createWizardAnimState();
+    // Phaser reruns init()/create() on this same instance for a Restart, so
+    // every character from the previous run has already been destroyed with
+    // the old display list — dropping them here rather than relying on the
+    // field initialiser is the same reason `areaBuilt` is reset below.
+    this.players = [];
     this.enemies = [];
     this.stats = createPlayerStats();
-    this.jumpWasDown = false;
     this.bolts = [];
-    this.attackWasDown = false;
     // Phaser reuses the scene instance across restart(), so these have to be
     // cleared here rather than relying on their field initialisers — a run
     // that ended while standing on a basket would otherwise start the next
@@ -426,7 +503,6 @@ export class PlayScene extends Phaser.Scene {
     this.touchedLatchedBasket = false;
     this.characterFrameKeys = undefined;
     this.enemyLoops = new Map();
-    this.castFlashUntil = 0;
     // Phaser reuses this same PlayScene instance across every Test Play/
     // World/Template run rather than constructing a fresh one each time —
     // create() reruns, but a plain class-field initializer like
@@ -494,7 +570,6 @@ export class PlayScene extends Phaser.Scene {
       this.music?.destroy();
     });
 
-    this.input$ = createPlayerInput(this);
     // Body first, controls second: the shell is pure decoration in the bands
     // beside the level, and the controls sit on top of it.
     new HandheldShell(this, { onStart: () => this.togglePause() });
@@ -529,12 +604,6 @@ export class PlayScene extends Phaser.Scene {
       .setDepth(30)
       .setScrollFactor(0)
       .setVisible(false);
-
-    // Positioned for real every frame in updateAccessoryVisuals() once the
-    // player exists — (0, 0) here is just a harmless placeholder before
-    // enterArea's first build.
-    this.slipperAccessory = this.add.image(0, 0, "accessory-slippers").setDepth(6).setVisible(false);
-    this.hatAccessory = this.add.image(0, 0, "accessory-hat").setDepth(6).setVisible(false);
 
     this.banner = this.add
       .text(this.scale.width / 2, this.scale.height / 2 - 20, "", {
@@ -672,12 +741,75 @@ export class PlayScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * Builds one playable character and everything that belongs only to them.
+   *
+   * Called once per player, from `enterArea`'s first build. It is deliberately
+   * the *only* place a character comes into existence, so there is exactly one
+   * answer to "what does a player consist of" — the sprite, its bindings, its
+   * animation clock, its two accessory sprites. Before this, those four things
+   * were created in three different methods, which is precisely why adding a
+   * second of each looked harder than it is.
+   *
+   * The accessories used to be made in `create()`. They are made here now
+   * because they belong to a character rather than to the scene; the (0, 0)
+   * placeholder position they had is gone with it, since a player now exists
+   * by the time its accessories do. They keep `setDepth(6)` for the one frame
+   * before `updateAccessoryVisuals` takes over — see that method.
+   */
+  private makePlayer(index: number, x: number, y: number): CoopPlayer {
+    const sprite = this.physics.add.sprite(x, y, "wizard-idle");
+    sprite.setOrigin(0.5, 1);
+    applyWizardTexture(sprite, "wizard-idle");
+    sprite.setCollideWorldBounds(true);
+    return {
+      sprite,
+      input: createPlayerInput(this),
+      anim: createWizardAnimState(),
+      // White means "no tint at all" — see updateCharacterVisuals, which spells
+      // it `clearTint()` so player one is byte-for-byte the solo character.
+      baseTint: UNTINTED,
+      padIndex: index,
+      // The console has one D-pad, and two people cannot share a phone.
+      usesTouch: index === 0,
+      jumpWasDown: false,
+      attackWasDown: false,
+      castFlashUntil: 0,
+      slipper: this.add.image(x, y, "accessory-slippers").setDepth(6).setVisible(false),
+      hat: this.add.image(x, y, "accessory-hat").setDepth(6).setVisible(false),
+    };
+  }
+
+  /** Every character's sprite, for the colliders and overlaps that want to
+   * fire for any of them. Arcade Physics accepts an array as either side of a
+   * pair, so this stays one registration rather than one per player — and the
+   * handler is handed the sprite that actually touched, which is the argument
+   * `onGroundCollide` used to throw away. */
+  private playerSprites(): Phaser.Physics.Arcade.Sprite[] {
+    return this.players.map((p) => p.sprite);
+  }
+
+  /** The record behind a sprite an Arcade callback handed back. Undefined only
+   * if a stale collider fired for a character that no longer exists, which the
+   * callers treat as "nothing to do" rather than guessing at player one. */
+  private playerFor(sprite: Phaser.GameObjects.GameObject): CoopPlayer | undefined {
+    return this.players.find((p) => p.sprite === sprite);
+  }
+
+  /** Halfway between the characters — what the parallax background follows,
+   * instead of one particular player's x. With one player it is exactly that
+   * player's x, so nothing about a solo game moves. */
+  private playerFocusX(): number {
+    if (this.players.length === 0) return GRID_ORIGIN_X;
+    return this.players.reduce((sum, p) => sum + p.sprite.x, 0) / this.players.length;
+  }
+
   /** Tears down (if anything's currently built — a no-op the very first
    * call, from create() above) and rebuilds every area-scoped piece of
    * Play state for `key`: background, music, ground tilemap+collider,
    * player position, and every entity sprite/zone (goal/checkpoints/
    * baskets/enemies/items/chest/decor). What deliberately survives a call
-   * to this — `stats`/`player` itself/`checkpoint` — is exactly what makes
+   * to this — `stats`/the `players` themselves/`checkpoint` — is exactly what makes
    * a basket teleport read as walking through a door in the same level
    * rather than starting over; see currentAreaKey's docstring.
    *
@@ -830,22 +962,33 @@ export class PlayScene extends Phaser.Scene {
     this.physics.world.setBounds(areaLeftX, -100000, areaRightX - areaLeftX, 200000, true, true, false, false);
 
     if (this.areaBuilt) {
-      this.player.setPosition(spawnX, spawnY);
-      (this.player.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
-      // The per-frame pass in update() re-derives tint/angle authoritatively
-      // anyway, so this is belt-and-braces — but a reused player carrying a
-      // stale treatment into a freshly-built area for even one frame is
-      // exactly the kind of thing that only shows up as a flicker later.
-      this.player.clearTint();
-      this.player.setAngle(0);
+      // **Everyone travels.** A basket teleport rebuilds the tilemap and every
+      // collider, so a character left behind would be standing on a level that
+      // no longer exists — this is not a preference about how co-op should
+      // feel, it is the only coherent answer. They are spread along the row so
+      // two do not land inside each other.
+      this.players.forEach((player, index) => {
+        player.sprite.setPosition(spawnX + index * SPAWN_SPACING_X, spawnY);
+        (player.sprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+        // The per-frame pass in update() re-derives tint/angle authoritatively
+        // anyway, so this is belt-and-braces — but a reused player carrying a
+        // stale treatment into a freshly-built area for even one frame is
+        // exactly the kind of thing that only shows up as a flicker later.
+        if (player.baseTint === UNTINTED) player.sprite.clearTint();
+        else player.sprite.setTint(player.baseTint);
+        player.sprite.setAngle(0);
+      });
     } else {
-      this.player = this.physics.add.sprite(spawnX, spawnY, "wizard-idle");
-      this.player.setOrigin(0.5, 1);
-      applyWizardTexture(this.player, "wizard-idle");
-      this.player.setCollideWorldBounds(true);
+      this.players = [this.makePlayer(0, spawnX, spawnY)];
     }
-    this.groundCollider = this.physics.add.collider(this.player, this.groundLayer, (_player, tile) =>
-      this.onGroundCollide(tile as Phaser.Tilemaps.Tile),
+    // One collider per character, and the colliding sprite is *used* rather
+    // than discarded. It was `(_player, tile)` until 2026-09-22, reading the
+    // scene's one player instead — which with two of them would have meant
+    // player two landing on a bounce block and launching player one.
+    this.groundCollider = this.physics.add.collider(
+      this.playerSprites(),
+      this.groundLayer,
+      (sprite, tile) => this.onGroundCollide(sprite as Phaser.Physics.Arcade.Sprite, tile as Phaser.Tilemaps.Tile),
     );
 
     const goal = area.entities.find((e) => e.type === "goal");
@@ -865,7 +1008,7 @@ export class PlayScene extends Phaser.Scene {
       const goalZone = this.add.zone(goalX, goalY, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(goalZone, true);
       this.areaZones.push(goalZone);
-      this.areaColliders.push(this.physics.add.overlap(this.player, goalZone, () => this.onWin()));
+      this.areaColliders.push(this.physics.add.overlap(this.playerSprites(), goalZone, () => this.onWin()));
     }
 
     // Checkpoints have no per-level instance limit, unlike Spawn/Goal/Chest
@@ -892,7 +1035,9 @@ export class PlayScene extends Phaser.Scene {
       const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(zone, true);
       this.areaZones.push(zone);
-      this.areaColliders.push(this.physics.add.overlap(this.player, zone, () => this.activateCheckpoint(entity.x, entity.y, bell)));
+      this.areaColliders.push(
+        this.physics.add.overlap(this.playerSprites(), zone, () => this.activateCheckpoint(entity.x, entity.y, bell)),
+      );
     }
 
     // Baskets (see "Sub/Up areas" under Art) — two-way teleport triggers
@@ -923,7 +1068,7 @@ export class PlayScene extends Phaser.Scene {
         this.physics.add.existing(zone, true);
         this.areaZones.push(zone);
         this.areaColliders.push(
-          this.physics.add.overlap(this.player, zone, () => this.useBasket(basketType, { x: entity.x, y: entity.y })),
+          this.physics.add.overlap(this.playerSprites(), zone, () => this.useBasket(basketType, { x: entity.x, y: entity.y })),
         );
       }
     }
@@ -961,7 +1106,9 @@ export class PlayScene extends Phaser.Scene {
         const state = createGhostState(sprite, areaLeftX, areaRightX, def.speedScale);
         this.enemies.push({ sprite, state, stompable: def.stompable, type: def.type });
         this.areaColliders.push(
-          this.physics.add.overlap(this.player, sprite, () => this.onPlayerEnemyOverlap(sprite, def.stompable, def.type)),
+          this.physics.add.overlap(this.playerSprites(), sprite, (playerSprite) =>
+            this.onPlayerEnemyOverlap(playerSprite as Phaser.Physics.Arcade.Sprite, sprite, def.stompable, def.type),
+          ),
         );
       }
     }
@@ -983,7 +1130,7 @@ export class PlayScene extends Phaser.Scene {
         const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
         this.physics.add.existing(zone, true);
         this.areaZones.push(zone);
-        this.areaColliders.push(this.physics.add.overlap(this.player, zone, () => this.collectItem(type, icon, zone)));
+        this.areaColliders.push(this.physics.add.overlap(this.playerSprites(), zone, () => this.collectItem(type, icon, zone)));
       }
     }
 
@@ -996,7 +1143,9 @@ export class PlayScene extends Phaser.Scene {
       const chestZone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(chestZone, true);
       this.areaZones.push(chestZone);
-      this.areaColliders.push(this.physics.add.overlap(this.player, chestZone, () => this.tryOpenChest(chestSprite, chestZone)));
+      this.areaColliders.push(
+        this.physics.add.overlap(this.playerSprites(), chestZone, () => this.tryOpenChest(chestSprite, chestZone)),
+      );
     }
 
     // Decoration entities — plain static images, no physics body, no overlap:
@@ -1213,7 +1362,47 @@ export class PlayScene extends Phaser.Scene {
     if (!this.touchedLatchedBasket) this.latchedBasketTile = undefined;
     this.touchedLatchedBasket = false;
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    // Keeps the two shock buttons showing whether they can actually do
+    // anything — they are drawn either way so the diamond never changes
+    // shape, but a faded pair reads as "not yet" rather than as broken. The
+    // console has one set of buttons and player one holds it, so this is asked
+    // once for the scene rather than once per character.
+    this.touch.setAttackEnabled(this.stats.hasThunderHat);
+
+    for (const player of this.players) this.updatePlayerFrame(player, time, delta);
+
+    this.updateEnemyAnimation(delta);
+    // Halfway between the characters rather than one of them, so neither is the
+    // one the world is "really" about. Identical to the old `player.x` while
+    // there is only one — see playerFocusX.
+    this.background?.update(this.playerFocusX());
+
+    for (const enemy of this.enemies) {
+      updateGhostPatrol(enemy.sprite, enemy.state, time);
+    }
+    this.updateBolts();
+
+    for (const player of this.players) this.checkPlayerFooting(player);
+  }
+
+  /**
+   * One character's whole frame: read its input, resolve swimming and jumping,
+   * move it, and put it in the right pose.
+   *
+   * Every rule in here was already written to take the sprite as an argument —
+   * `updatePlayerMovement`, `updateWizardAnimation`, `resolveTint`. Only this
+   * scene's bookkeeping was singular, which is why lifting the body of
+   * `update()` into a method that takes a player is the entire change.
+   *
+   * The shared-pool consequences are real and deliberate: `resetDoubleJump`,
+   * `useDoubleJump` and the thunder-hat cooldown all live in the one `stats`,
+   * so one character landing re-arms the other's double jump. For a game two
+   * people play in the same room that reads as generous rather than wrong, and
+   * it is what keeps the HUD — and `collectItem`, and the chest — untouched.
+   */
+  private updatePlayerFrame(player: CoopPlayer, time: number, delta: number): void {
+    const sprite = player.sprite;
+    const body = sprite.body as Phaser.Physics.Arcade.Body;
     // A controller joins the on-screen buttons rather than replacing them, the
     // same way those already join the keyboard — so there is no input mode to
     // be in and nothing has to guess which device you meant. This one line is
@@ -1221,17 +1410,20 @@ export class PlayScene extends Phaser.Scene {
     // walking, jumping, swimming and the shock attack all come along. `mergePad`
     // returns a new object; writing into this one would leave an on-screen
     // button lit after the pad let go.
-    const touch = mergePad(this.touch.get(), currentPad());
-    const jumpDown = isJumpPressed(this.input$, touch);
-    const justPressedJump = jumpDown && !this.jumpWasDown;
-    this.jumpWasDown = jumpDown;
+    //
+    // Only player one reads the D-pad (see `usesTouch`): there is one cluster
+    // on the console and two people cannot share a phone.
+    const touch = mergePad(player.usesTouch ? this.touch.get() : NO_TOUCH, currentPad());
+    const jumpDown = isJumpPressed(player.input, touch);
+    const justPressedJump = jumpDown && !player.jumpWasDown;
+    player.jumpWasDown = jumpDown;
 
     // Submersion is checked at roughly waist height (half a tile above the
     // bottom-anchored player.y — see the sprite's setOrigin(0.5, 1) above)
     // rather than at the feet, so a player merely standing on a submerged
     // floor (body.blocked.down true) doesn't get floaty swim controls —
     // only genuinely swimming through open water does.
-    const waistTile = this.groundLayer.getTileAtWorldXY(this.player.x, this.player.y - TILE_SIZE / 2);
+    const waistTile = this.groundLayer.getTileAtWorldXY(sprite.x, sprite.y - TILE_SIZE / 2);
     const inWater = !!waistTile && WATER_FRAMES.has(waistTile.index);
     const swimming = inWater && !body.blocked.down;
 
@@ -1260,55 +1452,52 @@ export class PlayScene extends Phaser.Scene {
       playSfx(this, "jump");
     }
 
-    // Keeps the two shock buttons showing whether they can actually do
-    // anything — they are drawn either way so the diamond never changes
-    // shape, but a faded pair reads as "not yet" rather than as broken.
-    this.touch.setAttackEnabled(this.stats.hasThunderHat);
-    const attackDown = isAttackPressed(this.input$, touch);
-    const justPressedAttack = attackDown && !this.attackWasDown;
-    this.attackWasDown = attackDown;
+    const attackDown = isAttackPressed(player.input, touch);
+    const justPressedAttack = attackDown && !player.attackWasDown;
+    player.attackWasDown = attackDown;
     if (justPressedAttack && canFireThunderHat(this.stats, time)) {
-      this.fireThunderBolt(time);
+      this.fireThunderBolt(player, time);
     }
 
-    updatePlayerMovement(this.player, this.input$, touch, speedMultiplierAt(this.stats, time) * (swimming ? SWIM_SPEED_MULTIPLIER : 1));
+    updatePlayerMovement(sprite, player.input, touch, speedMultiplierAt(this.stats, time) * (swimming ? SWIM_SPEED_MULTIPLIER : 1));
     // The cast pose used to be re-applied here as a special case *after* the
     // animation had already picked a frame; it's now just one more situation
     // the resolver ranks (see characterState.resolveSituation), so swimming
     // and casting can't fight over the sprite the way an override tacked on
     // afterward could.
-    const situation = updateWizardAnimation(this.player, this.wizardAnim, delta, {
+    const situation = updateWizardAnimation(sprite, player.anim, delta, {
       outcome: this.outcome,
       swimming,
-      casting: time < this.castFlashUntil,
+      casting: time < player.castFlashUntil,
       frameKeys: this.characterFrameKeys,
     });
-    this.updateCharacterVisuals(situation, time);
-    this.updateAccessoryVisuals();
-    this.updateEnemyAnimation(delta);
-    this.background?.update(this.player.x);
+    this.updateCharacterVisuals(player, situation, time);
+    this.updateAccessoryVisuals(player);
+  }
 
-    for (const enemy of this.enemies) {
-      updateGhostPatrol(enemy.sprite, enemy.state, time);
-    }
-    this.updateBolts();
-
+  /** What the ground under one character does to them: lava, and the drop off
+   * the bottom of the area. Split out of the per-player pass above so it keeps
+   * its original place in the frame — after the bolts have moved, not before —
+   * since either branch can end the run. */
+  private checkPlayerFooting(player: CoopPlayer): void {
+    if (this.outcome !== "playing") return;
+    const sprite = player.sprite;
     // Lava is a hazard, not solid ground (see the collision exclusion in
     // create()) — standing in it costs a hit exactly like a bad enemy
     // touch, debounced the same way via registerHit's grace period so it
     // doesn't drain multiple hearts per frame of continued contact. Water
     // used to be included here too; it's swimmable now (see above) and
     // never damages the player.
-    const footTile = this.groundLayer.getTileAtWorldXY(this.player.x, this.player.y - 2);
+    const footTile = this.groundLayer.getTileAtWorldXY(sprite.x, sprite.y - 2);
     if (footTile && HAZARD_FRAMES.has(footTile.index)) {
-      this.takeHit();
+      this.takeHit(player);
     }
 
     // Falling off the level is unconditional instant-loss, unlike a bad
     // enemy/hazard touch — Hearts and Shield don't apply here, since
     // "bounce back and keep playing" doesn't fit falling the way it fits
     // an on-screen hit.
-    if (this.player.y > GRID_ORIGIN_Y + this.area().height * TILE_SIZE + 200) {
+    if (sprite.y > GRID_ORIGIN_Y + this.area().height * TILE_SIZE + 200) {
       this.onLose();
     }
   }
@@ -1319,28 +1508,31 @@ export class PlayScene extends Phaser.Scene {
    * adds the extra launch-upward effect on top of it. `body.blocked.down`
    * restricts it to landing on the pad's top face, so bumping one from the
    * side doesn't launch the player. */
-  private onGroundCollide(tile: Phaser.Tilemaps.Tile): void {
+  private onGroundCollide(sprite: Phaser.Physics.Arcade.Sprite, tile: Phaser.Tilemaps.Tile): void {
     if (!BOUNCE_FRAMES.has(tile.index)) return;
-    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    const body = sprite.body as Phaser.Physics.Arcade.Body;
     if (!body.blocked.down) return;
     body.setVelocityY(BOUNCE_VELOCITY_Y);
   }
 
   private onPlayerEnemyOverlap(
+    playerSprite: Phaser.Physics.Arcade.Sprite,
     enemySprite: Phaser.Physics.Arcade.Sprite,
     stompable: boolean,
     type: PlaceableType,
   ): void {
     if (this.outcome !== "playing") return;
-    if (stompable && isStompFromAbove(this.player, enemySprite)) {
+    const player = this.playerFor(playerSprite);
+    if (!player) return;
+    if (stompable && isStompFromAbove(playerSprite, enemySprite)) {
       this.enemies = this.enemies.filter((e) => e.sprite !== enemySprite);
       enemySprite.destroy();
       // An invented enemy's own noise replaces the built-in one, exactly as it
       // does for a collected item — same rule, same one-line shape.
       if (!this.playThingSound(type)) playSfx(this, "stomp");
-      applyStompBounce(this.player);
+      applyStompBounce(playerSprite);
     } else {
-      this.takeHit();
+      this.takeHit(player);
     }
   }
 
@@ -1349,15 +1541,15 @@ export class PlayScene extends Phaser.Scene {
    * starts its cooldown, and briefly flashes the "wizard-cast" pose (see
    * CAST_FLASH_MS). The bolt itself is tracked in `bolts` and driven by
    * updateBolts() every frame from here on. */
-  private fireThunderBolt(time: number): void {
+  private fireThunderBolt(player: CoopPlayer, time: number): void {
     fireThunderHat(this.stats, time);
-    const direction: 1 | -1 = this.player.flipX ? -1 : 1;
-    const x = this.player.x + direction * BOLT_LAUNCH_OFFSET_X;
-    const y = this.player.y - BOLT_LAUNCH_OFFSET_Y;
+    const direction: 1 | -1 = player.sprite.flipX ? -1 : 1;
+    const x = player.sprite.x + direction * BOLT_LAUNCH_OFFSET_X;
+    const y = player.sprite.y - BOLT_LAUNCH_OFFSET_Y;
     const bolt = createBolt(this, x, y, direction, "bolt-projectile");
     bolt.setDepth(6);
     this.bolts.push(bolt);
-    this.castFlashUntil = time + CAST_FLASH_MS;
+    player.castFlashUntil = time + CAST_FLASH_MS;
   }
 
   /** Advances every live bolt one frame and resolves its fate: expired
@@ -1479,7 +1671,13 @@ export class PlayScene extends Phaser.Scene {
     // Coins and Keys are collectibles, not power-ups — they change the HUD,
     // not what the character can do, so they don't get the celebratory pose.
     if (effective !== "item-coin" && effective !== "item-key") {
-      this.castFlashUntil = Math.max(this.castFlashUntil, now + POWERUP_FLASH_MS);
+      // Everyone cheers, because everyone got it: the power-up went into the
+      // one shared `stats`, so the arms-up pose belongs to the team rather than
+      // to whichever character happened to walk into the sprite. With one
+      // player this is the same single flash it always was.
+      for (const player of this.players) {
+        player.castFlashUntil = Math.max(player.castFlashUntil, now + POWERUP_FLASH_MS);
+      }
     }
     icon.destroy();
     zone.destroy();
@@ -1556,7 +1754,7 @@ export class PlayScene extends Phaser.Scene {
    * Called every frame while playing, and once directly from onWin/onLose —
    * update() early-returns once the run is over, so a terminal pose has to
    * be applied at the moment the outcome changes or it never lands. */
-  private updateCharacterVisuals(situation: CharacterSituation, now: number): void {
+  private updateCharacterVisuals(player: CoopPlayer, situation: CharacterSituation, now: number): void {
     const reason = resolveTint({
       situation,
       hurtFlash: isHurtFlashing(this.stats, now),
@@ -1564,12 +1762,25 @@ export class PlayScene extends Phaser.Scene {
       speedBoosted: speedMultiplierAt(this.stats, now) > 1,
     });
     const color = TINT_COLORS[reason];
-    if (color === null) this.player.clearTint();
-    else this.player.setTint(color);
+    // With no buff showing, the character wears its own colour — the one line
+    // that lets player two be told apart without fighting the hurt flash and the
+    // shield glow for the sprite every frame. A buff still wins, which is right:
+    // for those few seconds the shield matters more than who is who.
+    //
+    // White is spelled `clearTint()` rather than `setTint(0xffffff)` even though
+    // the two render identically. They are not identical to ask about: a
+    // white-tinted sprite reports `isTinted === true`, which is a real
+    // difference to anything inspecting the sprite, and it puts the sprite on
+    // the tinted render path for no gain. So player one — whose base is white —
+    // comes out of this byte-for-byte as it was before there was a second
+    // player at all.
+    if (color !== null) player.sprite.setTint(color);
+    else if (player.baseTint === UNTINTED) player.sprite.clearTint();
+    else player.sprite.setTint(player.baseTint);
     // Arcade Physics bodies stay axis-aligned regardless of the sprite's
     // angle, so this is provably cosmetic — it cannot move the hitbox the
     // 2026-08-19 gravity retune verified every template against.
-    this.player.setAngle(angleFor(situation, this.player.flipX));
+    player.sprite.setAngle(angleFor(situation, player.sprite.flipX));
   }
 
   /** Freezes the character into a win/lose pose at the moment the run ends.
@@ -1578,35 +1789,46 @@ export class PlayScene extends Phaser.Scene {
    * and because the walk timer must be reset too, or a character caught
    * mid-stride would resume on the wrong foot after Restart. */
   private applyTerminalPose(situation: "win" | "lose"): void {
-    this.wizardAnim = createWizardAnimState();
-    applyWizardTexture(this.player, frameFor(situation, 0));
-    this.updateCharacterVisuals(situation, this.time.now);
+    for (const player of this.players) {
+      player.anim = createWizardAnimState();
+      applyWizardTexture(player.sprite, frameFor(situation, 0));
+      this.updateCharacterVisuals(player, situation, this.time.now);
+    }
   }
 
-  /** Keeps the Chicken Slipper/PJ Thunder Hat accessory sprites glued to
-   * the player, visible only once the matching PlayerStats flag is set —
-   * see slipperAccessory/hatAccessory's own field docstring. Player origin
-   * is (0.5, 1) (bottom-anchored — see wizardAnimation.ts), so player.y is
-   * already the feet position for the slippers; the hat subtracts
-   * FRAME_HEIGHT to land near the top of the sprite's frame instead. */
-  private updateAccessoryVisuals(): void {
-    this.slipperAccessory.setVisible(this.stats.hasDoubleJump);
+  /** Keeps one character's Chicken Slipper/PJ Thunder Hat accessory sprites
+   * glued to them, visible only once the matching PlayerStats flag is set.
+   * They are the character's own (see CoopPlayer) rather than the scene's, so
+   * two players each carry their own pair rather than sharing one that can
+   * only be in one place — and they follow their character across a basket
+   * teleport, exactly as the buff tint does.
+   *
+   * Sprite origin is (0.5, 1) (bottom-anchored — see wizardAnimation.ts), so
+   * sprite.y is already the feet position for the slippers; the hat subtracts
+   * FRAME_HEIGHT to land near the top of the sprite's frame instead.
+   *
+   * Visibility reads the *shared* stats, which is the deliberate consequence of
+   * one pool: a Chicken Slipper picked up by either character puts slippers on
+   * both. */
+  private updateAccessoryVisuals(player: CoopPlayer): void {
+    const sprite = player.sprite;
+    player.slipper.setVisible(this.stats.hasDoubleJump);
     if (this.stats.hasDoubleJump) {
-      this.slipperAccessory.setPosition(this.player.x, this.player.y - 2).setFlipX(this.player.flipX).setDepth(this.player.depth + 1);
+      player.slipper.setPosition(sprite.x, sprite.y - 2).setFlipX(sprite.flipX).setDepth(sprite.depth + 1);
     }
-    this.hatAccessory.setVisible(this.stats.hasThunderHat);
+    player.hat.setVisible(this.stats.hasThunderHat);
     if (this.stats.hasThunderHat) {
-      this.hatAccessory
-        .setPosition(this.player.x, this.player.y - FRAME_HEIGHT + 6)
-        .setFlipX(this.player.flipX)
-        .setDepth(this.player.depth + 1);
+      player.hat
+        .setPosition(sprite.x, sprite.y - FRAME_HEIGHT + 6)
+        .setFlipX(sprite.flipX)
+        .setDepth(sprite.depth + 1);
     }
   }
 
   /** The single entry point for "player touched something bad" outside of
    * the unconditional fall-off-bottom check — see registerHit's docstring
    * for the invincible/absorbed/fatal decision. */
-  private takeHit(): void {
+  private takeHit(player: CoopPlayer): void {
     const result = registerHit(this.stats, this.time.now);
     // Not on every result: "invincible" is what this returns for each physics
     // frame of a hit the i-frames are already absorbing, so playing there would
@@ -1616,7 +1838,7 @@ export class PlayScene extends Phaser.Scene {
       this.onLose();
     } else if (result === "absorbed") {
       playSfx(this, "hurt");
-      applyStompBounce(this.player);
+      applyStompBounce(player.sprite);
       this.updateHud();
     }
   }
@@ -1630,7 +1852,7 @@ export class PlayScene extends Phaser.Scene {
     // anyone who plays a world straight through. recordCompletion is
     // monotonic, so the map re-reporting the same win is harmless.
     if (this.world?.worldId) recordCompletion(this.world.worldId, this.world.index);
-    this.player.setVelocity(0, 0);
+    for (const player of this.players) player.sprite.setVelocity(0, 0);
     this.applyTerminalPose("win");
     this.physics.pause();
     this.trophy.setVisible(true);
@@ -1677,7 +1899,7 @@ export class PlayScene extends Phaser.Scene {
   private onLose(): void {
     if (this.outcome !== "playing") return;
     this.outcome = "lost";
-    this.player.setVelocity(0, 0);
+    for (const player of this.players) player.sprite.setVelocity(0, 0);
     this.applyTerminalPose("lose");
     this.physics.pause();
     this.banner.setText("You Lose").setVisible(true);
