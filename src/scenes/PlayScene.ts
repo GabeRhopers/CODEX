@@ -352,6 +352,32 @@ export class PlayScene extends Phaser.Scene {
   private coopHint!: Phaser.GameObjects.Text;
 
   /**
+   * Player one's key bindings, built in `create()` and handed to `makePlayer`.
+   *
+   * **Built synchronously, and that is not tidiness — it is the fix for a real
+   * bug.** `create()` does not build the area itself; it waits on the ground
+   * tilesets and builds it in a callback (see the `composeGroundTilesets` call
+   * there). So a player created during that build gets its `Phaser.Input.
+   * Keyboard.Key` objects created *after* the scene is already on screen and
+   * already receiving events — and a Key learns a button is held only from a
+   * keydown *event*, never by asking the keyboard. A key that was already down
+   * when the Key was created therefore reads as up until it is released and
+   * pressed again.
+   *
+   * In plain terms: hold right while a level loads, and the character just
+   * stands there. It cost two `game-maker.spec.ts` tests, which press the
+   * moment the scene goes active — and it was invisible from Test Play, where
+   * the tilesets are already warm and the area is built before a test can
+   * press anything.
+   *
+   * Player two's bindings are made on joining, which is fine: joining is itself
+   * a keypress, so the scene is long since live, and A/D/W already exist as
+   * Key objects from this one (Phaser returns the same Key for a keycode it
+   * already tracks).
+   */
+  private soloInput!: PlayerInputKeys;
+
+  /**
    * Player one's sprite, **for the e2e specs and nothing else.**
    *
    * Eight spec files reach into the live scene through this name to ask where
@@ -621,10 +647,12 @@ export class PlayScene extends Phaser.Scene {
       this.music?.destroy();
     });
 
-    // Before anything that might build the area: `enterArea` registers every
-    // collider against this, and it is created here rather than in a field
-    // initialiser because Phaser reuses the scene instance across a Restart.
+    // Both before anything that might build the area. The group is here rather
+    // than in a field initialiser because Phaser reuses the scene instance
+    // across a Restart; the bindings are here because a Key created later
+    // cannot see a button that is already held — see soloInput.
     this.playerGroup = this.add.group();
+    this.soloInput = createPlayerInput(this);
 
     // Body first, controls second: the shell is pure decoration in the bands
     // beside the level, and the controls sit on top of it.
@@ -817,7 +845,7 @@ export class PlayScene extends Phaser.Scene {
    * by the time its accessories do. They keep `setDepth(6)` for the one frame
    * before `updateAccessoryVisuals` takes over — see that method.
    */
-  private makePlayer(index: number, x: number, y: number): CoopPlayer {
+  private makePlayer(index: number, x: number, y: number, input: PlayerInputKeys): CoopPlayer {
     const sprite = this.physics.add.sprite(x, y, "wizard-idle");
     sprite.setOrigin(0.5, 1);
     applyWizardTexture(sprite, "wizard-idle");
@@ -825,7 +853,9 @@ export class PlayScene extends Phaser.Scene {
     this.playerGroup.add(sprite);
     return {
       sprite,
-      input: createPlayerInput(this),
+      // Handed in rather than made here, because when this runs is not when the
+      // keyboard can first be typed at — see soloInput.
+      input,
       anim: createWizardAnimState(),
       // White means "no tint at all" — see updateCharacterVisuals, which spells
       // it `clearTint()` so player one is byte-for-byte the solo character.
@@ -1033,7 +1063,7 @@ export class PlayScene extends Phaser.Scene {
         player.sprite.setAngle(0);
       });
     } else {
-      this.players = [this.makePlayer(0, spawnX, spawnY)];
+      this.players = [this.makePlayer(0, spawnX, spawnY, this.soloInput)];
     }
     // One collider per character, and the colliding sprite is *used* rather
     // than discarded. It was `(_player, tile)` until 2026-09-22, reading the
@@ -1681,8 +1711,7 @@ export class PlayScene extends Phaser.Scene {
     one.input = createPlayerInput(this, "arrows");
 
     const spot = this.respawnPoint();
-    const two = this.makePlayer(1, spot.x + SPAWN_SPACING_X, spot.y);
-    two.input = createPlayerInput(this, "wasd");
+    const two = this.makePlayer(1, spot.x + SPAWN_SPACING_X, spot.y, createPlayerInput(this, "wasd"));
     two.baseTint = PLAYER_TWO_TINT;
     two.sprite.setTint(PLAYER_TWO_TINT);
     // No texture work here: makePlayer starts them on `wizard-idle`, and the
