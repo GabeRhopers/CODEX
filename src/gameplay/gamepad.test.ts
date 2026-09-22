@@ -58,6 +58,43 @@ describe("readPad", () => {
     expect(readPad([null, holding(15)]).right).toBe(true);
   });
 
+  describe("a second pad, for a second player", () => {
+    it("hands player two the second pad that exists", () => {
+      const [one, two] = [holding(14), holding(15)];
+      expect(readPad([one, two], 0).left, "player one gets the first").toBe(true);
+      expect(readPad([one, two], 1).right, "player two gets the second").toBe(true);
+    });
+
+    it("counts pads rather than slots, so an empty slot does not shuffle anybody", () => {
+      // **The reason this counts instead of indexing.** The browser never
+      // compacts its list: unplug the pad in slot 0 and the one in slot 1 stays
+      // in slot 1, with a null left in front of it. Indexing the raw list would
+      // give player one nothing and player two the only pad there is — so the
+      // person still holding a controller would find it had stopped working.
+      const only = holding(15);
+      expect(readPad([null, only], 0).right, "the one real pad is player one's").toBe(true);
+      expect(readPad([null, only], 1), "and there is no second player's pad").toEqual(NO_PAD);
+    });
+
+    it("skips a pad that lingers after being unplugged", () => {
+      // Same argument, with the other way a slot goes dead: a disconnected
+      // entry still occupies its slot, so it must not be counted either.
+      const stale = pad({ connected: false });
+      const live = holding(14);
+      expect(readPad([stale, live], 0).left).toBe(true);
+      expect(readPad([stale, live], 1)).toEqual(NO_PAD);
+    });
+
+    it("is silent when the second player has no pad, which is nearly always", () => {
+      expect(readPad([holding(15)], 1)).toEqual(NO_PAD);
+      expect(readPad([], 1)).toEqual(NO_PAD);
+    });
+
+    it("defaults to the first pad, so every existing caller is unchanged", () => {
+      expect(readPad([holding(15)])).toEqual(readPad([holding(15)], 0));
+    });
+  });
+
   it("reads the d-pad", () => {
     expect(readPad([holding(14)]).left).toBe(true);
     expect(readPad([holding(15)]).right).toBe(true);

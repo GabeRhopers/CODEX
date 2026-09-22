@@ -142,6 +142,22 @@ const NO_TOUCH: TouchControlState = Object.freeze({ left: false, right: false, j
 // rather than a white tint, so the solo character is untouched by co-op.
 const UNTINTED = 0xffffff;
 
+// Player two wears the same character in a different colour — no second skin,
+// no second Skin Creator entry, no second cast in the cut scenes. Warm orange
+// because it has to survive being read against four very different backgrounds
+// and against the two buff tints it takes turns with: it is nowhere near the
+// Shield's cyan or the hurt flash's red, so "which one am I" and "what just
+// happened to me" never look like the same signal.
+const PLAYER_TWO_TINT = 0xffa24a;
+
+// How long a fallen character stays out before popping back.
+//
+// The run only ends when *everybody* is down at once, so this is also the
+// window the other player has to survive alone. Long enough to feel like a
+// consequence and to get clear of whatever did it; short enough that the
+// person holding the other half of the keyboard is not sitting and watching.
+const RESPAWN_DELAY_MS = 1500;
+
 // PJ Thunder Hat's shock — see Bolt.ts for the projectile itself.
 // Launch position is roughly the wizard's chest/hand height, offset ahead
 // of the player in whichever direction they're facing (player.flipX).
@@ -270,6 +286,19 @@ interface CoopPlayer {
    * belongs to whoever pulled the trigger — the *cooldown* behind it lives in
    * the shared `stats` and is deliberately team-wide, like every other buff. */
   castFlashUntil: number;
+  /**
+   * 0 while playing; otherwise the time this character pops back.
+   *
+   * A fallen player is hidden with its body disabled rather than destroyed, so
+   * every collider that already names it keeps working and there is nothing to
+   * re-register when it returns.
+   *
+   * **This is the field that keeps solo play identical.** "Everybody is down"
+   * is true the instant the only player falls, so `onLose` still fires exactly
+   * where it always did — for a fatal hit and for falling off the level alike.
+   * The delay only ever means anything once there is somebody left standing.
+   */
+  downUntil: number;
   /** Accessory sprites follow their own character across a basket teleport,
    * the same way the buff tint does. */
   slipper: Phaser.GameObjects.Image;
@@ -299,6 +328,28 @@ export class PlayScene extends Phaser.Scene {
    * `onGroundCollide` had.
    */
   private players: CoopPlayer[] = [];
+
+  /**
+   * The same sprites as a Phaser Group, and **the reason joining mid-level
+   * costs nothing.**
+   *
+   * Every collider and overlap in the level is registered against this group
+   * once, when the area is built. Arcade Physics resolves a group to its live
+   * children on every step rather than at registration, so a character added to
+   * it afterwards is immediately collided and overlapped by the ground, the
+   * goal, the enemies, the baskets and the chest — with no collider to tear
+   * down and rebuild, and no risk of rebuilding them slightly differently than
+   * `enterArea` did.
+   *
+   * It is also what makes a *fallen* player free: disabling its body takes it
+   * out of every check at once, and re-enabling puts it back.
+   */
+  private playerGroup!: Phaser.GameObjects.Group;
+
+  /** The one line on screen that says a second person can join, and what they
+   * press once they have. Nobody presses Enter at a screen that never mentions
+   * Enter — see makeCoopHint. */
+  private coopHint!: Phaser.GameObjects.Text;
 
   /**
    * Player one's sprite, **for the e2e specs and nothing else.**
@@ -570,10 +621,16 @@ export class PlayScene extends Phaser.Scene {
       this.music?.destroy();
     });
 
+    // Before anything that might build the area: `enterArea` registers every
+    // collider against this, and it is created here rather than in a field
+    // initialiser because Phaser reuses the scene instance across a Restart.
+    this.playerGroup = this.add.group();
+
     // Body first, controls second: the shell is pure decoration in the bands
     // beside the level, and the controls sit on top of it.
     new HandheldShell(this, { onStart: () => this.togglePause() });
     this.touch = new TouchControls(this);
+    this.makeCoopHint();
 
     this.hud = this.add
       .text(this.scale.width - 12, 8, "", {
@@ -671,6 +728,9 @@ export class PlayScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown-ESC", () => this.backToEditor());
     this.input.keyboard?.on("keydown-R", () => this.restart());
     this.input.keyboard?.on("keydown-N", () => void this.nextLevel());
+    // A second person picks up the other half of the keyboard. Mid-level, with
+    // no screen to visit and nothing saved — see addPlayer.
+    this.input.keyboard?.on("keydown-ENTER", () => this.addPlayer());
 
     // The same four actions on a controller. Moving and jumping are not here —
     // those ride along with the on-screen controls via `mergePad` in update(),
@@ -762,6 +822,7 @@ export class PlayScene extends Phaser.Scene {
     sprite.setOrigin(0.5, 1);
     applyWizardTexture(sprite, "wizard-idle");
     sprite.setCollideWorldBounds(true);
+    this.playerGroup.add(sprite);
     return {
       sprite,
       input: createPlayerInput(this),
@@ -775,19 +836,12 @@ export class PlayScene extends Phaser.Scene {
       jumpWasDown: false,
       attackWasDown: false,
       castFlashUntil: 0,
+      downUntil: 0,
       slipper: this.add.image(x, y, "accessory-slippers").setDepth(6).setVisible(false),
       hat: this.add.image(x, y, "accessory-hat").setDepth(6).setVisible(false),
     };
   }
 
-  /** Every character's sprite, for the colliders and overlaps that want to
-   * fire for any of them. Arcade Physics accepts an array as either side of a
-   * pair, so this stays one registration rather than one per player — and the
-   * handler is handed the sprite that actually touched, which is the argument
-   * `onGroundCollide` used to throw away. */
-  private playerSprites(): Phaser.Physics.Arcade.Sprite[] {
-    return this.players.map((p) => p.sprite);
-  }
 
   /** The record behind a sprite an Arcade callback handed back. Undefined only
    * if a stale collider fired for a character that no longer exists, which the
@@ -986,7 +1040,7 @@ export class PlayScene extends Phaser.Scene {
     // scene's one player instead — which with two of them would have meant
     // player two landing on a bounce block and launching player one.
     this.groundCollider = this.physics.add.collider(
-      this.playerSprites(),
+      this.playerGroup,
       this.groundLayer,
       (sprite, tile) => this.onGroundCollide(sprite as Phaser.Physics.Arcade.Sprite, tile as Phaser.Tilemaps.Tile),
     );
@@ -1008,7 +1062,7 @@ export class PlayScene extends Phaser.Scene {
       const goalZone = this.add.zone(goalX, goalY, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(goalZone, true);
       this.areaZones.push(goalZone);
-      this.areaColliders.push(this.physics.add.overlap(this.playerSprites(), goalZone, () => this.onWin()));
+      this.areaColliders.push(this.physics.add.overlap(this.playerGroup, goalZone, () => this.onWin()));
     }
 
     // Checkpoints have no per-level instance limit, unlike Spawn/Goal/Chest
@@ -1036,7 +1090,7 @@ export class PlayScene extends Phaser.Scene {
       this.physics.add.existing(zone, true);
       this.areaZones.push(zone);
       this.areaColliders.push(
-        this.physics.add.overlap(this.playerSprites(), zone, () => this.activateCheckpoint(entity.x, entity.y, bell)),
+        this.physics.add.overlap(this.playerGroup, zone, () => this.activateCheckpoint(entity.x, entity.y, bell)),
       );
     }
 
@@ -1068,7 +1122,7 @@ export class PlayScene extends Phaser.Scene {
         this.physics.add.existing(zone, true);
         this.areaZones.push(zone);
         this.areaColliders.push(
-          this.physics.add.overlap(this.playerSprites(), zone, () => this.useBasket(basketType, { x: entity.x, y: entity.y })),
+          this.physics.add.overlap(this.playerGroup, zone, () => this.useBasket(basketType, { x: entity.x, y: entity.y })),
         );
       }
     }
@@ -1106,7 +1160,7 @@ export class PlayScene extends Phaser.Scene {
         const state = createGhostState(sprite, areaLeftX, areaRightX, def.speedScale);
         this.enemies.push({ sprite, state, stompable: def.stompable, type: def.type });
         this.areaColliders.push(
-          this.physics.add.overlap(this.playerSprites(), sprite, (playerSprite) =>
+          this.physics.add.overlap(this.playerGroup, sprite, (playerSprite) =>
             this.onPlayerEnemyOverlap(playerSprite as Phaser.Physics.Arcade.Sprite, sprite, def.stompable, def.type),
           ),
         );
@@ -1130,7 +1184,7 @@ export class PlayScene extends Phaser.Scene {
         const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
         this.physics.add.existing(zone, true);
         this.areaZones.push(zone);
-        this.areaColliders.push(this.physics.add.overlap(this.playerSprites(), zone, () => this.collectItem(type, icon, zone)));
+        this.areaColliders.push(this.physics.add.overlap(this.playerGroup, zone, () => this.collectItem(type, icon, zone)));
       }
     }
 
@@ -1144,7 +1198,7 @@ export class PlayScene extends Phaser.Scene {
       this.physics.add.existing(chestZone, true);
       this.areaZones.push(chestZone);
       this.areaColliders.push(
-        this.physics.add.overlap(this.playerSprites(), chestZone, () => this.tryOpenChest(chestSprite, chestZone)),
+        this.physics.add.overlap(this.playerGroup, chestZone, () => this.tryOpenChest(chestSprite, chestZone)),
       );
     }
 
@@ -1325,6 +1379,34 @@ export class PlayScene extends Phaser.Scene {
     return "the editor";
   }
 
+  /**
+   * The invitation, and then the reminder.
+   *
+   * A feature nobody can find is not a feature. This sits in the empty stretch
+   * of the left band between the back button and the D-pad — the one part of
+   * the console with room for a line of text — wearing the shell's own muted
+   * wordmark styling so it reads as moulded into the plastic rather than as a
+   * notification.
+   *
+   * It has two jobs in sequence: before anyone joins it says how, and after
+   * somebody has it stops asking and starts answering the next question, which
+   * is "wait, which keys are mine?". The toast that fires on joining scrolls
+   * away after a couple of seconds; this does not.
+   */
+  private makeCoopHint(): void {
+    this.coopHint = this.add
+      .text(LEFT_BAND.x + LEFT_BAND.width / 2, 58, "PRESS ENTER\nFOR PLAYER 2", {
+        fontSize: "10px",
+        color: "#5a5f85",
+        fontStyle: "bold",
+        align: "center",
+        lineSpacing: 3,
+      })
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(30);
+  }
+
   private makeOverlayButton(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
     const text = this.add
       .text(x, y, label, {
@@ -1369,7 +1451,18 @@ export class PlayScene extends Phaser.Scene {
     // once for the scene rather than once per character.
     this.touch.setAttackEnabled(this.stats.hasThunderHat);
 
-    for (const player of this.players) this.updatePlayerFrame(player, time, delta);
+    // Before anybody moves: whoever's time is up comes back. Doing it here
+    // rather than inside the loop means a character revived this frame gets a
+    // full frame of input like everyone else.
+    this.revivePlayers(time);
+
+    for (const player of this.players) {
+      // A downed character has no body to move and no pose to strike — and
+      // without this, updateAccessoryVisuals would helpfully put the slippers
+      // and hat back on somebody who is not on screen.
+      if (player.downUntil > 0) continue;
+      this.updatePlayerFrame(player, time, delta);
+    }
 
     this.updateEnemyAnimation(delta);
     // Halfway between the characters rather than one of them, so neither is the
@@ -1382,7 +1475,10 @@ export class PlayScene extends Phaser.Scene {
     }
     this.updateBolts();
 
-    for (const player of this.players) this.checkPlayerFooting(player);
+    for (const player of this.players) {
+      if (player.downUntil > 0) continue;
+      this.checkPlayerFooting(player);
+    }
   }
 
   /**
@@ -1498,8 +1594,106 @@ export class PlayScene extends Phaser.Scene {
     // "bounce back and keep playing" doesn't fit falling the way it fits
     // an on-screen hit.
     if (sprite.y > GRID_ORIGIN_Y + this.area().height * TILE_SIZE + 200) {
-      this.onLose();
+      this.knockOut(player);
     }
+  }
+
+  /**
+   * One character goes down — and the run ends only if that was the last one
+   * standing.
+   *
+   * **With one player this is `onLose()` and nothing else**, on the very same
+   * frame, which is what keeps every existing spec honest: `every` over a
+   * one-element array is true the moment that element is down. The hiding, the
+   * timer and the respawn below are unreachable in a solo game.
+   *
+   * The sprite is hidden and its body disabled rather than destroyed, so every
+   * collider that already names it survives the trip — see `playerGroup`.
+   */
+  private knockOut(player: CoopPlayer): void {
+    if (this.outcome !== "playing" || player.downUntil > 0) return;
+    player.downUntil = this.time.now + RESPAWN_DELAY_MS;
+
+    if (this.players.every((p) => p.downUntil > 0)) {
+      this.onLose();
+      return;
+    }
+
+    player.sprite.setVisible(false);
+    (player.sprite.body as Phaser.Physics.Arcade.Body).enable = false;
+    player.slipper.setVisible(false);
+    player.hat.setVisible(false);
+    this.showToast(`Player ${this.players.indexOf(player) + 1} is down — hang on!`, WARNING_TOAST_COLOR);
+  }
+
+  /** Puts a fallen character back on their feet once their time is up, at
+   * wherever this area says a player starts — the checkpoint if one has been
+   * touched here, otherwise the Spawn marker. They arrive with the shared
+   * invincibility already running (see registerHit), so they are not knocked
+   * straight back down by whatever they landed in. */
+  private revivePlayers(now: number): void {
+    for (const player of this.players) {
+      if (player.downUntil === 0 || now < player.downUntil) continue;
+      player.downUntil = 0;
+      const { x, y } = this.respawnPoint();
+      player.sprite.setPosition(x, y);
+      player.sprite.setVisible(true);
+      const body = player.sprite.body as Phaser.Physics.Arcade.Body;
+      body.enable = true;
+      body.setVelocity(0, 0);
+      player.anim = createWizardAnimState();
+    }
+  }
+
+  /** Where a character starts in the area they are currently in: the
+   * checkpoint they have touched *here* if there is one, else this area's Spawn
+   * marker, else the top-left fallback. The same resolution `enterArea` does
+   * for a fresh entry, kept in one place so a respawn cannot drift from it. */
+  private respawnPoint(): { x: number; y: number } {
+    const area = this.area();
+    const here = this.checkpoint?.area === this.currentAreaKey ? this.checkpoint : undefined;
+    const tile = here ?? area.entities.find((e) => e.type === "player-spawn");
+    return {
+      x: tile ? GRID_ORIGIN_X + tile.x * TILE_SIZE + TILE_SIZE / 2 : GRID_ORIGIN_X + TILE_SIZE,
+      // Bottom-anchored, like enterArea's own spawnY: the feet land on top of
+      // the ground tile one row below.
+      y: GRID_ORIGIN_Y + (tile ? (tile.y + 1) * TILE_SIZE : TILE_SIZE),
+    };
+  }
+
+  /**
+   * A second person picks up the other half of the keyboard.
+   *
+   * No screen, no menu, nothing persisted: press Enter mid-level and a second
+   * character drops in beside the first. Player one's bindings narrow to the
+   * arrows at that moment and not before — a solo game keeps arrows *and* WASD
+   * exactly as it always has, so nobody loses a key to a feature they never
+   * asked for.
+   *
+   * The new character is simply added to `playerGroup`, which is all it takes
+   * for every collider in the level to start including them — see that field.
+   */
+  private addPlayer(): void {
+    if (this.outcome !== "playing" || !this.areaBuilt) return;
+    if (this.players.length >= 2) return;
+
+    const one = this.players[0];
+    one.input = createPlayerInput(this, "arrows");
+
+    const spot = this.respawnPoint();
+    const two = this.makePlayer(1, spot.x + SPAWN_SPACING_X, spot.y);
+    two.input = createPlayerInput(this, "wasd");
+    two.baseTint = PLAYER_TWO_TINT;
+    two.sprite.setTint(PLAYER_TWO_TINT);
+    // No texture work here: makePlayer starts them on `wizard-idle`, and the
+    // very next frame's updateWizardAnimation resolves this level's painted
+    // character skin for them exactly as it does for player one. Both wear the
+    // one CHARACTER_SKIN_ID skin, which is what keeps the Skin Creator and the
+    // cut-scene cast out of co-op entirely.
+    this.players.push(two);
+
+    this.coopHint.setText("P1  ARROWS + X\nP2  WASD + Q");
+    this.showToast("Player 2 joined! WASD to move, Q to zap");
   }
 
   /** Bounce blocks are just another ground-layer tile (see groundAutotile's
@@ -1835,7 +2029,7 @@ export class PlayScene extends Phaser.Scene {
     // turn one bump into a burst of noise.
     if (result === "fatal") {
       playSfx(this, "hurt");
-      this.onLose();
+      this.knockOut(player);
     } else if (result === "absorbed") {
       playSfx(this, "hurt");
       applyStompBounce(player.sprite);

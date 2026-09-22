@@ -117,19 +117,30 @@ function pressed(pad: Gamepad, index: number): boolean {
 }
 
 /**
- * The first pad that is actually there.
+ * The nth pad that is actually there, counting only the real ones.
  *
  * `navigator.getGamepads()` returns a sparse, fixed-length list — usually four
  * slots, mostly `null`, and a pad that was unplugged can linger with
  * `connected: false`. Both have to be skipped or every read throws or lies.
  *
- * First-connected wins rather than merging every pad: this is a one-player
- * game, and two pads fighting over one wizard is a worse answer than the second
- * one doing nothing.
+ * **Counting connected pads rather than indexing the raw list is the whole
+ * point.** A browser does not compact that list: unplug the pad in slot 0 and
+ * the pad in slot 1 stays in slot 1, with a `null` or a stale `connected:
+ * false` entry above it. Indexing it directly would hand player two a pad
+ * whose slot number depends on what was plugged in earlier in the session, and
+ * would give player one nothing at all while a dead entry sat in front of it.
+ * Here, "player two" means "the second pad that exists", which is what someone
+ * picking up a controller means by it.
+ *
+ * Out of range — the usual case, since almost nobody has two pads — is `null`,
+ * which `readPad` turns into silence.
  */
-function firstConnected(pads: readonly (Gamepad | null)[]): Gamepad | null {
+function nthConnected(pads: readonly (Gamepad | null)[], index: number): Gamepad | null {
+  let seen = 0;
   for (const pad of pads) {
-    if (pad && pad.connected) return pad;
+    if (!pad || !pad.connected) continue;
+    if (seen === index) return pad;
+    seen += 1;
   }
   return null;
 }
@@ -147,8 +158,8 @@ function firstConnected(pads: readonly (Gamepad | null)[]): Gamepad | null {
  * support controllers". Optional chaining throughout means an unusual pad with
  * fewer buttons or axes returns false rather than throwing.
  */
-export function readPad(pads: readonly (Gamepad | null)[]): PadState {
-  const pad = firstConnected(pads);
+export function readPad(pads: readonly (Gamepad | null)[], index = 0): PadState {
+  const pad = nthConnected(pads, index);
   if (!pad) return NO_PAD;
 
   const x = pad.axes[AXIS_X] ?? 0;
@@ -232,13 +243,13 @@ export function padEdges(previous: PadState, next: PadState): PadState {
  * `navigator.getGamepads?.()` guard — the API is missing in some embedded
  * WebViews, and a missing pad must be silence, not a crash on boot.
  */
-export function currentPad(): PadState {
-  return readPad(navigator.getGamepads?.() ?? []);
+export function currentPad(index = 0): PadState {
+  return readPad(navigator.getGamepads?.() ?? [], index);
 }
 
 /** Whether any pad is present at all — for telling the player it was seen.
  * Browsers reveal a pad only after a button is pressed on it, so this turning
  * true *is* the confirmation that the press registered. */
 export function padConnected(): boolean {
-  return firstConnected(navigator.getGamepads?.() ?? []) !== null;
+  return nthConnected(navigator.getGamepads?.() ?? [], 0) !== null;
 }
