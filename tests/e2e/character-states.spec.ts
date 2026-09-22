@@ -284,6 +284,28 @@ test("a survived hit flashes a different colour than a Shield", async ({ page })
   const SHIELD_TINT = 0x66e0ff;
 
   /**
+   * **Stop walking the moment the spike lands.**
+   *
+   * Everything below is read from a sequence the page records on every frame
+   * (see startTintLatch), so holding the key after the hit does nothing for the
+   * assertions — but it does keep the character marching towards the goal, and
+   * reaching it ends the run and fails the last assertion in this test with
+   * "won".
+   *
+   * That margin was measured, not guessed: the character finished this test at
+   * x≈570 with the goal at x=686, about half a second of walking left. It is
+   * the same half-second before and after two-player support, so it is the
+   * test's own shape rather than any change to the game — and half a second of
+   * poll latency is nothing on a loaded CI box, which is where it eventually
+   * failed. Released here, the character stops beside the spike at x≈430 and
+   * the race is gone rather than made less likely.
+   */
+  await expect
+    .poll(async () => (await tintSequence(page)).includes(HURT_TINT), { timeout: OUTCOME_TIMEOUT, intervals: [100] })
+    .toBe(true);
+  await page.keyboard.up("ArrowRight");
+
+  /**
    * The whole claim, as one assertion on what was actually worn and when.
    *
    * The bug this closes: an absorbed hit only set `invincibleUntil`, so being
@@ -305,7 +327,6 @@ test("a survived hit flashes a different colour than a Shield", async ({ page })
       { timeout: OUTCOME_TIMEOUT, intervals: [100] },
     )
     .toBe(true);
-  await page.keyboard.up("ArrowRight");
 
   expect(HURT_TINT).not.toBe(SHIELD_TINT);
 
