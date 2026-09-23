@@ -16,7 +16,7 @@ import {
 } from "../gameplay/EnemyBehaviors";
 import { createBolt, isBoltExpired } from "../gameplay/Bolt";
 import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from "../gameplay/characterState";
-import { currentPad, mergePad } from "../gameplay/gamepad";
+import { connectedPadCount, currentPad, mergePad, NO_PAD, padForPlayer } from "../gameplay/gamepad";
 import { installPadNavigation } from "../gameplay/padNavigation";
 import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
@@ -275,8 +275,6 @@ interface CoopPlayer {
   /** Worn whenever no buff tint is showing. `UNTINTED` for player one, which
    * means literally no tint — see updateCharacterVisuals. */
   baseTint: number;
-  /** Which connected pad drives this character. */
-  padIndex: number;
   /** The on-screen D-pad belongs to player one; there is only one cluster and
    * two people cannot share a phone. */
   usesTouch: boolean;
@@ -346,10 +344,21 @@ export class PlayScene extends Phaser.Scene {
    */
   private playerGroup!: Phaser.GameObjects.Group;
 
-  /** The one line on screen that says a second person can join, and what they
-   * press once they have. Nobody presses Enter at a screen that never mentions
-   * Enter — see makeCoopHint. */
+  /**
+   * The tappable invitation to join, and the line that replaces it afterwards.
+   *
+   * **A button rather than a label, because of the device this is for.** The
+   * setup two-player support was built for is a tablet: one person on the
+   * on-screen D-pad, one on a controller. A tablet has no Enter key, so a hint
+   * that says "press Enter" is an instruction nobody in the room can follow.
+   * Enter still works for anyone who has a keyboard.
+   */
+  private coopButton!: { rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text };
   private coopHint!: Phaser.GameObjects.Text;
+
+  /** So the summary is rewritten when a controller arrives or leaves, and not
+   * sixty times a second otherwise. -1 is "not asked yet". */
+  private lastPadCount = -1;
 
   /**
    * Player one's key bindings, built in `create()` and handed to `makePlayer`.
@@ -860,7 +869,6 @@ export class PlayScene extends Phaser.Scene {
       // White means "no tint at all" — see updateCharacterVisuals, which spells
       // it `clearTint()` so player one is byte-for-byte the solo character.
       baseTint: UNTINTED,
-      padIndex: index,
       // The console has one D-pad, and two people cannot share a phone.
       usesTouch: index === 0,
       jumpWasDown: false,
@@ -1424,8 +1432,30 @@ export class PlayScene extends Phaser.Scene {
    * away after a couple of seconds; this does not.
    */
   private makeCoopHint(): void {
+    // In the empty stretch of the left band between the back button (y 8–34)
+    // and the D-pad (CONTROL_ROW_Y), the one part of the console with room.
+    this.coopButton = makeConsoleButton(this, {
+      x: LEFT_BAND.x + LEFT_BAND.width / 2,
+      y: 62,
+      // Narrower than the back button above it, which is 164. It cannot match:
+      // the power LED and its "ON" label sit at x = SCREEN_RECT.x - 18 = 172
+      // (see HandheldShell), and a 164-wide button centred in the band reaches
+      // x=177 and swallows them. 140 stops at 165. Tried the matching width for
+      // tidiness, looked at it, and put it back — the layout invariants compare
+      // only interactive *Text*, so a button sitting on top of a lamp is
+      // something only a person looking at the screen will ever notice.
+      width: 140,
+      height: 26,
+      label: "+ PLAYER 2",
+      depth: 30,
+      fontSize: "11px",
+      onPress: () => this.addPlayer(),
+    });
+
+    // Sits behind the button and only shows once it is gone, so nothing that
+    // looks pressable is inert.
     this.coopHint = this.add
-      .text(LEFT_BAND.x + LEFT_BAND.width / 2, 58, "PRESS ENTER\nFOR PLAYER 2", {
+      .text(LEFT_BAND.x + LEFT_BAND.width / 2, 52, "", {
         fontSize: "10px",
         color: "#5a5f85",
         fontStyle: "bold",
@@ -1434,7 +1464,40 @@ export class PlayScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
-      .setDepth(30);
+      .setDepth(30)
+      .setVisible(false);
+  }
+
+  /**
+   * Who is holding what, once two people are playing.
+   *
+   * Named by *device* rather than by key, because the answer depends on what is
+   * plugged in — and on a tablet, which is what this was built for, "ARROWS"
+   * and "WASD" name things that are not in the room. Re-read whenever the pad
+   * count changes (see update), so plugging a second controller in mid-level
+   * corrects the line rather than leaving it lying.
+   */
+  private coopSummary(): string {
+    const pads = connectedPadCount();
+    if (pads >= 2) return "P1  CONTROLLER 1\nP2  CONTROLLER 2";
+    if (pads === 1) return "P1  SCREEN + ARROWS\nP2  CONTROLLER";
+    return "P1  ARROWS + X\nP2  WASD + Q";
+  }
+
+  /**
+   * What the toast says at the moment of joining.
+   *
+   * Reads the pad count for the same reason `coopSummary` does, and it is not a
+   * nicety: this said "WASD to move, Q to zap" unconditionally, which with a
+   * controller plugged in contradicted the line in the left band directly
+   * beside it. Two pieces of the same screen telling a child two different
+   * things about which buttons are theirs is worse than either one alone.
+   */
+  private coopJoinMessage(): string {
+    const pads = connectedPadCount();
+    if (pads >= 2) return "Player 2 joined! The second controller is yours";
+    if (pads === 1) return "Player 2 joined! The controller is yours";
+    return "Player 2 joined! WASD to move, Q to zap";
   }
 
   private makeOverlayButton(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
@@ -1486,12 +1549,21 @@ export class PlayScene extends Phaser.Scene {
     // full frame of input like everyone else.
     this.revivePlayers(time);
 
+    // Asked once for the frame rather than once per character: it is the same
+    // answer for both, and it is also what keeps the co-op summary honest when
+    // a controller is plugged in mid-level.
+    const padCount = connectedPadCount();
+    if (padCount !== this.lastPadCount) {
+      this.lastPadCount = padCount;
+      if (this.players.length > 1) this.coopHint.setText(this.coopSummary());
+    }
+
     for (const player of this.players) {
       // A downed character has no body to move and no pose to strike — and
       // without this, updateAccessoryVisuals would helpfully put the slippers
       // and hat back on somebody who is not on screen.
       if (player.downUntil > 0) continue;
-      this.updatePlayerFrame(player, time, delta);
+      this.updatePlayerFrame(player, time, delta, padCount);
     }
 
     this.updateEnemyAnimation(delta);
@@ -1526,7 +1598,7 @@ export class PlayScene extends Phaser.Scene {
    * people play in the same room that reads as generous rather than wrong, and
    * it is what keeps the HUD — and `collectItem`, and the chest — untouched.
    */
-  private updatePlayerFrame(player: CoopPlayer, time: number, delta: number): void {
+  private updatePlayerFrame(player: CoopPlayer, time: number, delta: number, padCount: number): void {
     const sprite = player.sprite;
     const body = sprite.body as Phaser.Physics.Arcade.Body;
     // A controller joins the on-screen buttons rather than replacing them, the
@@ -1539,7 +1611,18 @@ export class PlayScene extends Phaser.Scene {
     //
     // Only player one reads the D-pad (see `usesTouch`): there is one cluster
     // on the console and two people cannot share a phone.
-    const touch = mergePad(player.usesTouch ? this.touch.get() : NO_TOUCH, currentPad());
+    //
+    // **Which pad is asked for every frame rather than remembered.** This read
+    // `currentPad()` with no argument until 2026-09-23, so both characters were
+    // driven by pad 0: one controller moved the pair of them, and a second
+    // controller did nothing at all. See padForPlayer for who gets what, and
+    // why the count is re-read rather than stored — a controller plugged in
+    // mid-level has to just start working.
+    const pad = padForPlayer(this.players.indexOf(player), this.players.length, padCount);
+    const touch = mergePad(
+      player.usesTouch ? this.touch.get() : NO_TOUCH,
+      pad === null ? NO_PAD : currentPad(pad),
+    );
     const jumpDown = isJumpPressed(player.input, touch);
     const justPressedJump = jumpDown && !player.jumpWasDown;
     player.jumpWasDown = jumpDown;
@@ -1721,8 +1804,11 @@ export class PlayScene extends Phaser.Scene {
     // cut-scene cast out of co-op entirely.
     this.players.push(two);
 
-    this.coopHint.setText("P1  ARROWS + X\nP2  WASD + Q");
-    this.showToast("Player 2 joined! WASD to move, Q to zap");
+    // The invitation has been taken up, so it stops being offered.
+    this.coopButton.rect.destroy();
+    this.coopButton.text.destroy();
+    this.coopHint.setText(this.coopSummary()).setVisible(true);
+    this.showToast(this.coopJoinMessage());
   }
 
   /** Bounce blocks are just another ground-layer tile (see groundAutotile's

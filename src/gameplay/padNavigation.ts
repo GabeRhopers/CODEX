@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { currentPad, NO_PAD, padEdges, type PadState } from "./gamepad";
+import { currentAnyPad, NO_PAD, padEdges, type PadState } from "./gamepad";
 
 /**
  * Menu navigation for a controller: press, not hold.
@@ -45,10 +45,13 @@ export interface PadNavigationHandlers {
  * destroyed objects the next time anything ticks.
  */
 export function installPadNavigation(scene: Phaser.Scene, handlers: PadNavigationHandlers): void {
-  let previous: PadState = currentPad();
+  // Every connected pad, not just the first: with a controller each, player
+  // two's Start button did nothing at all while this read pad 0 alone. A menu
+  // does not care who pressed — see anyPad.
+  let previous: PadState = currentAnyPad();
 
   const onUpdate = (): void => {
-    const next = currentPad();
+    const next = currentAnyPad();
     const edges = padEdges(previous, next);
     previous = next;
 

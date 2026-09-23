@@ -253,3 +253,90 @@ export function currentPad(index = 0): PadState {
 export function padConnected(): boolean {
   return nthConnected(navigator.getGamepads?.() ?? [], 0) !== null;
 }
+
+/** How many real pads there are, skipping the empty slots and the unplugged
+ * stragglers exactly as `nthConnected` does. What `padForPlayer` is asked
+ * about. */
+export function countConnected(pads: readonly (Gamepad | null)[]): number {
+  let n = 0;
+  for (const pad of pads) if (pad && pad.connected) n += 1;
+  return n;
+}
+
+/** The live count. Same DOM guard as `currentPad`. */
+export function connectedPadCount(): number {
+  return countConnected(navigator.getGamepads?.() ?? []);
+}
+
+/**
+ * Every connected pad's buttons folded into one — what the *menus* read.
+ *
+ * Gameplay asks which pad a particular character is holding (see
+ * `padForPlayer`); a menu does not care who pressed. Pause, back and confirm
+ * should answer to anyone in the room, and reading only pad 0 meant player
+ * two's Start button did nothing at all once each person had a controller.
+ *
+ * OR'd, for the same reason a pad is OR'd into the on-screen buttons: there is
+ * no "which device is in charge" to decide, and nothing has to be told which
+ * one you meant.
+ */
+export function anyPad(pads: readonly (Gamepad | null)[]): PadState {
+  let merged = NO_PAD;
+  const count = countConnected(pads);
+  for (let i = 0; i < count; i += 1) {
+    const state = readPad(pads, i);
+    merged = {
+      left: merged.left || state.left,
+      right: merged.right || state.right,
+      up: merged.up || state.up,
+      down: merged.down || state.down,
+      jump: merged.jump || state.jump,
+      attack: merged.attack || state.attack,
+      confirm: merged.confirm || state.confirm,
+      back: merged.back || state.back,
+      pause: merged.pause || state.pause,
+    };
+  }
+  return merged;
+}
+
+/** The live read of every pad at once. Same DOM guard as `currentPad`. */
+export function currentAnyPad(): PadState {
+  return anyPad(navigator.getGamepads?.() ?? []);
+}
+
+/**
+ * Which pad drives a given character, or `null` for "none — keyboard and the
+ * on-screen buttons only".
+ *
+ * | players | pads | player one | player two |
+ * |---|---|---|---|
+ * | 1 | 0 | — | — |
+ * | 1 | 1+ | pad 0 | — |
+ * | 2 | 0 | — | — |
+ * | 2 | 1 | **—** | **pad 0** |
+ * | 2 | 2+ | pad 0 | pad 1 |
+ *
+ * **Player two takes the last pad, not the second one.** With two controllers
+ * that is pad 1 and reads as "one each". With one controller it is pad 0, and
+ * player one gives it up — which is the decision that makes the setup this was
+ * written for work at all: a tablet, one person on the on-screen D-pad and one
+ * holding the only gamepad. Had player one kept it, the person who just joined
+ * would have had nothing to play with, since a tablet has no keyboard either.
+ *
+ * **Derived, never stored.** The count changes the moment somebody plugs a
+ * controller in, and a remembered index would then be pointing at the wrong
+ * one — or at nothing. An earlier version of this stored `padIndex` on each
+ * player and no caller ever read it, which is its own argument.
+ *
+ * Solo is byte-for-byte what it was before there was a second player: one
+ * character, one pad, pad 0.
+ */
+export function padForPlayer(playerIndex: number, playerCount: number, padCount: number): number | null {
+  if (padCount <= 0) return null;
+  if (playerCount <= 1) return playerIndex === 0 ? 0 : null;
+  // The last player takes the last pad; everyone before them takes pads from
+  // the front. With the two the key schemes allow, that is exactly the table.
+  if (playerIndex === playerCount - 1) return padCount - 1;
+  return playerIndex < padCount - 1 ? playerIndex : null;
+}

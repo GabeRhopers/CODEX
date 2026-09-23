@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergePad, NO_PAD, padEdges, readPad, type PadState } from "./gamepad";
+import { countConnected, mergePad, NO_PAD, padEdges, padForPlayer, readPad, type PadState } from "./gamepad";
 import type { TouchControlState } from "./TouchControls";
 
 /**
@@ -250,5 +250,70 @@ describe("padEdges", () => {
 
   it("reports nothing at all when nothing is happening", () => {
     expect(padEdges(NO_PAD, NO_PAD)).toEqual(NO_PAD);
+  });
+});
+
+describe("countConnected", () => {
+  it("counts the real ones and nothing else", () => {
+    expect(countConnected([])).toBe(0);
+    expect(countConnected([null, null])).toBe(0);
+    expect(countConnected([pad()])).toBe(1);
+    expect(countConnected([null, pad(), null, pad()])).toBe(2);
+  });
+
+  it("does not count a pad that has been unplugged", () => {
+    expect(countConnected([pad({ connected: false }), pad()])).toBe(1);
+  });
+});
+
+describe("padForPlayer", () => {
+  /**
+   * The whole rule as its own table, because it is the kind of thing that is
+   * easy to get subtly right for the case in front of you and wrong for the
+   * one you are not holding.
+   */
+
+  it("gives a lone player the first pad, exactly as before there were two", () => {
+    // The property eighteen solo specs depend on: one character, one pad, pad 0.
+    expect(padForPlayer(0, 1, 1)).toBe(0);
+    expect(padForPlayer(0, 1, 2)).toBe(0);
+    expect(padForPlayer(0, 1, 4)).toBe(0);
+  });
+
+  it("gives nobody a pad when there are none", () => {
+    expect(padForPlayer(0, 1, 0)).toBeNull();
+    expect(padForPlayer(0, 2, 0)).toBeNull();
+    expect(padForPlayer(1, 2, 0)).toBeNull();
+  });
+
+  it("hands the only controller to player two, and player one gives it up", () => {
+    // **The decision this rule exists for.** A tablet, one person on the
+    // on-screen D-pad and one holding the only gamepad. If player one kept it,
+    // the person who just joined would have nothing at all to play with — a
+    // tablet has no keyboard to fall back on either.
+    expect(padForPlayer(1, 2, 1)).toBe(0);
+    expect(padForPlayer(0, 2, 1)).toBeNull();
+  });
+
+  it("gives one each when there are two", () => {
+    expect(padForPlayer(0, 2, 2)).toBe(0);
+    expect(padForPlayer(1, 2, 2)).toBe(1);
+  });
+
+  it("never hands the same pad to both of them", () => {
+    // The bug that prompted all of this was exactly this: both characters read
+    // pad 0, so one controller moved the pair of them.
+    for (const pads of [1, 2, 3, 4]) {
+      const one = padForPlayer(0, 2, pads);
+      const two = padForPlayer(1, 2, pads);
+      if (one !== null && two !== null) expect(one).not.toBe(two);
+    }
+  });
+
+  it("puts player two on the last pad, not the second", () => {
+    // Three plugged in and two playing: the spare sits in the middle rather
+    // than leaving player two on a pad nobody is holding.
+    expect(padForPlayer(1, 2, 3)).toBe(2);
+    expect(padForPlayer(0, 2, 3)).toBe(0);
   });
 });
