@@ -370,6 +370,23 @@ export class PlayScene extends Phaser.Scene {
   private lastPadCount = -1;
 
   /**
+   * Somebody asked for a second player before the level was ready.
+   *
+   * **A level is not finished loading when the screen appears.** `create()`
+   * hands off to `composeGroundTilesets` and builds the area in a callback, a
+   * promise bounded at ten seconds — so `areaBuilt` can be false for a long
+   * while with the console, the HUD and the `+ PLAYER 2` button all sitting
+   * there looking ready. `addPlayer` cannot run before the area exists, and
+   * simply returning threw the press away: on a slow tablet the button did
+   * nothing at all, silently, for as long as the load took.
+   *
+   * The same mistake as the key bindings in `soloInput`, from the other end —
+   * that one read input too early, this one discarded it. Remembered here and
+   * applied the moment the area is built.
+   */
+  private joinWhenReady = false;
+
+  /**
    * Whether the console can see a controller, said out loud.
    *
    * **The line exists because its absence was a real dead end.** A controller
@@ -600,6 +617,7 @@ export class PlayScene extends Phaser.Scene {
     // the old display list — dropping them here rather than relying on the
     // field initialiser is the same reason `areaBuilt` is reset below.
     this.players = [];
+    this.joinWhenReady = false;
     this.enemies = [];
     this.stats = createPlayerStats();
     this.bolts = [];
@@ -1336,6 +1354,15 @@ export class PlayScene extends Phaser.Scene {
     }
 
     this.areaBuilt = true;
+
+    // Anyone who pressed the button while this was loading gets their player
+    // now. A basket teleport re-enters here with the flag already false, so
+    // this is a no-op for every call but the first; `addPlayer`'s own guards
+    // still apply, so a run that ended during the build gains nobody.
+    if (this.joinWhenReady) {
+      this.joinWhenReady = false;
+      this.addPlayer();
+    }
   }
 
   /**
@@ -1845,7 +1872,13 @@ export class PlayScene extends Phaser.Scene {
    * for every collider in the level to start including them — see that field.
    */
   private addPlayer(): void {
-    if (this.outcome !== "playing" || !this.areaBuilt) return;
+    if (this.outcome !== "playing") return;
+    // Asked for before there is a level to stand in: remembered, not dropped.
+    // See joinWhenReady — enterArea applies it the instant the area is built.
+    if (!this.areaBuilt) {
+      this.joinWhenReady = true;
+      return;
+    }
     if (this.players.length >= 2) return;
 
     const one = this.players[0];

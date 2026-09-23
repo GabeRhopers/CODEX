@@ -76,13 +76,30 @@ async function characters(page: Page): Promise<Character[]> {
 const outcome = (page: Page): Promise<string> =>
   page.evaluate(() => (window.__debugGame!.scene.getScene("Play") as unknown as { outcome: string }).outcome);
 
+/**
+ * Waits until the level is actually ready, rather than for a fixed moment.
+ *
+ * **A level is not finished loading when the scene goes active.** PlayScene
+ * hands off to `composeGroundTilesets` and builds the area in a callback,
+ * bounded at ten seconds — so `areaBuilt` is the only honest answer to "can I
+ * drive this yet". This was `waitForTimeout(300)`, which is enough on an idle
+ * machine and is not under load, and it cost two unrelated tests in this file
+ * a failure nobody could reproduce afterwards.
+ */
+const waitForLevel = (page: Page): Promise<unknown> =>
+  page.waitForFunction(
+    () => (window.__debugGame!.scene.getScene("Play") as unknown as { areaBuilt?: boolean }).areaBuilt === true,
+    undefined,
+    { timeout: 20_000 },
+  );
+
 /** Straight into Test Play on `level`. */
 async function play(page: Page, level = FLAT()): Promise<void> {
   await gotoApp(page);
   await startEditorWithLevel(page, level);
   await clickByText(page, "Editor", "Test Play (Space)");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
-  await page.waitForTimeout(300);
+  await waitForLevel(page);
 }
 
 /** Test Play, then Enter. */
