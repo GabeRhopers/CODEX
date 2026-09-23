@@ -16,7 +16,16 @@ import {
 } from "../gameplay/EnemyBehaviors";
 import { createBolt, isBoltExpired } from "../gameplay/Bolt";
 import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from "../gameplay/characterState";
-import { connectedPadCount, currentPad, mergePad, NO_PAD, padForPlayer } from "../gameplay/gamepad";
+import {
+  connectedPadCount,
+  connectedPadNames,
+  currentPad,
+  mergePad,
+  NO_PAD,
+  padApiAvailable,
+  padForPlayer,
+  padStatusLine,
+} from "../gameplay/gamepad";
 import { installPadNavigation } from "../gameplay/padNavigation";
 import { createPlayerInput, isAttackPressed, isJumpPressed, JUMP_VELOCITY, PlayerInputKeys, updatePlayerMovement } from "../gameplay/PlayerController";
 import { resolveBackgroundTextureKey } from "../gameplay/backgroundLoader";
@@ -359,6 +368,19 @@ export class PlayScene extends Phaser.Scene {
   /** So the summary is rewritten when a controller arrives or leaves, and not
    * sixty times a second otherwise. -1 is "not asked yet". */
   private lastPadCount = -1;
+
+  /**
+   * Whether the console can see a controller, said out loud.
+   *
+   * **The line exists because its absence was a real dead end.** A controller
+   * paired to a tablet, a level playing, nothing happening — and nowhere on
+   * screen to learn that browsers hide a gamepad until a button is pressed on
+   * it, or that this browser has no Gamepad API at all. `padConnected` had
+   * exactly one caller in the whole codebase, on the *published game's* title
+   * screen, so the place you actually discover a dead controller was the one
+   * place that never mentioned them. See padStatusLine for the wording.
+   */
+  private padStatus!: Phaser.GameObjects.Text;
 
   /**
    * Player one's key bindings, built in `create()` and handed to `makePlayer`.
@@ -1454,6 +1476,21 @@ export class PlayScene extends Phaser.Scene {
 
     // Sits behind the button and only shows once it is gone, so nothing that
     // looks pressable is inert.
+    // Below the join button, clear of the D-pad further down. Two lines in
+    // every state (see padStatusLine) so it never reflows against them.
+    this.padStatus = this.add
+      .text(LEFT_BAND.x + LEFT_BAND.width / 2, 96, "", {
+        fontSize: "9px",
+        color: "#5a5f85",
+        fontStyle: "bold",
+        align: "center",
+        lineSpacing: 3,
+      })
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(30);
+    this.refreshPadStatus(0);
+
     this.coopHint = this.add
       .text(LEFT_BAND.x + LEFT_BAND.width / 2, 52, "", {
         fontSize: "10px",
@@ -1477,6 +1514,21 @@ export class PlayScene extends Phaser.Scene {
    * count changes (see update), so plugging a second controller in mid-level
    * corrects the line rather than leaving it lying.
    */
+  /** Puts the current answer in the left band. Called on every change to the
+   * pad count, and once up front so the line is never blank. */
+  private refreshPadStatus(padCount: number): void {
+    this.padStatus.setText(padStatusLine(padApiAvailable(), padCount));
+  }
+
+  /** Names the controllers that just appeared. Plural because two people can
+   * plug in at once, and because saying "a controller" when two arrived would
+   * be the sort of small lie this whole line exists to stop. */
+  private announceNewPads(before: number, after: number): void {
+    const names = connectedPadNames().slice(before, after);
+    if (names.length === 0) return;
+    this.showToast(`Controller ready · ${names.join(", ")}`);
+  }
+
   private coopSummary(): string {
     const pads = connectedPadCount();
     if (pads >= 2) return "P1  CONTROLLER 1\nP2  CONTROLLER 2";
@@ -1554,8 +1606,14 @@ export class PlayScene extends Phaser.Scene {
     // a controller is plugged in mid-level.
     const padCount = connectedPadCount();
     if (padCount !== this.lastPadCount) {
+      const first = this.lastPadCount;
       this.lastPadCount = padCount;
       if (this.players.length > 1) this.coopHint.setText(this.coopSummary());
+      this.refreshPadStatus(padCount);
+      // The moment a controller is first seen is the moment the press-a-button
+      // rule paid off, so it is worth saying out loud — and the name answers
+      // "which controller is this?" without a settings app.
+      if (padCount > first && first >= 0) this.announceNewPads(first, padCount);
     }
 
     for (const player of this.players) {

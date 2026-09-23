@@ -306,6 +306,67 @@ export function currentAnyPad(): PadState {
 }
 
 /**
+ * Whether this browser has the Gamepad API at all.
+ *
+ * Distinct from "no controller is connected", and the difference is the whole
+ * reason this exists. Every read below guards with `?.()` and turns a missing
+ * API into silence, which is right for gameplay and useless to a person: told
+ * only that nothing is connected, they will go on pressing buttons on a
+ * controller the page is constitutionally unable to see. Every third-party
+ * browser on an iPad is a WKWebView, and that is exactly where this comes back
+ * false.
+ */
+export function padApiAvailable(): boolean {
+  return typeof navigator.getGamepads === "function";
+}
+
+/**
+ * A controller's name, short enough to show.
+ *
+ * Browsers report something like `Xbox Wireless Controller (STANDARD GAMEPAD
+ * Vendor: 045e Product: 02ea)` — the useful half is before the bracket, and the
+ * rest is a vendor id nobody is holding. Falls back to the whole string when
+ * there is no bracket, since the format is a convention rather than a rule.
+ */
+export function padName(pad: Gamepad): string {
+  const id = pad.id ?? "";
+  // `>= 0`, not `> 0`: an id that is *only* a bracket leaves nothing, which the
+  // fallback below then names. Written as `> 0` first, and the "never comes
+  // back empty" test said so.
+  const cut = id.indexOf("(");
+  const short = (cut >= 0 ? id.slice(0, cut) : id).trim();
+  return short || "Controller";
+}
+
+/** The names of every connected pad, in the order `padForPlayer` counts them. */
+export function connectedPadNames(): string[] {
+  const pads = navigator.getGamepads?.() ?? [];
+  const out: string[] = [];
+  for (const pad of pads) if (pad && pad.connected) out.push(padName(pad));
+  return out;
+}
+
+/**
+ * What to tell the player about controllers, in the console's own voice.
+ *
+ * **The middle case is the one that matters**, and it is an instruction rather
+ * than a status. Browsers deliberately hide a gamepad from a page until a
+ * button is pressed on it, so a controller paired before the page opened is
+ * invisible however long you wait — and the player, holding a controller that
+ * does nothing, has no way to know the rule exists. Saying "none connected"
+ * there would be true and useless. Saying which button to press is the fix.
+ *
+ * Pure, so the wording is settled in a unit test rather than by loading a page
+ * and squinting at a corner of it.
+ */
+export function padStatusLine(available: boolean, count: number): string {
+  if (!available) return "CONTROLLERS\nNOT IN THIS BROWSER";
+  if (count <= 0) return "CONTROLLER?\nPRESS A BUTTON ON IT";
+  if (count === 1) return "CONTROLLER\nREADY";
+  return `CONTROLLERS\n${count} READY`;
+}
+
+/**
  * Which pad drives a given character, or `null` for "none — keyboard and the
  * on-screen buttons only".
  *

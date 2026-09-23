@@ -84,6 +84,49 @@ export async function installFakePad(page: Page, count = 1): Promise<void> {
   }, count);
 }
 
+/**
+ * Takes the Gamepad API away entirely, the way a web view without one behaves.
+ *
+ * Not the same as "no controller is connected", and the difference is the point
+ * of the thing this tests: every read in `gamepad.ts` guards with `?.()` and
+ * turns a missing API into silence, so from the inside the two look identical —
+ * while to a person holding a controller they could not be more different. Every
+ * third-party browser on an iPad is a WKWebView, which is where this is real.
+ *
+ * Deleted rather than set to a stub, so `typeof navigator.getGamepads` is
+ * genuinely not "function" — that is the question `padApiAvailable` asks.
+ */
+export async function removeGamepadApi(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    // @ts-expect-error — removing a standard member is the whole point.
+    delete Navigator.prototype.getGamepads;
+    // @ts-expect-error — and any own property a previous script left behind.
+    delete navigator.getGamepads;
+  });
+}
+
+/** Plugs in another pad mid-session, the way pressing a button on a controller
+ * the browser had been hiding does. Returns the new count. */
+export async function plugIn(page: Page, id = "Test Pad (STANDARD GAMEPAD Vendor: 0000 Product: 0000)"): Promise<number> {
+  const count = await page.evaluate((padId) => {
+    const pads = window.__pads!;
+    pads.push({
+      connected: true,
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })),
+      timestamp: performance.now(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      id: padId,
+      index: pads.length,
+      mapping: "standard",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    return pads.length;
+  }, id);
+  await page.waitForTimeout(FRAMES_MS);
+  return count;
+}
+
 /** Presses and keeps holding — for movement, which the game reads as "is it
  * held right now". `pad` is the slot, and defaults to the first. */
 export async function hold(page: Page, button: number, pad = 0): Promise<void> {

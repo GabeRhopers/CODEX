@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countConnected, mergePad, NO_PAD, padEdges, padForPlayer, readPad, type PadState } from "./gamepad";
+import { countConnected, mergePad, NO_PAD, padEdges, padForPlayer, padName, padStatusLine, readPad, type PadState } from "./gamepad";
 import type { TouchControlState } from "./TouchControls";
 
 /**
@@ -315,5 +315,61 @@ describe("padForPlayer", () => {
     // than leaving player two on a pad nobody is holding.
     expect(padForPlayer(1, 2, 3)).toBe(2);
     expect(padForPlayer(0, 2, 3)).toBe(0);
+  });
+});
+
+describe("padName", () => {
+  it("keeps the part a person would recognise and drops the vendor ids", () => {
+    expect(padName(pad({ id: "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 02ea)" }))).toBe(
+      "Xbox Wireless Controller",
+    );
+  });
+
+  it("uses the whole string when there is no bracket, since the format is a convention", () => {
+    expect(padName(pad({ id: "8BitDo SN30 Pro" }))).toBe("8BitDo SN30 Pro");
+  });
+
+  it("never comes back empty, however odd the pad", () => {
+    // A blank name would render as a gap where the answer should be.
+    expect(padName(pad({ id: "" }))).toBe("Controller");
+    expect(padName(pad({ id: "(STANDARD GAMEPAD)" }))).toBe("Controller");
+  });
+});
+
+describe("padStatusLine", () => {
+  /**
+   * The wording, settled here rather than by loading a page and squinting at a
+   * corner of it — which is the whole reason this rule is pure.
+   */
+
+  it("tells a player with no controller seen which button to press", () => {
+    // **The case this was written for.** Browsers hide a gamepad until a button
+    // is pressed on it, so a controller paired before the page opened is
+    // invisible for ever. "None connected" would be true and useless: the
+    // player is holding one. The line has to say what to do about it.
+    expect(padStatusLine(true, 0)).toContain("PRESS A BUTTON");
+  });
+
+  it("does not tell a browser with no Gamepad API to press anything", () => {
+    // Pressing is exactly what will not help here, and saying so would send
+    // somebody off pressing buttons they have already pressed.
+    const line = padStatusLine(false, 0);
+    expect(line).not.toContain("PRESS A BUTTON");
+    expect(line).toContain("NOT IN THIS BROWSER");
+  });
+
+  it("confirms one, and says how many when there are more", () => {
+    expect(padStatusLine(true, 1)).toContain("READY");
+    expect(padStatusLine(true, 1)).not.toContain("PRESS A BUTTON");
+    expect(padStatusLine(true, 2)).toContain("2 READY");
+  });
+
+  it("is two lines in every state, so the band does not reflow", () => {
+    // The line sits in a fixed slot in the console's left band between the
+    // join button and the D-pad; a state that was one line or three would
+    // shift against its neighbours.
+    for (const line of [padStatusLine(false, 0), padStatusLine(true, 0), padStatusLine(true, 1), padStatusLine(true, 3)]) {
+      expect(line.split("\n")).toHaveLength(2);
+    }
   });
 });
