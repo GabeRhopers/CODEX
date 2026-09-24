@@ -1,10 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { clickByText, clickIconWithLabel, gotoApp, openThings } from "./support/coords";
+import { FIT_INDEX } from "../../src/editor/canvasZoom";
 
 /**
  * The Skin Creator's zoom, reworked 2026-08-23 from "grow the canvas inside a
  * 336px band" (a 1.6x range, three clicks end to end) to "a fixed window with
- * the drawing scaled and panned inside it" (16x).
+ * the drawing scaled and panned inside it" (20x).
  *
  * The first test here is the one that matters. Every cell click is derived from
  * the canvas element's own bounding box, and that box is now a scaled, offset,
@@ -160,6 +161,8 @@ test("zooms out below the old 200px floor and centres what is left", async ({ pa
   expect(Math.abs(leftGap - rightGap)).toBeLessThan(2);
 
   await clickByText(page, "SkinEditor", "Fit");
-  expect((await readView(page)).zoomIndex).toBe(2);
+  // The symbol, not the number it happened to be: the ladder gained a step
+  // below fit on 2026-09-24 (see ZOOM_FACTORS) and this read 2 until it did.
+  expect((await readView(page)).zoomIndex).toBe(FIT_INDEX);
   expect((await boxes(page)).canvas.width).toBeCloseTo(fit.viewport.width, 0);
 });

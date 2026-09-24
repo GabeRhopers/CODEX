@@ -52,7 +52,10 @@ describe("the zoom ladder", () => {
 
   it("reads back as a plain multiplier", () => {
     expect(formatZoom(FIT_INDEX)).toBe("×1");
-    expect(formatZoom(0)).toBe("×0.5");
+    // The bottom of the ladder, which exists so a 448 window can still be
+    // zoomed out past the old 200px floor — and is 0.4 rather than 0.375
+    // precisely so this readout stays legible. See ZOOM_FACTORS.
+    expect(formatZoom(0)).toBe("×0.4");
   });
 });
 

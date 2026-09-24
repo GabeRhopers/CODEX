@@ -18,21 +18,26 @@
 /**
  * The window the drawing is seen through, in game units.
  *
- * 384, up from 320 on 2026-09-05, because the surrounding layout stopped
- * spending the screen on chrome: four stacked full-width rows above the canvas
- * (name and Save, the status line, the palette selector, the swatch row) held
- * its top at y=132 — 28% of the scene height for about 96px of actual content.
- * Those became one footer line plus two side columns, which frees the whole
- * band; see SkinEditorScene.buildCanvas. 44% more area to draw on, and a cell at
- * fit zoom on the 32 grid goes from 12.19px to 14.63px.
+ * **448 is not a preference, it is the ceiling.** The scene is a fixed 468px
+ * tall (GAME_HEIGHT) and the drawing is square, so the largest window that can
+ * exist is the screen height less a margin at each end — 10 + 448 + 10. There
+ * is no layout cleverness left after this one; the only way past it would be a
+ * taller scene.
  *
- * Not 400, which the width would also allow: `contentSizeFor(VIEWPORT_SIZE, 0)`
- * is the bottom of the zoom ladder, and it has to stay *below* the old
- * grow-the-canvas floor of 200px for zooming out to still mean anything —
- * 400 x 0.5 is exactly 200 and 384 x 0.5 is 192. canvasZoom.test.ts asserts it.
- * 384 is also 12 x 32.
+ * Getting there took the last row off the screen. 320 became 384 on 2026-09-05
+ * when four stacked full-width rows above the canvas collapsed into one footer
+ * line plus two side columns; 384 became this on 2026-09-24 when that footer
+ * went too, its name field, Back, Undo/Redo/Save and status line moving into
+ * the side columns, which had run out of things to hold long before they ran
+ * out of room. A cell at fit zoom on the 32 grid goes 12.19px → 14.63px →
+ * 17.07px across those two changes: 96% more area than the original.
+ *
+ * The horizontal fit is the tighter one and was measured rather than assumed:
+ * the left column's widest control is the 190px palette chip at x=120, ending
+ * at 310, and the right rail starts at 778, which leaves 468 for a 448 window
+ * and a 10px gutter either side. See SkinEditorScene's canvas-mode layout.
  */
-export const VIEWPORT_SIZE = 384;
+export const VIEWPORT_SIZE = 448;
 
 /**
  * Zoom as a multiple of "the whole sprite exactly fills the window", rather
@@ -44,12 +49,25 @@ export const VIEWPORT_SIZE = 384;
  * its range and 12% at the top, so clicks did progressively less. Every step
  * here is a real jump. The ends give 3.3px per cell (48 grid, zoomed out to see
  * the silhouette small) up to 53px per cell (zoomed in to place one pixel) —
- * a 16x range against the old 1.6x.
+ * a 20x range against the old 1.6x.
+ *
+ * **0.4 exists because the window grew.** The bottom of this ladder has to
+ * leave the drawing smaller than the old grow-the-canvas floor of 200px, or
+ * zooming out would mean less than it used to — and a 448 window at 0.5 is
+ * 224px, above that floor. One more step down restores it at 179px.
+ *
+ * 0.4 rather than the 0.375 the geometric pattern points at, because this
+ * number is *read out on screen* (see formatZoom, and the ×1 under the zoom
+ * buttons). "×0.4" is a number a child can read; "×0.375" is three decimal
+ * places of arithmetic nobody asked for. A x1.25 step is still a real jump,
+ * which is the property the ladder actually cares about — the +40px step it
+ * replaced did 20% at one end and 12% at the other.
  */
-export const ZOOM_FACTORS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
+export const ZOOM_FACTORS = [0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
 
-/** Index of 1.0 — the whole sprite, exactly filling the window. */
-export const FIT_INDEX = 2;
+/** Index of 1.0 — the whole sprite, exactly filling the window. Read
+ * symbolically everywhere, which is why adding a step below it costs nothing. */
+export const FIT_INDEX = 3;
 
 export function clampZoomIndex(index: number): number {
   if (!Number.isFinite(index)) return FIT_INDEX;

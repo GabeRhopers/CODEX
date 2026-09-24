@@ -89,14 +89,36 @@ const SHADE_STEP_NAME = "shade-step";
 // other rather than reconstructed from scattered literals. Everything here is
 // checked by eye and by assertLayoutSound; see buildCanvas.
 
-/** The one action line, at the scene's floor: Back, name, status, Undo/Redo/Save. */
+/**
+ * The action line at the scene's floor on the **"What it does" tab**: Back,
+ * Delete, Save.
+ *
+ * The Draw tab had one too until 2026-09-24, and losing it is what let the
+ * painting window reach its ceiling — see VIEWPORT_SIZE. The form tab keeps it,
+ * because a form is short and has the room; see drawThingForm.
+ */
 const FOOTER_Y = 434;
+
+/**
+ * Where the painting window's left edge sits, and why it is not centred.
+ *
+ * `(GAME_WIDTH - VIEWPORT_SIZE) / 2` would be 301, which is 7px inside the left
+ * column's palette chip. The window is centred in the *gap between the columns*
+ * instead. Measured rather than guessed, from the widest thing on each side:
+ * the chip is 190 wide at LEFT_COL2_X and so ends at 294, and the right rail
+ * starts at 766 — 472 of gap for a 448 window, 12px either side.
+ */
+const CANVAS_LEFT_X = 306;
 /** Top of every side column. Above the canvas by a hair, so the first heading
  * sits level with the drawing's top edge rather than below it. */
 const RAIL_TOP_Y = 8;
 /** Left region: two columns, both clear of the canvas's left edge at 333. */
 const LEFT_COL_X = 16;
-const LEFT_COL2_X = 120;
+/** 104, in from 120 on 2026-09-24: the 16px it gives up is what buys the
+ * painting window its 12px gutters at 448 (see CANVAS_LEFT_X). The first
+ * column's widest thing is the "Ctrl+scroll zooms" hint, which ends at 94, so
+ * there is still 10px between the two. */
+const LEFT_COL2_X = 104;
 /** Rendered height of a makeSmallButton: 12px text plus its 6px padding, twice. */
 const SMALL_BUTTON_H = 26;
 /** Small-button pitch in a vertical stack — the button plus 6px of air. */
@@ -1080,39 +1102,26 @@ export class SkinEditorScene extends Phaser.Scene {
     // — showing a second, differently-worded "Grumble Bug 1" here would be two
     // names for one object, and the one the child typed would not be either of
     // them. `onSave` writes the thing's name through as the skin's.
-    if (!target.draft) {
-      this.add
-        .text(GAME_WIDTH / 2 - 128, footerMidY, "Name", { fontSize: "12px", color: "#8a8ab0" })
-        .setOrigin(1, 0.5);
-    }
+    // The name field and the status line used to sit here, centred. They are in
+    // the right rail now (see the NAME group below): at 448 the drawing runs
+    // from x=306 to x=754 and from y=10 to y=458, straight through where both
+    // of them were. Everything else on this line was always outside that
+    // column and so has not moved a pixel — which matters most for Save, whose
+    // whole point is being in the same place on both of an invented thing's
+    // tabs.
 
-    // The name field. Reuses LevelNameInput rather than a second DOM input of
-    // its own: that class carries the capture-phase blur that makes clicking
-    // Save commit an in-progress edit (rather than saving the previous name),
-    // and the keydown stopPropagation that stops a space in a name reaching
-    // Phaser's shortcuts. Both were found the hard way; a copy would lose them.
-    if (!target.draft) {
-      this.nameInput = new LevelNameInput(
-        this,
-        { x: GAME_WIDTH / 2 - 120, y: footerMidY - 13, width: 240, height: 26 },
-        target.name,
-        (value) => {
-          if (this.target) this.target.name = value;
-        },
-        { fallback: target.name, placeholder: "Skin name" },
-      );
-    }
-
-    // In the band between the drawing and the footer, not on the footer itself.
-    // The footer's own free space is the ~247px between the name field and
-    // Undo, and the longest message this shows — "Copy — saving adds a new skin,
-    // the original is untouched" — measures about 280px, so it would have run
-    // under Undo. assertLayoutSound would not have caught it either: this text
-    // is a label, not interactive. Here it has the whole width and sits right
-    // under the thing it is talking about.
+    // Created here, positioned by the rail below — the band it used to live in,
+    // between the drawing and the footer, no longer exists.
+    //
+    // **Wrapped, and that is not decoration.** The longest message it shows,
+    // "Copy — saving adds a new skin, the original is untouched", measures about
+    // 280px against a 260px rail. It was already too long for the footer's own
+    // free space, which is why it was never put there; in a column it simply
+    // takes two lines. assertLayoutSound cannot help either way, since this is
+    // a label rather than an interactive object.
     this.statusText = this.add
-      .text(GAME_WIDTH / 2, CANVAS_TOP_Y + VIEWPORT_SIZE + 13, "", { fontSize: "12px", color: "#4ade80" })
-      .setOrigin(0.5, 0.5);
+      .text(0, 0, "", { fontSize: "12px", color: "#4ade80", wordWrap: { width: REFERENCE_WIDTH } })
+      .setOrigin(0, 0);
 
     // --- the three regions -------------------------------------------------
     //
@@ -1456,7 +1465,7 @@ export class SkinEditorScene extends Phaser.Scene {
     // rather than the window (see canvasZoom.ts for why the old grow-the-canvas
     // model could never exceed a 1.6x range in a 468px-tall scene). ---
     const canvasRect: GameRect = {
-      x: (GAME_WIDTH - VIEWPORT_SIZE) / 2,
+      x: CANVAS_LEFT_X,
       y: CANVAS_TOP_Y,
       width: VIEWPORT_SIZE,
       height: VIEWPORT_SIZE,
@@ -1567,6 +1576,51 @@ export class SkinEditorScene extends Phaser.Scene {
     // They also all say the same thing: every one of these acts on the skin
     // currently open. Mirror and Clear draw on it, the reference is traced into
     // it, "Set as default" is about it.
+    // --- NAME ----------------------------------------------------------------
+    //
+    // Moved off the footer on 2026-09-24, because at 448 the drawing runs
+    // through where it used to sit. The rail is the right home for it rather
+    // than merely a free one: this is what the skin is *called*, and everything
+    // under the heading below acts on that same skin. It also reads better
+    // first — "Ghost 1" names the thing, then come the five things you can do
+    // to it.
+    //
+    // **An invented thing has no skin name of its own.** It is one thing with
+    // one name, and that name lives on the "What it does" tab where you gave
+    // it; a second, differently-worded "Grumble Bug 1" here would be two names
+    // for one object, and the one the child typed would be neither. `onSave`
+    // writes the thing's name through as the skin's.
+    //
+    // The neighbouring "Editing: <brush>" on the footer stays where it is and
+    // is not a duplicate of this: that is which *brush* the skin is for, this
+    // is the skin's own name, and they coincide only while the name is still
+    // the default. On a skin called "Blue Ghost", losing it would take away the
+    // only thing on screen saying it is a ghost.
+    if (!target.draft) {
+      railY = heading(railX, railY, "Name");
+      // Reuses LevelNameInput rather than a second DOM input of its own: that
+      // class carries the capture-phase blur that makes clicking Save commit an
+      // in-progress edit (rather than saving the previous name), and the keydown
+      // stopPropagation that stops a space in a name reaching Phaser's
+      // shortcuts. Both were found the hard way; a copy would lose them.
+      this.nameInput = new LevelNameInput(
+        this,
+        { x: railX, y: railY, width: REFERENCE_WIDTH, height: SMALL_BUTTON_H },
+        target.name,
+        (value) => {
+          if (this.target) this.target.name = value;
+        },
+        { fallback: target.name, placeholder: "Skin name" },
+      );
+      railY += STACK_STEP + GROUP_GAP;
+    }
+
+    // Bottom-anchored, just above the Undo/Redo/Save line at y=421, so the
+    // message about saving sits next to the button that causes it — and so a
+    // two-line message grows upward into the rail's empty middle instead of
+    // down onto the buttons. See statusText's own note for why it wraps.
+    this.statusText.setPosition(railX, 404).setOrigin(0, 1);
+
     railY = heading(railX, railY, "This skin");
     const mirrorButton = this.makeSmallButton(
       railX,
