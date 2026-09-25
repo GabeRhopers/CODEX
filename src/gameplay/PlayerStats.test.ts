@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyPickup,
   canDoubleJump,
   canFireThunderHat,
   CHEST_SCORE_BONUS,
@@ -279,5 +280,62 @@ describe("openChest", () => {
     openChest(stats);
     expect(openChest(stats)).toBe("locked");
     expect(stats.score).toBe(CHEST_SCORE_BONUS); // unchanged by the second attempt
+  });
+});
+
+describe("applyPickup", () => {
+  /**
+   * The dispatcher that used to be a switch inside PlayScene, where the one
+   * rule worth guarding — which pickups make the character cheer — was
+   * reachable only by playing the game and watching a 260ms pose.
+   */
+
+  it("does not make the character cheer for money or a key", () => {
+    // **The rule that is invisible and easy to get backwards.** A coin and a
+    // key change the HUD, not what the character can do, so the arms-up pose
+    // would be celebrating nothing.
+    const stats = createPlayerStats();
+    expect(applyPickup(stats, "item-coin", 0)?.celebrates).toBe(false);
+    expect(applyPickup(stats, "item-key", 0)?.celebrates).toBe(false);
+  });
+
+  it("makes it cheer for every power-up, without listing them here", () => {
+    // Asserted as "all of them" rather than one by one, so a power-up added
+    // later is covered by this test on the day it is written.
+    const powerUps = ["item-heart", "item-speed", "item-feather", "item-thunder-hat", "item-shield"];
+    for (const type of powerUps) {
+      expect(applyPickup(createPlayerStats(), type, 0), type).toMatchObject({ celebrates: true });
+    }
+  });
+
+  it("actually changes the stats, not just the return value", () => {
+    // The pickup's whole job. A version that reported the right effect and
+    // collected nothing would satisfy every assertion above.
+    const stats = createPlayerStats();
+    applyPickup(stats, "item-coin", 0);
+    expect(stats.score).toBeGreaterThan(0);
+    applyPickup(stats, "item-key", 0);
+    expect(stats.hasKey).toBe(true);
+    applyPickup(stats, "item-shield", 1000);
+    expect(isInvincible(stats, 1000)).toBe(true);
+  });
+
+  it("leaves anything it does not recognise alone", () => {
+    // Not "nothing happened" — the caller must put the sprite back on the
+    // floor. An invented item whose copied type cannot be resolved has to stay
+    // there rather than silently vanish when touched.
+    const stats = createPlayerStats();
+    const before = JSON.stringify(stats);
+    expect(applyPickup(stats, "enemy-ghost", 0)).toBeNull();
+    expect(applyPickup(stats, "", 0)).toBeNull();
+    expect(JSON.stringify(stats)).toBe(before);
+  });
+
+  it("gives money its own noise and everything else the same one", () => {
+    const stats = createPlayerStats();
+    expect(applyPickup(stats, "item-coin", 0)?.sfx).toBe("coin");
+    expect(applyPickup(stats, "item-key", 0)?.sfx).toBe("key");
+    expect(applyPickup(stats, "item-heart", 0)?.sfx).toBe("heart");
+    expect(applyPickup(stats, "item-shield", 0)?.sfx).toBe("heart");
   });
 });

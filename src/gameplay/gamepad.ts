@@ -367,6 +367,40 @@ export function padStatusLine(available: boolean, count: number): string {
 }
 
 /**
+ * Who is holding what, once two people are playing.
+ *
+ * Named by *device* rather than by key, because the answer depends on what is
+ * plugged in — and on a tablet, which is what this was built for, "ARROWS" and
+ * "WASD" name things that are not in the room. Re-read whenever the pad count
+ * changes (see PlayScene's update), so plugging a second controller in
+ * mid-level corrects the line rather than leaving it lying.
+ *
+ * The one-pad row is `padForPlayer`'s table read back as English: player one
+ * gives up the controller, so player one is on the screen and the arrows.
+ */
+export function coopSummaryLine(pads: number): string {
+  if (pads >= 2) return "P1  CONTROLLER 1\nP2  CONTROLLER 2";
+  if (pads === 1) return "P1  SCREEN + ARROWS\nP2  CONTROLLER";
+  return "P1  ARROWS + X\nP2  WASD + Q";
+}
+
+/**
+ * What the toast says at the moment of joining.
+ *
+ * Reads the pad count for the same reason `coopSummaryLine` does, and it is not
+ * a nicety: this said "WASD to move, Q to zap" unconditionally, which with a
+ * controller plugged in contradicted the line in the left band directly beside
+ * it. Two pieces of the same screen telling a child two different things about
+ * which buttons are theirs is worse than either one alone — which is why these
+ * two live together, and are tested against each other.
+ */
+export function coopJoinLine(pads: number): string {
+  if (pads >= 2) return "Player 2 joined! The second controller is yours";
+  if (pads === 1) return "Player 2 joined! The controller is yours";
+  return "Player 2 joined! WASD to move, Q to zap";
+}
+
+/**
  * Which pad drives a given character, or `null` for "none — keyboard and the
  * on-screen buttons only".
  *

@@ -176,3 +176,62 @@ export function openChest(stats: PlayerStats): ChestResult {
   stats.score += CHEST_SCORE_BONUS;
   return "opened";
 }
+
+/** What a pickup means, once the stats have already been changed for it.
+ * `sfx` is the built-in noise the pickup would make if the thing has none of
+ * its own (see PlayScene's playThingSound); `celebrates` is whether the
+ * character throws its arms up. */
+export interface PickupEffect {
+  sfx: PickupSound;
+  celebrates: boolean;
+}
+
+/** The three noises a pickup can make. Named rather than typed as `SfxName`
+ * so this module stays clear of the audio layer — PlayScene maps them. */
+export type PickupSound = "coin" | "heart" | "key";
+
+/**
+ * The single decision point for "the player walked into an item".
+ *
+ * This was a forty-line switch in PlayScene, which meant the two rules inside
+ * it were only ever reachable by playing the game and watching. The second one
+ * in particular is invisible and easy to get backwards: **coins and keys do not
+ * celebrate.** They change the HUD, not what the character can do, so they get
+ * no arms-up pose — everything else does.
+ *
+ * One sound per kind rather than a single "picked something up" noise, because
+ * the whole point of having sound is telling what happened without looking at
+ * the HUD. The power-ups share the heart's chime — they are all "something
+ * good, and it is not money" — rather than each getting one nobody would learn.
+ *
+ * Returns `null` for anything that is not a pickup, which the caller must treat
+ * as "leave it alone" rather than "nothing happened": an unresolvable invented
+ * item must stay on the floor rather than silently vanish.
+ */
+export function applyPickup(stats: PlayerStats, type: string, now: number): PickupEffect | null {
+  switch (type) {
+    case "item-coin":
+      collectCoin(stats);
+      return { sfx: "coin", celebrates: false };
+    case "item-heart":
+      collectHeart(stats);
+      return { sfx: "heart", celebrates: true };
+    case "item-speed":
+      collectSpeed(stats, now);
+      return { sfx: "heart", celebrates: true };
+    case "item-feather":
+      collectFeather(stats);
+      return { sfx: "heart", celebrates: true };
+    case "item-thunder-hat":
+      collectThunderHat(stats);
+      return { sfx: "heart", celebrates: true };
+    case "item-shield":
+      collectShield(stats, now);
+      return { sfx: "heart", celebrates: true };
+    case "item-key":
+      collectKey(stats);
+      return { sfx: "key", celebrates: false };
+    default:
+      return null;
+  }
+}

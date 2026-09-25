@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { countConnected, mergePad, NO_PAD, padEdges, padForPlayer, padName, padStatusLine, readPad, type PadState } from "./gamepad";
+import {
+  coopJoinLine,
+  coopSummaryLine,
+  countConnected,
+  mergePad,
+  NO_PAD,
+  padEdges,
+  padForPlayer,
+  padName,
+  padStatusLine,
+  readPad,
+  type PadState,
+} from "./gamepad";
 import type { TouchControlState } from "./TouchControls";
 
 /**
@@ -371,5 +383,53 @@ describe("padStatusLine", () => {
     for (const line of [padStatusLine(false, 0), padStatusLine(true, 0), padStatusLine(true, 1), padStatusLine(true, 3)]) {
       expect(line.split("\n")).toHaveLength(2);
     }
+  });
+});
+
+describe("what the two lines about co-op say", () => {
+  /**
+   * These were two private methods on PlayScene and so were reachable only by
+   * loading a level, joining, and reading a corner of the screen — which is how
+   * they came to contradict each other in the first place. Pure now, and tested
+   * against each other, because that is the bug.
+   */
+
+  it("never says WASD when the second player is on a controller", () => {
+    // **The contradiction, as an assertion.** The join toast said "WASD to
+    // move, Q to zap" whatever was plugged in, while the line in the left band
+    // directly beside it said CONTROLLER. Two parts of one screen telling a
+    // child two different things about which buttons are theirs.
+    for (const pads of [1, 2, 3]) {
+      expect(coopJoinLine(pads)).not.toContain("WASD");
+      expect(coopSummaryLine(pads)).not.toContain("WASD");
+    }
+  });
+
+  it("agrees with the other line about how many controllers there are", () => {
+    // Both read the same count, so neither can go stale while the other
+    // updates. A second controller arriving mid-level moves both.
+    expect(coopSummaryLine(1)).toContain("SCREEN");
+    expect(coopJoinLine(1)).toContain("The controller is yours");
+    expect(coopSummaryLine(2)).toContain("CONTROLLER 2");
+    expect(coopJoinLine(2)).toContain("second controller");
+  });
+
+  it("falls back to the keyboard halves when nothing is plugged in", () => {
+    expect(coopSummaryLine(0)).toContain("ARROWS");
+    expect(coopSummaryLine(0)).toContain("WASD");
+    expect(coopJoinLine(0)).toContain("WASD");
+  });
+
+  it("hands the lone controller to player two, matching padForPlayer", () => {
+    // The line is not free to say anything else: with one pad, padForPlayer
+    // gives it to player two and player one keeps the screen. If that table
+    // ever changes, this sentence becomes a lie and this test says so.
+    expect(padForPlayer(1, 2, 1)).toBe(0);
+    expect(padForPlayer(0, 2, 1)).toBeNull();
+    expect(coopSummaryLine(1)).toBe("P1  SCREEN + ARROWS\nP2  CONTROLLER");
+  });
+
+  it("is two lines, like the status line it sits above", () => {
+    for (const pads of [0, 1, 2]) expect(coopSummaryLine(pads).split("\n")).toHaveLength(2);
   });
 });

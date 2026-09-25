@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { VolumeControl } from "../audio/VolumeControl";
-import { playSfx, playSoundKey, type SfxName } from "../audio/sfx";
+import { playSfx, playSoundKey } from "../audio/sfx";
 import { registerSound, soundKeyFor } from "../audio/soundLoader";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y, TILE_SIZE } from "../config/gameConfig";
 import { UP_BASKET_TINT_COLOR } from "../editor/Palette";
@@ -19,6 +19,8 @@ import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from
 import {
   connectedPadCount,
   connectedPadNames,
+  coopJoinLine,
+  coopSummaryLine,
   currentPad,
   mergePad,
   NO_PAD,
@@ -36,15 +38,9 @@ import { loadCustomEntities } from "../entities/customEntityStorage";
 import type { GameRunContext } from "./WorldMapScene";
 import { StaticBackground } from "../gameplay/StaticBackground";
 import {
+  applyPickup,
   canDoubleJump,
   canFireThunderHat,
-  collectCoin,
-  collectFeather,
-  collectHeart,
-  collectKey,
-  collectShield,
-  collectSpeed,
-  collectThunderHat,
   createPlayerStats,
   fireThunderHat,
   isHurtFlashing,
@@ -58,7 +54,7 @@ import {
 } from "../gameplay/PlayerStats";
 import { HandheldShell, LEFT_BAND, makeConsoleButton, SCREEN_RECT, VOLUME_CONTROL } from "../gameplay/HandheldShell";
 import { recordCompletion } from "../world/worldProgress";
-import { TouchControls, TouchControlState } from "../gameplay/TouchControls";
+import { TouchControls } from "../gameplay/TouchControls";
 import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
 import { buildEdgeGrid, EDGE_GID_BASE, GROUND_EDGE_TEXTURE_KEY } from "../level/groundEdges";
@@ -70,120 +66,27 @@ import { builtInGroundTilesets, composeGroundTilesets } from "../skins/groundTil
 import { FrameTextureKeys, resolveFrameTextureKeys, resolveLoopLength, resolveSkinTextureKeys } from "../skins/skinLoader";
 import { CHARACTER_SKIN_ID, framePlanFor } from "../skins/spriteFrames";
 import { advanceLoop, createLoopState, LoopState } from "../gameplay/spriteLoop";
+import { makeCoopHud } from "./play/coopHud";
+import {
+  BOLT_LAUNCH_OFFSET_X,
+  BOLT_LAUNCH_OFFSET_Y,
+  BOUNCE_VELOCITY_Y,
+  CAST_FLASH_MS,
+  CHECKPOINT_ACTIVE_TINT,
+  CHECKPOINT_TOAST_MS,
+  NO_TOUCH,
+  PLAYER_TWO_TINT,
+  POWERUP_FLASH_MS,
+  RESPAWN_DELAY_MS,
+  SPAWN_SPACING_X,
+  SWIM_SINK_VELOCITY,
+  SWIM_SPEED_MULTIPLIER,
+  SWIM_UP_VELOCITY,
+  TELEPORT_COOLDOWN_MS,
+  UNTINTED,
+  WARNING_TOAST_COLOR,
+} from "./play/tuning";
 
-// Raised from -650 alongside GRAVITY_Y's 900→1100 bump (2026-08-19, see
-// its own comment in gameConfig.ts) — v scales by sqrt(1100/900) to keep
-// the bounce's own apex height (h = v²/2g) exactly what it was before,
-// since SPRING_MEADOW's landing platform in templateLevels.ts was placed
-// and verified against that specific height. Airtime drops from ~1.4s to
-// ~1.3s as a side effect, which only makes the pad feel snappier, not
-// less reachable.
-const BOUNCE_VELOCITY_Y = -719;
-// Swimming (see the water check in update()) sets vertical velocity
-// directly every frame rather than fighting gravity, so these aren't
-// forces — SWIM_UP_VELOCITY while jump/up is held, SWIM_SINK_VELOCITY
-// otherwise, both far gentler than JUMP_VELOCITY/gravity so movement in
-// water reads as buoyant control rather than a normal fall/jump.
-const SWIM_UP_VELOCITY = -160;
-const SWIM_SINK_VELOCITY = 80;
-// Applied on top of speedMultiplierAt's own Speed Potion multiplier (see
-// update()) — water slows horizontal movement the same way it would in
-// any platformer, without needing a second buff-stacking system.
-const SWIM_SPEED_MULTIPLIER = 0.6;
-// Green reads as "good/active" against every one of this game's built-in
-// backgrounds and the bell's own cyan/blue art, matching the existing
-// buff-tint convention (see updateCharacterVisuals) of a flat setTint rather
-// than a second baked texture — cheap, and it survives a user-uploaded
-// skin of any color scheme instead of needing an "activated" variant of
-// whatever image they chose.
-const CHECKPOINT_ACTIVE_TINT = 0x4ade80;
-// How long a toast (see showToast) stays up — shorter than
-// EditorUI.setStatus's 2500ms since these fire mid-platforming and
-// shouldn't linger over the action.
-const CHECKPOINT_TOAST_MS = 1200;
-// Text color for showToast's "something didn't happen" case (a basket with
-// no matching basket in its paired area — see useBasket) — distinct from
-// the Checkpoint toast's green so a warning reads as a warning at a glance.
-const WARNING_TOAST_COLOR = "#facc15";
-// A basket teleport lands the player standing exactly on top of the
-// *destination* area's own matching basket (see enterArea/useBasket) —
-// without a guard, that new position immediately overlaps that basket's
-// own freshly-rebuilt trigger zone and bounces straight back where they
-// came from, forever.
-//
-// This timer was that guard on its own until 2026-08-22, and it turned out
-// not to be enough, because it and the player's movement are measured on
-// two different clocks. `this.time.now` follows wall time whatever the
-// frame rate (measured: it advanced 783ms across 782ms of wall clock on a
-// loaded machine), but the player's position is integrated per physics
-// step, so a starved loop moves them a fraction of the usual distance in
-// the same 500ms. Reproduced deterministically under 6x CPU throttling:
-// they cover ~10px instead of ~100px, are therefore still standing on the
-// basket when the timer lapses, and ping-pong between the two areas for
-// as long as the direction is held. Real players on slow phones can hit
-// this — the game is built for phones — and CI hit it too.
-//
-// So the actual guard is now `latchedBasketTile`, which asks the
-// frame-rate-independent question ("has the player left that pad yet?") and
-// is scoped to the one pad they landed on, so a neighbouring basket still
-// works. The timer stays as a second line of defence: it keeps an *inert*
-// basket from re-toasting every physics frame. Long enough to clear one
-// overlap check after landing, short enough that using a different basket
-// right after arriving never feels blocked.
-const TELEPORT_COOLDOWN_MS = 500;
-
-// How far apart two characters are placed when they arrive somewhere together
-// — a fresh start, and every basket teleport. Stacking them on the identical
-// pixel is not merely ugly: two Arcade bodies at the same point get pushed
-// apart by the separation pass in whichever direction rounding happens to
-// favour, which reads as one of them being flung. Half a tile is enough to
-// avoid that and still small enough that both are plainly at the same door.
-// With one player it multiplies by zero and changes nothing.
-const SPAWN_SPACING_X = TILE_SIZE / 2;
-
-// What a character who is not holding the console reads from the on-screen
-// controls: nothing. Frozen rather than built per frame so it cannot be
-// written into by accident — `mergePad` returns a fresh object anyway.
-const NO_TOUCH: TouchControlState = Object.freeze({ left: false, right: false, jump: false, attack: false });
-
-// Player one's `baseTint`. Not a colour so much as the absence of one: see
-// updateCharacterVisuals, which turns this exact value back into `clearTint()`
-// rather than a white tint, so the solo character is untouched by co-op.
-const UNTINTED = 0xffffff;
-
-// Player two wears the same character in a different colour — no second skin,
-// no second Skin Creator entry, no second cast in the cut scenes. Warm orange
-// because it has to survive being read against four very different backgrounds
-// and against the two buff tints it takes turns with: it is nowhere near the
-// Shield's cyan or the hurt flash's red, so "which one am I" and "what just
-// happened to me" never look like the same signal.
-const PLAYER_TWO_TINT = 0xffa24a;
-
-// How long a fallen character stays out before popping back.
-//
-// The run only ends when *everybody* is down at once, so this is also the
-// window the other player has to survive alone. Long enough to feel like a
-// consequence and to get clear of whatever did it; short enough that the
-// person holding the other half of the keyboard is not sitting and watching.
-const RESPAWN_DELAY_MS = 1500;
-
-// PJ Thunder Hat's shock — see Bolt.ts for the projectile itself.
-// Launch position is roughly the wizard's chest/hand height, offset ahead
-// of the player in whichever direction they're facing (player.flipX).
-const BOLT_LAUNCH_OFFSET_X = 16;
-const BOLT_LAUNCH_OFFSET_Y = 24;
-// How long the "wizard-cast" pose holds when firing a bolt — brief on
-// purpose, just long enough to read as a cast rather than a static jump/
-// idle/walk frame. Fed into characterState's own situation ranking (see
-// update()) rather than stamped over the animation afterward, so it can't
-// fight whatever pose the resolver already chose.
-const CAST_FLASH_MS = 150;
-// The same pose, held a little longer, for the moment a power-up is picked
-// up — the cast frame's arms-up stance already reads as "something good
-// just happened," so this needs no new art. Distinct from the persistent
-// powered-up look, which is the accessory sprites (see
-// updateAccessoryVisuals) plus the Speed/Shield tints.
-const POWERUP_FLASH_MS = 260;
 
 // The three placeable-entity tables live in entities/builtins.ts and are read
 // through entities/entityRegistry.ts, which merges in whatever types the player
@@ -1481,68 +1384,15 @@ export class PlayScene extends Phaser.Scene {
    * away after a couple of seconds; this does not.
    */
   private makeCoopHint(): void {
-    // In the empty stretch of the left band between the back button (y 8–34)
-    // and the D-pad (CONTROL_ROW_Y), the one part of the console with room.
-    this.coopButton = makeConsoleButton(this, {
-      x: LEFT_BAND.x + LEFT_BAND.width / 2,
-      y: 62,
-      // Narrower than the back button above it, which is 164. It cannot match:
-      // the power LED and its "ON" label sit at x = SCREEN_RECT.x - 18 = 172
-      // (see HandheldShell), and a 164-wide button centred in the band reaches
-      // x=177 and swallows them. 140 stops at 165. Tried the matching width for
-      // tidiness, looked at it, and put it back — the layout invariants compare
-      // only interactive *Text*, so a button sitting on top of a lamp is
-      // something only a person looking at the screen will ever notice.
-      width: 140,
-      height: 26,
-      label: "+ PLAYER 2",
-      depth: 30,
-      fontSize: "11px",
-      onPress: () => this.addPlayer(),
-    });
-
-    // Sits behind the button and only shows once it is gone, so nothing that
-    // looks pressable is inert.
-    // Below the join button, clear of the D-pad further down. Two lines in
-    // every state (see padStatusLine) so it never reflows against them.
-    this.padStatus = this.add
-      .text(LEFT_BAND.x + LEFT_BAND.width / 2, 96, "", {
-        fontSize: "9px",
-        color: "#5a5f85",
-        fontStyle: "bold",
-        align: "center",
-        lineSpacing: 3,
-      })
-      .setOrigin(0.5, 0)
-      .setScrollFactor(0)
-      .setDepth(30);
-    this.refreshPadStatus(0);
-
-    this.coopHint = this.add
-      .text(LEFT_BAND.x + LEFT_BAND.width / 2, 52, "", {
-        fontSize: "10px",
-        color: "#5a5f85",
-        fontStyle: "bold",
-        align: "center",
-        lineSpacing: 3,
-      })
-      .setOrigin(0.5, 0)
-      .setScrollFactor(0)
-      .setDepth(30)
-      .setVisible(false);
+    const hud = makeCoopHud(this, () => this.addPlayer());
+    this.coopButton = hud.button;
+    this.coopHint = hud.hint;
+    this.padStatus = hud.status;
   }
 
-  /**
-   * Who is holding what, once two people are playing.
-   *
-   * Named by *device* rather than by key, because the answer depends on what is
-   * plugged in — and on a tablet, which is what this was built for, "ARROWS"
-   * and "WASD" name things that are not in the room. Re-read whenever the pad
-   * count changes (see update), so plugging a second controller in mid-level
-   * corrects the line rather than leaving it lying.
-   */
   /** Puts the current answer in the left band. Called on every change to the
-   * pad count, and once up front so the line is never blank. */
+   * pad count; the line is never blank because makeCoopHud fills it in on the
+   * way past. */
   private refreshPadStatus(padCount: number): void {
     this.padStatus.setText(padStatusLine(padApiAvailable(), padCount));
   }
@@ -1554,29 +1404,6 @@ export class PlayScene extends Phaser.Scene {
     const names = connectedPadNames().slice(before, after);
     if (names.length === 0) return;
     this.showToast(`Controller ready · ${names.join(", ")}`);
-  }
-
-  private coopSummary(): string {
-    const pads = connectedPadCount();
-    if (pads >= 2) return "P1  CONTROLLER 1\nP2  CONTROLLER 2";
-    if (pads === 1) return "P1  SCREEN + ARROWS\nP2  CONTROLLER";
-    return "P1  ARROWS + X\nP2  WASD + Q";
-  }
-
-  /**
-   * What the toast says at the moment of joining.
-   *
-   * Reads the pad count for the same reason `coopSummary` does, and it is not a
-   * nicety: this said "WASD to move, Q to zap" unconditionally, which with a
-   * controller plugged in contradicted the line in the left band directly
-   * beside it. Two pieces of the same screen telling a child two different
-   * things about which buttons are theirs is worse than either one alone.
-   */
-  private coopJoinMessage(): string {
-    const pads = connectedPadCount();
-    if (pads >= 2) return "Player 2 joined! The second controller is yours";
-    if (pads === 1) return "Player 2 joined! The controller is yours";
-    return "Player 2 joined! WASD to move, Q to zap";
   }
 
   private makeOverlayButton(x: number, y: number, label: string, onClick: () => void): Phaser.GameObjects.Text {
@@ -1635,7 +1462,7 @@ export class PlayScene extends Phaser.Scene {
     if (padCount !== this.lastPadCount) {
       const first = this.lastPadCount;
       this.lastPadCount = padCount;
-      if (this.players.length > 1) this.coopHint.setText(this.coopSummary());
+      if (this.players.length > 1) this.coopHint.setText(coopSummaryLine(connectedPadCount()));
       this.refreshPadStatus(padCount);
       // The moment a controller is first seen is the moment the press-a-button
       // rule paid off, so it is worth saying out loud — and the name answers
@@ -1898,8 +1725,8 @@ export class PlayScene extends Phaser.Scene {
     // The invitation has been taken up, so it stops being offered.
     this.coopButton.rect.destroy();
     this.coopButton.text.destroy();
-    this.coopHint.setText(this.coopSummary()).setVisible(true);
-    this.showToast(this.coopJoinMessage());
+    this.coopHint.setText(coopSummaryLine(connectedPadCount())).setVisible(true);
+    this.showToast(coopJoinLine(connectedPadCount()));
   }
 
   /** Bounce blocks are just another ground-layer tile (see groundAutotile's
@@ -2027,50 +1854,15 @@ export class PlayScene extends Phaser.Scene {
     // below is the built-in fallback, so the switch keeps naming the sound each
     // pickup *means* without having to know whether one will actually play.
     const own = this.playThingSound(type);
-    const sfx = (name: SfxName): void => {
-      if (!own) playSfx(this, name);
-    };
-    // One sound per case rather than a single "picked something up" noise: a
-    // coin and a heart are different events to the player, and the whole reason
-    // for having sound is that you can tell what happened without looking at
-    // the HUD. The power-ups share the heart's chime — they are all "something
-    // good, and it is not money" — rather than each getting a sound of its own
-    // for a distinction nobody would learn.
-    switch (effective) {
-      case "item-coin":
-        collectCoin(this.stats);
-        sfx("coin");
-        break;
-      case "item-heart":
-        collectHeart(this.stats);
-        sfx("heart");
-        break;
-      case "item-speed":
-        collectSpeed(this.stats, now);
-        sfx("heart");
-        break;
-      case "item-feather":
-        collectFeather(this.stats);
-        sfx("heart");
-        break;
-      case "item-thunder-hat":
-        collectThunderHat(this.stats);
-        sfx("heart");
-        break;
-      case "item-shield":
-        collectShield(this.stats, now);
-        sfx("heart");
-        break;
-      case "item-key":
-        collectKey(this.stats);
-        sfx("key");
-        break;
-      default:
-        return;
-    }
-    // Coins and Keys are collectibles, not power-ups — they change the HUD,
-    // not what the character can do, so they don't get the celebratory pose.
-    if (effective !== "item-coin" && effective !== "item-key") {
+    // What the pickup does to `stats`, and what it means — see applyPickup, in
+    // PlayerStats.ts with the collectors it dispatches over. `null` is "not a
+    // pickup", and must leave the sprite where it is rather than consume it.
+    const effect = applyPickup(this.stats, effective, now);
+    if (!effect) return;
+    // The built-in noise is the fallback: an invented thing's own sound
+    // replaces it entirely.
+    if (!own) playSfx(this, effect.sfx);
+    if (effect.celebrates) {
       // Everyone cheers, because everyone got it: the power-up went into the
       // one shared `stats`, so the arms-up pose belongs to the team rather than
       // to whichever character happened to walk into the sprite. With one
