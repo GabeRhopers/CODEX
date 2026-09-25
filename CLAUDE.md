@@ -44,6 +44,14 @@ three ways with `retries: 1`; the full single-worker run is ~30 minutes and
 reproduces neither CI's ordering nor its load. Twice, the full suite passed
 locally while CI failed, and `--shard=1/3` found it in ten minutes.
 
+> **Never pass `--workers=2` to go faster.** `playwright.config.ts` pins
+> `workers: 1` and says why: several specs (basket pairing, checkpoints) drive
+> timing-sensitive physics through software WebGL, and parallel workers on one
+> machine contend for the CPU those specs need. Overriding it produces failures
+> that look like regressions and are not — costing an afternoon each time. CI
+> gets its wall clock from sharding across three machines, every one of them
+> still single-worker.
+
 **4. Mutation-check every new assertion.** Break the thing it claims to protect
 and watch it fail. This is not ceremony — in this session alone it caught a
 `padName` off-by-one, proved a controller test was vacuous, and revealed that a
@@ -89,6 +97,20 @@ of it. A rule parked in a Phaser-importing file cannot be tested at all.
 **Derive, don't store, anything that can change underneath you.** A remembered
 index into a list the browser rebuilds (connected gamepads, say) points at the
 wrong thing the moment the list changes.
+
+**Splitting a big scene: count the wires first.** `PlayScene.ts` and
+`SkinEditorScene.ts` are ~2,000 lines each and each has one method that is a
+fifth of the file — `enterArea` (428 lines) and `buildCanvas` (623). Neither can
+be lifted out: they reach 33 and 31 members of their scene respectively, so
+moving them means dropping `private` from thirty-odd fields, and a class whose
+state anybody can reach is a worse file than a long one. Take out the pieces
+that leave through a door instead — the ones with two or three wires. Measure
+before deciding: `sed -n 'A,Bp' file | grep -o 'this\.[a-zA-Z_]*' | sort -u | wc -l`.
+
+The pieces worth taking out first are the ones that stop needing a scene at all:
+a rule moved into a Phaser-free module gains a unit test the same afternoon
+(`applyPickup`, `copySkinName`, `coopSummaryLine` were all unreachable except by
+playing the game and watching).
 
 **Input arriving before a scene is ready is the recurring bug.** A level is not
 loaded when its screen appears — `PlayScene` waits on a tileset composition
