@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultSkinName, displaySkinName, MAX_SKIN_NAME_LENGTH, sanitizeSkinName } from "./skinNames";
+import { copySkinName, defaultSkinName, displaySkinName, MAX_SKIN_NAME_LENGTH, sanitizeSkinName } from "./skinNames";
 
 describe("displaySkinName", () => {
   it("uses the skin's own name when it has one", () => {
@@ -67,5 +67,36 @@ describe("sanitizeSkinName", () => {
   it("caps the length so a long name can't run into the row's buttons", () => {
     const long = "x".repeat(MAX_SKIN_NAME_LENGTH + 40);
     expect(sanitizeSkinName(long, "Ghost 1")).toHaveLength(MAX_SKIN_NAME_LENGTH);
+  });
+});
+
+describe("copySkinName", () => {
+  it("says what it was copied from", () => {
+    expect(copySkinName("Ghost 1", [])).toBe("Ghost 1 copy");
+    expect(copySkinName("Spooky ghost", [])).toBe("Spooky ghost copy");
+  });
+
+  it("does not renumber a copy into the plain sequence", () => {
+    // **The whole point.** "Ghost 1" copied becoming "Ghost 4" would lose the
+    // one fact worth keeping on a screen full of near-identical drawings:
+    // which one it came from. Contrast defaultSkinName above, which is
+    // deliberately the other rule for a skin drawn from scratch.
+    expect(copySkinName("Ghost 1", ["Ghost 1", "Ghost 2", "Ghost 3"])).toBe("Ghost 1 copy");
+  });
+
+  it("keeps the lineage readable however many times it is copied", () => {
+    expect(copySkinName("Ghost 1", ["Ghost 1 copy"])).toBe("Ghost 1 copy 2");
+    expect(copySkinName("Ghost 1", ["Ghost 1 copy", "Ghost 1 copy 2"])).toBe("Ghost 1 copy 3");
+  });
+
+  it("does not care how the existing name was capitalised", () => {
+    // Names are compared case-insensitively everywhere else a clash matters
+    // (see defaultSkinName), and two skins called "ghost 1 copy" and
+    // "Ghost 1 copy" are indistinguishable in the list.
+    expect(copySkinName("Ghost 1", ["ghost 1 COPY"])).toBe("Ghost 1 copy 2");
+  });
+
+  it("is not confused by whitespace around a stored name", () => {
+    expect(copySkinName("Ghost 1", ["  Ghost 1 copy  "])).toBe("Ghost 1 copy 2");
   });
 });

@@ -52,6 +52,30 @@ export function defaultSkinName(brushLabel: string, existingNames: readonly stri
 }
 
 /**
+ * The name a *copy* starts with: "Ghost 1" becomes "Ghost 1 copy", then
+ * "Ghost 1 copy 2".
+ *
+ * Deliberately not `defaultSkinName`'s sequence. Renumbering a copy into the
+ * plain run — "Ghost 1" copied becoming "Ghost 4" — loses the one fact worth
+ * keeping, which is what it was copied from; on a screen full of near-identical
+ * drawings that is the only thing telling you which is which. The lineage stays
+ * readable however many times it is copied.
+ *
+ * Lives beside `defaultSkinName` rather than in the Skin Creator because the
+ * two rules only make sense read against each other, and because up here they
+ * can be checked without opening a canvas.
+ */
+export function copySkinName(sourceName: string, existingNames: readonly string[]): string {
+  const taken = new Set(existingNames.map((name) => name.trim().toLowerCase()));
+  const first = `${sourceName} copy`;
+  if (!taken.has(first.toLowerCase())) return first;
+  for (let n = 2; ; n++) {
+    const candidate = `${first} ${n}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/**
  * What actually gets stored when someone commits the name field: trimmed,
  * length-capped, and replaced by `fallback` when they've left it blank.
  *

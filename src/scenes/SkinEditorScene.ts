@@ -35,102 +35,30 @@ import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PALETTE_SWATCH_NAME, PIXEL_PALET
 import { shadeRamp } from "../skins/colorShades";
 import { addCustomColor, CUSTOM_PALETTE_ID, loadCustomColors, saveCustomColors } from "../skins/customPalette";
 import { resolveSkinThumbnails } from "../skins/skinLoader";
-import { defaultSkinName, displaySkinName, sanitizeSkinName } from "../skins/skinNames";
+import { copySkinName, defaultSkinName, displaySkinName, sanitizeSkinName } from "../skins/skinNames";
+import { paletteThumbnail } from "./skin/paletteThumbnail";
 import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin, setActiveSkin } from "../skins/skinStorage";
 import { BUTTON_COLOR, BUTTON_COLOR_NUM, BUTTON_HOVER_COLOR, ROW_BG, SELECTED_COLOR, SELECTED_HOVER_COLOR } from "../ui/theme";
+import {
+  ARM_TIMEOUT_MS,
+  CANVAS_LEFT_X,
+  CANVAS_TOP_Y,
+  FOOTER_Y,
+  GROUP_GAP,
+  HEADING_GAP,
+  LEFT_COL2_X,
+  LEFT_COL_X,
+  RAIL_TOP_Y,
+  REFERENCE_WIDTH,
+  ROW_HEIGHT,
+  ROW_START_Y,
+  SELECTED_FILL,
+  SELECTED_RING_COLOR,
+  SHADE_STEP_NAME,
+  SMALL_BUTTON_H,
+  STACK_STEP,
+} from "./skin/layout";
 
-/** The Text buttons take CSS strings; the Rectangles take the number above. */
-/**
- * Selected, and selected-while-hovered.
- *
- * These exist because one colour served as *both* the hover colour and the
- * selected colour, which broke selection twice over: an armed tool looked
- * exactly like a tool you happened to be pointing at, and makeSmallButton's
- * pointerout reset every button to the unselected colour unconditionally — so
- * hovering the armed tool and moving away rendered it inactive until you
- * clicked something else.
- *
- * The amber is deliberately nowhere near the hover blue, and is the same family
- * as the ring around the selected colour swatch, so "selected" reads as one
- * language across the screen. The level editor already worked this way
- * (EditorUI's ERASER_ACTIVE_COLOR / ERASER_ACTIVE_HOVER_COLOR pair); this is
- * that pattern, not a new one.
- */
-/** SELECTED_COLOR as a number, for Rectangle fills. */
-const SELECTED_FILL = 0x8a6d1f;
-/** The ring drawn around whichever member of an exclusive group is active, so
- * selection is a shape and not only a colour — the same idea as EditorUI's
- * `selectedOutline` on the brush grid. */
-const SELECTED_RING_COLOR = 0xffc93c;
-const ARM_TIMEOUT_MS = 3000;
-const ROW_START_Y = 90;
-const ROW_HEIGHT = 44;
-// Where the painting window sits. Fixed for the life of the scene: zoom moves
-// the drawing inside this box, never the box itself, so no button can be pushed
-// off the scene's 468px floor however far someone zooms in. 10 + 384 = 394,
-// which leaves the footer row its line and the side columns 40px of run-on
-// below the canvas — see buildCanvas's layout note.
-const CANVAS_TOP_Y = 10;
-/** Width of the reference picker, and therefore of the whole right rail — see
- * buildReferenceControls for why the picker cannot be narrower. */
-const REFERENCE_WIDTH = 260;
-
-// Everything this scene draws is a Phaser shape on one canvas, so a test that
-// wants "the shade ramp" and not "the palette" has no DOM to query and has to
-// pick the objects out of the display list somehow. It used to be by geometry —
-// `width === 24 && x < 250`, the ramp being the only 24px swatches left of the
-// centred palette row. That is a coincidence of a layout, not a fact about the
-// objects, and it broke the moment the 2026-09-05 rework put both groups in the
-// same column. Naming them says what they are and survives being moved.
-const SHADE_STEP_NAME = "shade-step";
-
-// --- canvas-mode layout ---------------------------------------------------
-// One place for the geometry, so the three regions can be read against each
-// other rather than reconstructed from scattered literals. Everything here is
-// checked by eye and by assertLayoutSound; see buildCanvas.
-
-/**
- * The action line at the scene's floor on the **"What it does" tab**: Back,
- * Delete, Save.
- *
- * The Draw tab had one too until 2026-09-24, and losing it is what let the
- * painting window reach its ceiling — see VIEWPORT_SIZE. The form tab keeps it,
- * because a form is short and has the room; see drawThingForm.
- */
-const FOOTER_Y = 434;
-
-/**
- * Where the painting window's left edge sits, and why it is not centred.
- *
- * `(GAME_WIDTH - VIEWPORT_SIZE) / 2` would be 301, which is 7px inside the left
- * column's palette chip. The window is centred in the *gap between the columns*
- * instead. Measured rather than guessed, from the widest thing on each side:
- * the chip is 190 wide at LEFT_COL2_X and so ends at 294, and the right rail
- * starts at 766 — 472 of gap for a 448 window, 12px either side.
- */
-const CANVAS_LEFT_X = 306;
-/** Top of every side column. Above the canvas by a hair, so the first heading
- * sits level with the drawing's top edge rather than below it. */
-const RAIL_TOP_Y = 8;
-/** Left region: two columns, both clear of the canvas's left edge at 333. */
-const LEFT_COL_X = 16;
-/** 104, in from 120 on 2026-09-24: the 16px it gives up is what buys the
- * painting window its 12px gutters at 448 (see CANVAS_LEFT_X). The first
- * column's widest thing is the "Ctrl+scroll zooms" hint, which ends at 94, so
- * there is still 10px between the two. */
-const LEFT_COL2_X = 104;
-/** Rendered height of a makeSmallButton: 12px text plus its 6px padding, twice. */
-const SMALL_BUTTON_H = 26;
-/** Small-button pitch in a vertical stack — the button plus 6px of air. */
-const STACK_STEP = SMALL_BUTTON_H + 6;
-// The two gaps below are what decides whether a column fits. The right rail is
-// the tight one — PALETTE (5 rows), DRAWING, REFERENCE and THIS SKIN have to
-// finish above the footer at y=421, and at 22/16 the last button ended at 426,
-// measurably on top of "↶ Undo". 18 still leaves 5px under a 13px heading.
-/** Heading to its first row. */
-const HEADING_GAP = 18;
-/** Between one labelled group and the next heading. */
-const GROUP_GAP = 12;
 
 type Mode = "browse" | "pick-brush" | "canvas" | "thing";
 
@@ -719,17 +647,8 @@ export class SkinEditorScene extends Phaser.Scene {
     return defaultSkinName(brush.label, await this.existingNamesFor(brush));
   }
 
-  /** "Ghost 1" copied becomes "Ghost 1 copy", then "Ghost 1 copy 2" — keeps the
-   * lineage readable rather than renumbering into the plain sequence, where it
-   * would be indistinguishable from a skin drawn from scratch. */
   private async nextCopyName(brush: Brush, sourceName: string): Promise<string> {
-    const taken = new Set((await this.existingNamesFor(brush)).map((name) => name.toLowerCase()));
-    const first = `${sourceName} copy`;
-    if (!taken.has(first.toLowerCase())) return first;
-    for (let n = 2; ; n++) {
-      const candidate = `${first} ${n}`;
-      if (!taken.has(candidate.toLowerCase())) return candidate;
-    }
+    return copySkinName(sourceName, await this.existingNamesFor(brush));
   }
 
   // --- mode: pick-brush ----------------------------------------------------
@@ -1740,27 +1659,6 @@ export class SkinEditorScene extends Phaser.Scene {
    * by the colours themselves means a changed palette is simply a different
    * texture, and `exists` keeps each one generated once.
    */
-  private paletteThumbnail(palette: PixelPalette): string {
-    const key = `palette-thumb-${palette.id}-${palette.colors.join("")}`;
-    if (this.textures.exists(key)) return key;
-
-    // An empty "Yours" has nothing to draw: one flat cell, so the row reads as
-    // a palette with no colours yet rather than as a failed image.
-    const cols = Math.max(1, Math.ceil(Math.sqrt(palette.colors.length)));
-    const cell = 8;
-    const size = cols * cell;
-    const g = this.make.graphics({ x: 0, y: 0 }, false);
-    g.fillStyle(0x222634, 1).fillRect(0, 0, size, size);
-    palette.colors.forEach((color, i) => {
-      g.fillStyle(Phaser.Display.Color.HexStringToColor(color).color, 1);
-      g.fillRect((i % cols) * cell, Math.floor(i / cols) * cell, cell, cell);
-    });
-    g.generateTexture(key, size, size);
-    // Never on the display list (`make`, not `add`), so nothing else will free
-    // it — the same reason drawBackdrop's mask graphics is destroyed by hand.
-    g.destroy();
-    return key;
-  }
 
   /**
    * The palette chip, and the colours it chooses between.
@@ -1794,7 +1692,7 @@ export class SkinEditorScene extends Phaser.Scene {
     });
     this.palettePicker.setTriggerLabel(`Palette: ${active.name} ▾`);
     this.palettePicker.setItems(
-      choices.map((p) => ({ id: p.id, label: p.name, textureKey: this.paletteThumbnail(p) })),
+      choices.map((p) => ({ id: p.id, label: p.name, textureKey: paletteThumbnail(this, p) })),
       active.id,
     );
     return y + height + GROUP_GAP;
