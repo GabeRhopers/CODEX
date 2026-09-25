@@ -1939,6 +1939,14 @@ export class SkinEditorScene extends Phaser.Scene {
    *
    * Reachable from both tabs, which is why it does not require a live canvas
    * any more — on the "What it does" tab there is none.
+   *
+   * **Nothing here announces a save it has not seen land.** Until 2026-09-25 the
+   * definition went out as a bare `void saveCustomEntity(draft).then(...)` with
+   * no `.catch`, while `Saved "<name>"` was printed from the synchronous branch
+   * below — so a Drive outage produced a green "Saved" over an empty library,
+   * and the thing was simply not in the editor afterwards. That is the exact
+   * shape `drive-failure.spec.ts` already calls Tier 1 for the level editor; it
+   * had never been asked of this screen.
    */
   private onSave(): void {
     if (!this.target) return;
@@ -1951,13 +1959,34 @@ export class SkinEditorScene extends Phaser.Scene {
         return;
       }
       this.saveError = undefined;
-      void saveCustomEntity(draft).then(() => {
-        this.draftIsNew = false;
-        // The grid reads labels off these, so a rename has to reach it.
-        this.customDefs = this.customDefs.some((def) => def.id === draft.id)
-          ? this.customDefs.map((def) => (def.id === draft.id ? draft : def))
-          : [...this.customDefs, draft];
-      });
+    }
+    // Folded in before anything asynchronous starts: the live canvas holds the
+    // only copy of the strokes made since the last rebuild.
+    if (this.pixelCanvas) this.target = this.captureActiveFrame();
+    void this.persist(draft);
+  }
+
+  /**
+   * The two halves of a Save, in order, each one waited for.
+   *
+   * The definition goes first and a failure stops here: a drawing saved against
+   * a thing that is not in the library is an orphan, and the canvas is still on
+   * screen, so pressing Save again after the outage saves both.
+   */
+  private async persist(draft?: CustomEntityDef): Promise<void> {
+    if (draft) {
+      try {
+        await saveCustomEntity(draft);
+      } catch (err) {
+        console.error("Thing save failed:", err);
+        this.statusText?.setText("Couldn't save that thing — try again in a moment").setColor("#ff6666");
+        return;
+      }
+      this.draftIsNew = false;
+      // The grid reads labels off these, so a rename has to reach it.
+      this.customDefs = this.customDefs.some((def) => def.id === draft.id)
+        ? this.customDefs.map((def) => (def.id === draft.id ? draft : def))
+        : [...this.customDefs, draft];
     }
 
     // Nothing has been painted yet — which is a perfectly good state for a
@@ -1966,8 +1995,7 @@ export class SkinEditorScene extends Phaser.Scene {
       this.statusText?.setText(draft ? `Saved "${draft.name}".` : "").setColor("#4ade80");
       return;
     }
-    const target = this.captureActiveFrame();
-    this.target = target;
+    const target = this.target!;
     const plan = framePlanFor(target.brush.id);
     const uploadedBy = loadActiveProfile() ?? "unknown";
 
