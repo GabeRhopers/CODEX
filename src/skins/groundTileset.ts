@@ -97,7 +97,17 @@ export async function composeGroundStrip(
   if (scene.textures.exists(key)) return key;
   const canvas = scene.textures.createCanvas(key, TILE_SIZE * STRIP_LENGTH, TILE_SIZE);
   if (!canvas) return builtIn;
+  // The canvas is guarded above and its context was not, so a null context
+  // threw on the `drawImage` below. Seen for real in a browser on 2026-09-23.
+  //
+  // **It was never as bad as it looked, and the difference is worth recording.**
+  // That throw is caught by composeAll's own per-strip handler, which exists to
+  // never reject for exactly this reason, so the level went on to build with
+  // the shipped strip — an exception and a console line, not a broken game. A
+  // clean return says the same thing without the detour, and without an
+  // unhandled-looking error in the log to mislead the next person reading it.
   const ctx = canvas.getContext();
+  if (!ctx) return builtIn;
 
   // Start from the shipped art, so every unskinned frame stays exactly itself.
   const source = scene.textures.get(builtIn).getSourceImage();

@@ -363,3 +363,66 @@ test("a level still starts when the skins library read never answers", async ({ 
   await expect.poll(() => readSceneField<string>(page, "Play", "outcome"), { timeout: 20000, intervals: [100] }).toBe("won");
   await page.keyboard.up("ArrowRight");
 });
+
+test("a level still starts when the composed tileset cannot be drawn", async ({ page }) => {
+  test.slow();
+  // The sibling of the test above, for a failure that *does* settle — and this
+  // one guards the sentence composeAll already carries: "Never rejects,
+  // deliberately. PlayScene *waits* on this before it builds the area, so a
+  // rejection here would mean no ground, no player, no level."
+  //
+  // Nothing tested that. Removing the per-strip try/catch it describes leaves
+  // `areaBuilt` false for ever — console chrome, an empty screen, nothing to do
+  // but watch — and every other test in this file went on passing, because they
+  // all compose successfully.
+  //
+  // The way in is a real one rather than a contrived throw: composeGroundStrip
+  // guarded the canvas it creates and not the 2D context it then asks that
+  // canvas for, so a null context threw on the first `drawImage`. That happened
+  // in a browser on 2026-09-23. It cost an exception and a console line and
+  // nothing else, precisely because the handler above caught it — and that is
+  // the property worth pinning, not the guard that now makes the throw
+  // unnecessary.
+  await gotoApp(page);
+  await paintSkinFor(page, "Grass");
+  await startEditorWithLevel(page, grassLevel());
+  await chooseBlockSkin(page, "Grass", "Grass 1");
+
+  // **The composed strip has to be thrown away first**, and finding that out is
+  // the reason the tileset assertion below exists. Picking the skin in the
+  // editor composes the strip there, and `composeAll` returns early for a key
+  // the texture manager already holds — so Play never reached `createCanvas`,
+  // the stub never fired, and the test passed while exercising nothing. The
+  // "fell back to the shipped strip" expectation is what said so.
+  const composed = await grassTilesetName(page, "Editor");
+  expect(composed, "the editor should have composed a skinned strip").not.toBe(GRASS_TILESET);
+  await page.evaluate((key) => {
+    const textures = window.__debugGame!.textures as unknown as {
+      remove(key: string): void;
+      createCanvas(key: string, w: number, h: number): { getContext(): unknown } | null;
+    };
+    textures.remove(key);
+    const real = textures.createCanvas.bind(textures);
+    textures.createCanvas = (k: string, w: number, h: number) => {
+      const canvas = real(k, w, h);
+      if (canvas) canvas.getContext = () => null;
+      return canvas;
+    };
+  }, composed);
+
+  await clickByText(page, "Editor", "Test Play (Space)");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
+
+  // The level builds, wearing the shipped art rather than the painted skin —
+  // and the assertion that matters is not the art but that there is a level at
+  // all. Before the guard this hung here for ever.
+  await expect
+    .poll(() => readSceneField<boolean>(page, "Play", "areaBuilt"), { timeout: 25000, intervals: [250] })
+    .toBe(true);
+  expect(await grassTilesetName(page, "Play"), "fell back to the shipped strip").toBe(GRASS_TILESET);
+
+  // And it is playable, not merely built.
+  await page.keyboard.down("ArrowRight");
+  await expect.poll(() => readSceneField<string>(page, "Play", "outcome"), { timeout: 20000, intervals: [100] }).toBe("won");
+  await page.keyboard.up("ArrowRight");
+});
