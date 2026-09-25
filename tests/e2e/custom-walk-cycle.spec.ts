@@ -299,6 +299,8 @@ test("a thing with one frame still stands perfectly still", async ({ page }) => 
     const until = Date.now() + ms;
     while (Date.now() < until) {
       for (const k of await read()) seen.add(k);
+      // The sampling interval of a collector, not a wait for anything to
+      // happen — the loop's own deadline decides when it stops.
       await page.waitForTimeout(80);
     }
     return [...seen];

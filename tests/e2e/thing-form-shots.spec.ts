@@ -26,6 +26,7 @@ test("the edit form fits in every family", async ({ page }, testInfo) => {
 
   for (const family of ["Item", "Enemy", "Decoration"] as const) {
     await clickByText(page, "SkinEditor", family);
+    // Settling before a photograph; nothing below asserts on it.
     await page.waitForTimeout(300);
 
     const name = `thing-form-${family.toLowerCase()}`;

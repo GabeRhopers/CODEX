@@ -91,8 +91,9 @@ test("the pad joins the keyboard rather than replacing it", async ({ page }) => 
   // keyboard, and a pad joins the same way. Someone playing on a keyboard with
   // a pad plugged in must not find their arrow keys dead.
   await page.keyboard.down("ArrowRight");
-  await page.waitForTimeout(120);
-  expect(await velocityX(page)).toBeGreaterThan(0);
+  // Polled, not timed: 120ms is two frames at 60fps and none at all on a
+  // machine that is busy.
+  await expect.poll(() => velocityX(page), { timeout: 15_000 }).toBeGreaterThan(0);
   await page.keyboard.up("ArrowRight");
 });
 

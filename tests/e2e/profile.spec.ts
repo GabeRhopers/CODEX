@@ -169,8 +169,15 @@ test("one profile's levels and worlds do not show up in another's", async ({ pag
 
   await clickByText(page, "Menu", "My Levels");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("LevelBrowser"));
-  // Poll for the list to settle before asserting an *absence* — otherwise this
-  // would pass simply by reading the screen before the Drive round trip lands.
+  // A settle before asserting an *absence*, which cannot be polled for — the
+  // first sample would satisfy it.
+  //
+  // **Known weakness, stated rather than hidden.** This could still pass by
+  // reading the screen before the Drive round trip lands, which is the vacuous
+  // half of an absence test. Fixing it needs a positive signal that the list
+  // has loaded — this profile's own content, or an empty-state line — and this
+  // comment is here so the next person knows that is the fix rather than a
+  // longer number. (It said "Poll for the list to settle" and did not poll.)
   await page.waitForTimeout(500);
   expect(await levelNames()).not.toContain("Mike's Level");
   await clickByText(page, "LevelBrowser", "← Back");
@@ -178,6 +185,7 @@ test("one profile's levels and worlds do not show up in another's", async ({ pag
 
   await clickByText(page, "Menu", "Worlds");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldBrowser"));
+  // The same absence, with the same known weakness — see the note above.
   await page.waitForTimeout(500);
   expect(await worldNames()).not.toContain("Mike's World");
   await clickByText(page, "WorldBrowser", "← Back");

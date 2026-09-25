@@ -80,6 +80,8 @@ async function playTwo(page: Page, pads: number): Promise<void> {
   await play(page, pads);
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await characters(page)).length, { timeout: 5_000 }).toBe(2);
+  // The second character arrives beside the first and both settle onto the
+  // floor; every drift below is measured from where they come to rest.
   await page.waitForTimeout(200);
 }
 
@@ -87,6 +89,40 @@ async function playTwo(page: Page, pads: number): Promise<void> {
  * "went left" and "went right" are distinguishable and "did not move" is zero. */
 function drift(before: Character[], after: Character[]): number[] {
   return after.map((c, i) => Math.round(c.x - before[i].x));
+}
+
+/**
+ * Presses, then polls the drift until `done` is satisfied, handing the last
+ * sample back through `keep`.
+ *
+ * **Asking rather than timing**, for the reason recorded in CLAUDE.md: a
+ * character covers about 30px in the first 250ms of a run and about 100px once
+ * warm, so a fixed hold long enough on an idle machine is not long enough under
+ * load. This suite has lost three commits to that already.
+ *
+ * The sample is handed back rather than re-read afterwards so that the *other*
+ * assertions in these tests — the "and this one did not move" half — are made
+ * against the same instant the movement was observed, which is the earliest
+ * moment they can be, and so the strongest.
+ */
+async function holdUntilMoved(
+  page: Page,
+  before: Character[],
+  done: (drifted: number[]) => boolean,
+  press: () => Promise<void>,
+  keep: (drifted: number[]) => void,
+): Promise<void> {
+  await press();
+  await expect
+    .poll(
+      async () => {
+        const drifted = drift(before, await characters(page));
+        keep(drifted);
+        return done(drifted);
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
 }
 
 test("with one controller, it drives player two and leaves player one alone", async ({ page }) => {
@@ -101,9 +137,12 @@ test("with one controller, it drives player two and leaves player one alone", as
   await playTwo(page, 1);
   const before = await characters(page);
 
-  await hold(page, PAD.right);
-  await page.waitForTimeout(500);
-  const moved = drift(before, await characters(page));
+  // Polled until it has moved, not held for a fixed 500ms and hoped. That also
+  // makes the second assertion *stronger*: player one is checked at the
+  // earliest moment player two had definitely moved, which is the least time
+  // player one has had to drift.
+  let moved: number[] = [];
+  await holdUntilMoved(page, before, (d) => d[1] > 20, () => hold(page, PAD.right), (d) => (moved = d));
   await release(page, PAD.right);
 
   expect(moved[1], "the controller moved player two").toBeGreaterThan(20);
@@ -118,10 +157,17 @@ test("with two controllers, each drives its own character at the same time", asy
   await playTwo(page, 2);
   const before = await characters(page);
 
-  await hold(page, PAD.left, 0);
-  await hold(page, PAD.right, 1);
-  await page.waitForTimeout(500);
-  const moved = drift(before, await characters(page));
+  let moved: number[] = [];
+  await holdUntilMoved(
+    page,
+    before,
+    (d) => d[0] < -20 && d[1] > 20,
+    async () => {
+      await hold(page, PAD.left, 0);
+      await hold(page, PAD.right, 1);
+    },
+    (d) => (moved = d),
+  );
   await release(page, PAD.left, 0);
   await release(page, PAD.right, 1);
 
@@ -137,9 +183,8 @@ test("a lone player still has the first controller, exactly as before", async ({
   await play(page, 1);
   const before = await characters(page);
 
-  await hold(page, PAD.right);
-  await page.waitForTimeout(500);
-  const moved = drift(before, await characters(page));
+  let moved: number[] = [];
+  await holdUntilMoved(page, before, (d) => d[0] > 20, () => hold(page, PAD.right), (d) => (moved = d));
   await release(page, PAD.right);
 
   expect(moved[0]).toBeGreaterThan(20);

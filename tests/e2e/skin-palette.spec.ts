@@ -181,8 +181,25 @@ test("an off-palette colour survives a frame switch instead of being discarded",
   // shown that way until 2026-09-12, which on a screen aimed at a child said
   // nothing. The stored names are unchanged — renaming them would orphan the art
   // in every saved skin — so this is the second frame under its new label.
+  // **Polled on the frame, not on the colour.** Polling for the colour would be
+  // vacuous: it is already `picked` before the switch, so the very first sample
+  // passes whether the rebuild has happened or not — the assertion would hold
+  // with the feature removed. The active frame changing is the rebuild actually
+  // having occurred, so that is what is waited for, and the colour is read
+  // after it.
   await clickByText(page, "SkinEditor", "Frame 2 ·");
-  await page.waitForTimeout(200);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
+            target?: { activeFrame?: string };
+          };
+          return scene.target?.activeFrame ?? "";
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe("1");
   expect(await currentColor(page), "the sampled colour should survive a rebuild").toBe(picked);
 });
 
@@ -221,8 +238,12 @@ test("switching palette keeps the strokes you have already made", async ({ page 
 
   await clickByText(page, "SkinEditor", "Palette: PICO-8 ▾");
   await clickByText(page, "SkinEditor", "Sweetie 16");
-  await page.waitForTimeout(300);
 
-  expect(await sceneTexts(page), "the chip should follow the switch").toContain("Palette: Sweetie 16 ▾");
+  // The chip changing *is* the signal that the switch landed, so it is polled
+  // for rather than waited out — and the stroke count is then read at that
+  // moment, which is the earliest the rebuild can have thrown them away.
+  await expect
+    .poll(() => sceneTexts(page), { timeout: 15_000 })
+    .toContain("Palette: Sweetie 16 ▾");
   expect(await painted(), "the drawing should survive a palette switch").toBe(3);
 });

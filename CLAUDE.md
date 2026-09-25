@@ -61,6 +61,14 @@ racing a character to the goal. Measured: a character covers ~30px in the first
 `waitForTimeout` is fine for "let a tween finish before screenshotting". It is
 never fine for "the thing I am about to assert on should exist by now".
 
+The line between the two is which kind of assertion follows. Before a *positive*
+one ("it moved") a fixed wait is a race. Before a *negative* one ("no second
+player appeared") it is the only tool there is, because an absence cannot be
+polled for. `src/e2eWaits.test.ts` enforces the distinction the only way a test
+can: it does not ban the call, it requires a comment beside every one with a
+numeric argument, and leaves you to write the sentence that decides which you
+have. A named constant is its own justification and is exempt.
+
 **Assert the precondition, or the test passes vacuously.** If a test depends on
 a *state* — the level is still loading, the area is not yet built, the menu is
 open — assert that state before acting on it. Tests that skipped this have

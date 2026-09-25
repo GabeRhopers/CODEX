@@ -610,6 +610,8 @@ async function buildLevel(page: Page, hand: Hand, run: Run, plan: LevelPlan): Pr
       .not.toContain("enemy-ghost-pillow");
 
     await page.keyboard.down("ArrowRight");
+    // Walking for the photograph, not towards an assertion — nothing below
+    // depends on how far it got.
     await page.waitForTimeout(1200);
     await page.keyboard.up("ArrowRight");
     await shot(page, `${plan.shot}-play`);

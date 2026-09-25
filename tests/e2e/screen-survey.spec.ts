@@ -64,6 +64,8 @@ test("every authoring screen, on an iPad", async ({ page }, testInfo) => {
   const missed: string[] = [];
 
   const shot = async (name: string): Promise<void> => {
+    // Settling before a photograph. This file asserts only that it *reached*
+    // every screen, so a short wait costs a blurry picture and never a pass.
     await page.waitForTimeout(500);
     await testInfo.attach(name, { body: await page.screenshot(), contentType: "image/png" });
     await page.screenshot({ path: `test-results/survey-${name}.png` });

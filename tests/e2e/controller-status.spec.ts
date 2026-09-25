@@ -53,7 +53,9 @@ async function play(page: Page): Promise<void> {
   await startEditorWithLevel(page, LEVEL());
   await clickByText(page, "Editor", "Test Play (Space)");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
-  await page.waitForTimeout(300);
+  // The line itself is the precondition, and one test below reads it without a
+  // poll — so wait for it to exist rather than for 300ms to pass.
+  await expect.poll(() => statusLine(page), { timeout: 15_000 }).not.toBe("");
 }
 
 test("with no controller seen, it says which button to press", async ({ page }) => {

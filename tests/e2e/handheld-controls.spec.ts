@@ -248,14 +248,18 @@ test("Start freezes the level, and pressing it again resumes it", async ({ page 
   expect(await physicsPaused(page)).toBe(true);
   const frozenX = await playerX(page);
   await page.keyboard.down("ArrowRight");
+  // Fixed on purpose: this asserts the character did *not* move while paused.
+  // An absence cannot be polled for — the first sample would satisfy it.
   await page.waitForTimeout(500);
   expect(await playerX(page)).toBe(frozenX);
 
   await clickStart(page);
   expect(await physicsPaused(page)).toBe(false);
-  await page.waitForTimeout(500);
+  // Polled: this asserts the character *did* move, and a fixed wait for a
+  // positive is the race this suite keeps losing. Its twin above is a fixed
+  // wait on purpose, because that one asserts the opposite.
+  await expect.poll(() => playerX(page), { timeout: 15_000 }).toBeGreaterThan(frozenX + 20);
   await page.keyboard.up("ArrowRight");
-  expect(await playerX(page)).toBeGreaterThan(frozenX + 20);
 });
 
 test("Start is refused once the run is over, so no pause lands on the win screen", async ({ page }) => {

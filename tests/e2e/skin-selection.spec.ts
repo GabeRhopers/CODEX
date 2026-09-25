@@ -70,6 +70,7 @@ test("the armed tool still looks armed after you hover it and move away", async 
   const p = await buttonPoint(page, "Fill");
   await page.mouse.move(p.x, p.y);
   await page.mouse.move(p.x, p.y + 120); // off the button, without clicking
+  // An absence: the highlight must *not* change. Fixed by necessity.
   await page.waitForTimeout(50);
 
   expect(await buttonBackground(page, "Fill"), "hovering the armed tool must not clear its highlight").toBe(armed);
@@ -107,6 +108,7 @@ test("Grid and Mirror keep their On highlight after a hover", async ({ page }) =
     const p = await buttonPoint(page, on);
     await page.mouse.move(p.x, p.y);
     await page.mouse.move(p.x, p.y + 120);
+    // An absence, as above.
     await page.waitForTimeout(50);
     expect(await buttonBackground(page, on), `${on} lost its highlight to a hover`).toBe(lit);
   }

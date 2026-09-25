@@ -126,6 +126,8 @@ test("a level that loads normally is still one player until somebody asks", asyn
   await clickByText(page, "Editor", "Test Play (Space)");
 
   await expect.poll(() => areaBuilt(page), { timeout: 20_000 }).toBe(true);
+  // An absence again: giving a join that should not exist every chance to
+  // appear before asserting it did not.
   await page.waitForTimeout(600);
 
   expect(await playerCount(page)).toBe(1);

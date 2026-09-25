@@ -42,6 +42,8 @@ const active = (page: Page, key: string): Promise<boolean> =>
 
 function shotter(slug: string) {
   return async (page: Page, name: string): Promise<void> => {
+    // Letting the scene settle before photographing it. Nothing is asserted on
+    // the result, so there is no race to lose.
     await page.waitForTimeout(600);
     await page.screenshot({ path: `test-results/play-${slug}-${name}.png` });
   };
@@ -70,6 +72,9 @@ async function playToTheGoal(page: Page, attempts = 4, seconds = 16): Promise<bo
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) {
       await page.keyboard.press("R");
+      // A settle before driving again, not before asserting: Restart rebuilds
+      // the scene asynchronously, and if this is short the attempt simply
+      // fails and the loop takes another.
       await page.waitForTimeout(600);
     }
     await page.keyboard.down("ArrowRight");

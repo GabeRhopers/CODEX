@@ -107,6 +107,8 @@ async function playTwo(page: Page, level = FLAT()): Promise<void> {
   await play(page, level);
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await characters(page)).length, { timeout: 5_000 }).toBe(2);
+  // The second character arrives beside the first and both settle onto the
+  // floor; every position below is read against where they come to rest.
   await page.waitForTimeout(200);
 }
 
@@ -120,6 +122,8 @@ async function holdKeys(page: Page, keys: string[], ms: number): Promise<void> {
   for (const key of keys) await page.keyboard.down(key);
   await page.waitForTimeout(ms);
   for (const key of keys) await page.keyboard.up(key);
+  // One frame past the release, so the zeroed velocity is what the next read
+  // sees rather than the last held one.
   await page.waitForTimeout(120);
 }
 
@@ -144,6 +148,7 @@ async function holdUntil(page: Page, keys: string[], done: () => Promise<boolean
   } finally {
     for (const key of keys) await page.keyboard.up(key);
   }
+  // One frame past the release, as above.
   await page.waitForTimeout(120);
 }
 
@@ -183,6 +188,9 @@ test("a third Enter does nothing — there are two sets of keys, not three", asy
 
   await page.keyboard.press("Enter");
   await page.keyboard.press("Enter");
+  // Asserting an *absence* — a third character must not appear — so this is a
+  // fixed wait by necessity. Polling would return on the first sample and
+  // prove nothing.
   await page.waitForTimeout(400);
 
   expect(await characters(page)).toHaveLength(2);
@@ -209,9 +217,18 @@ test("W jumps player two without lifting player one", async ({ page }) => {
   const before = await characters(page);
   expect(before[0].y, "both start on the floor").toBe(before[1].y);
 
+  // Polled for the jump rather than timed. W stays held throughout, and a held
+  // jump bunny-hops on landing (see updatePlayerMovement), so there are
+  // repeated chances to catch an airborne frame instead of one 160ms window
+  // that a loaded machine can miss entirely.
+  let mid = before;
   await page.keyboard.down("KeyW");
-  await page.waitForTimeout(160);
-  const mid = await characters(page);
+  await expect
+    .poll(async () => {
+      mid = await characters(page);
+      return mid[1].y < before[1].y - 10;
+    }, { timeout: 15_000 })
+    .toBe(true);
   await page.keyboard.up("KeyW");
 
   expect(mid[1].y, "player two is in the air").toBeLessThan(before[1].y - 10);
