@@ -30,6 +30,7 @@ import { backgroundDisplayLabel, resolveStaticBackground, STATIC_BACKGROUNDS, St
 import { BUILTIN_TUNES, builtinTuneLabel, isBuiltinTuneId } from "../music/builtinTunes";
 import { MusicAsset } from "../music/MusicLibrary";
 import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musicLibraryStorage";
+import { CHARACTER_SKIN_ID, HERO_TEXTURE_KEY } from "../skins/spriteFrames";
 import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { loadActiveProfile } from "../profile/Profile";
@@ -260,6 +261,8 @@ export class EditorScene extends Phaser.Scene {
         onDeleteArea: () => this.deleteCurrentArea(),
         onSkinPickerOpen: () => this.onSkinPickerOpen(),
         onSelectSkin: (skinId) => this.onSelectSkin(skinId),
+        onHeroPickerOpen: () => this.onHeroPickerOpen(),
+        onSelectHero: (skinId) => this.onSelectHero(skinId),
         onUploadSkin: (file) => this.uploadSkin(file),
         onDeleteSkin: (skinId) => this.onDeleteSkin(skinId),
         onSetSkinAsDefault: () => this.setAsDefaultSkin(),
@@ -1152,6 +1155,47 @@ export class EditorScene extends Phaser.Scene {
       const choice = this.level.skins?.[brush.id];
       const selected = choice === undefined ? USE_DEFAULT_SKIN_ID : (choice ?? BUILTIN_SKIN_ID);
       this.ui.setSkinPickerItems(items, selected);
+    });
+  }
+
+  /**
+   * The same picker, aimed at the character instead of at a brush.
+   *
+   * A hero is a skin for `CHARACTER_SKIN_ID`, so this is `onSkinPickerOpen`
+   * above with `"player"` in place of `brush.id` and nothing else changed —
+   * the two built-in entries, the three-state mapping, the level's own choice
+   * being what is highlighted. It needs its own method only because the skin
+   * picker reads the *selected brush*, and the character is not one.
+   *
+   * "Grampa" rather than a brush label: he is the built-in hero, and the two
+   * leading tiles are what you pick to get him back.
+   */
+  private onHeroPickerOpen(): void {
+    void resolveSkinThumbnails(this, CHARACTER_SKIN_ID, "Grampa").then((thumbnails) => {
+      const items: AssetPickerItem[] = [
+        { id: USE_DEFAULT_SKIN_ID, label: "Use default", textureKey: HERO_TEXTURE_KEY },
+        { id: BUILTIN_SKIN_ID, label: "Grampa", textureKey: HERO_TEXTURE_KEY },
+        ...thumbnails.map((t) => ({ id: t.id, label: t.name, textureKey: t.textureKey })),
+      ];
+      const choice = this.level.skins?.[CHARACTER_SKIN_ID];
+      const selected = choice === undefined ? USE_DEFAULT_SKIN_ID : (choice ?? BUILTIN_SKIN_ID);
+      this.ui.setHeroPickerItems(items, selected);
+    });
+  }
+
+  /**
+   * Records who this level is played as.
+   *
+   * Deliberately not `deletable` in the picker above: a hero is deleted in the
+   * Skin Creator, where it was drawn, and removing one from here would be a
+   * library-wide act hiding inside a per-level control — the same separation
+   * `setAsDefaultSkin` exists to keep.
+   */
+  private onSelectHero(choice: string | null | undefined): void {
+    this.setLevelSkin(CHARACTER_SKIN_ID, choice);
+    void this.reresolveSkins().catch((err: unknown) => {
+      console.error("Hero selection failed:", err);
+      this.ui.setStatus("Couldn't switch that hero");
     });
   }
 

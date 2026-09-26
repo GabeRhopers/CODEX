@@ -28,7 +28,7 @@ import {
   ReferenceSource,
   skinReferenceId,
 } from "../skins/referenceSources";
-import { baseFrameOf, CHARACTER_SKIN_ID, frameLabel, framePlanFor, gridSizeFor } from "../skins/spriteFrames";
+import { baseFrameOf, CHARACTER_SKIN_ID, frameLabel, framePlanFor, gridSizeFor, HERO_TEXTURE_KEY } from "../skins/spriteFrames";
 import { hasFinePointer } from "../ui/pointer";
 import { cellHitArgs } from "../ui/touchTarget";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PALETTE_SWATCH_NAME, PIXEL_PALETTES, PixelPalette } from "../skins/pixelPalettes";
@@ -123,7 +123,7 @@ const CHARACTER_BRUSH: Brush = {
   category: "markers",
   kind: "entity",
   label: "Grampa",
-  textureKey: "wizard-idle",
+  textureKey: HERO_TEXTURE_KEY,
 };
 
 /** Every target the Skin Creator can paint: the character first, since it's

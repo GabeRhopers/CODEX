@@ -27,6 +27,12 @@ import { isCustomEntityId } from "../entities/customEntity";
  */
 export const CHARACTER_SKIN_ID = "player";
 
+/** The built-in hero's face, for anywhere that needs to *show* him rather than
+ * animate him — a cut scene's cast list, the Skin Creator's grid tile, the
+ * editor's hero picker. Here beside his id because three files were each
+ * spelling "wizard-idle" for the same reason. */
+export const HERO_TEXTURE_KEY = "wizard-idle";
+
 /**
  * The character's five poses, matching the `wizard-*` textures one-for-one
  * (see wizardAnimation.ts's WIZARD_FRAME_KEYS). Order is the order the editor

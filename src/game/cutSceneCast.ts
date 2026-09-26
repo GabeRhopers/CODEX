@@ -14,7 +14,7 @@
 import type { CustomEntityDef, PlaceableType } from "../entities/customEntity";
 import { customBrushes, textureKeyFor } from "../entities/entityRegistry";
 import { PALETTE } from "../editor/Palette";
-import { CHARACTER_SKIN_ID } from "../skins/spriteFrames";
+import { CHARACTER_SKIN_ID, HERO_TEXTURE_KEY } from "../skins/spriteFrames";
 
 /**
  * The hero's resting pose.
@@ -26,7 +26,6 @@ import { CHARACTER_SKIN_ID } from "../skins/spriteFrames";
  * painted player skin is stored against. That means a child who redrew the hero
  * gets *their* hero in the cut scene for free.
  */
-const HERO_TEXTURE_KEY = "wizard-idle";
 
 export interface CastMember {
   id: string;

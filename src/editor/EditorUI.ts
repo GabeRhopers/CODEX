@@ -16,6 +16,7 @@ import { LevelNameInput } from "./LevelNameInput";
 import { Brush, CATEGORIES, isSkinnable, MINE_TAB, PALETTE, PaletteTab, UP_BASKET_TINT_COLOR } from "./Palette";
 import { BrushSlot, layOutBrushes, pageOfBrush } from "./paletteLayout";
 import { CustomEntityDef, isCustomEntityId } from "../entities/customEntity";
+import { CHARACTER_SKIN_ID } from "../skins/spriteFrames";
 import { customBrushes } from "../entities/entityRegistry";
 import { clampPage, rowsPerPage } from "../ui/pager";
 import { fitWithinTile } from "./spriteFit";
@@ -61,6 +62,20 @@ export interface EditorUICallbacks {
    * this level currently uses for the selected brush. Separated from
    * onSelectSkin precisely so no ordinary edit can reach every other level. */
   onSetSkinAsDefault: () => void;
+
+  /**
+   * Who this level's hero is.
+   *
+   * The same three states as `onSelectSkin` above and the same machinery behind
+   * it — a hero is simply the skin for `CHARACTER_SKIN_ID` — but it gets its own
+   * pair of hooks because it cannot go through the skin picker: that one
+   * reskins *whichever brush is selected*, and the character is deliberately not
+   * a palette brush, since it is not something you paint into a level. So it
+   * belongs over here with Background and Music, which are the level's other
+   * "what is this level like" choices rather than "what am I placing".
+   */
+  onHeroPickerOpen: () => void;
+  onSelectHero: (skinId: string | null | undefined) => void;
 
   onBackgroundPickerOpen: () => void;
   onSelectBackground: (id: string) => void;
@@ -246,6 +261,7 @@ export class EditorUI {
   private saveStatusText: Phaser.GameObjects.Text;
   private backgroundPicker!: AssetPickerMenu;
   private musicPicker!: AssetPickerMenu;
+  private heroPicker!: AssetPickerMenu;
   private skinPicker!: AssetPickerMenu;
   private setDefaultSkinButton!: Phaser.GameObjects.Text;
   private setDefaultArmed = false;
@@ -526,6 +542,46 @@ export class EditorUI {
       onUploadFile: (file) => this.callbacks.onUploadMusic(file),
     });
     this.musicPicker.setTriggerLabel(this.musicLabelText(initialMusicLabel));
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
+    /**
+     * Hero picker: which character this level is played as.
+     *
+     * A hero *is* a skin — PlayScene has always resolved the character through
+     * `resolveFrameTextureKeys(this, CHARACTER_SKIN_ID, level.skins)`, with
+     * skinSelection.ts's level → default → built-in cascade behind it — so
+     * nothing about the runtime changed to add this. What was missing was any
+     * way to say so: the skin picker in the left panel reskins whichever brush
+     * is *selected*, and the character is deliberately not a palette brush,
+     * because it is not something you paint into a level. That left "Set as
+     * default" in the Skin Creator as the only lever, which moves the hero for
+     * every level at once.
+     *
+     * Here rather than there, then, beside the two other choices that are about
+     * the level rather than about what you are holding. No upload hook: a hero
+     * is drawn in the Skin Creator, where its five poses are.
+     */
+    this.heroPicker = new AssetPickerMenu({
+      scene,
+      trigger: { x: RIGHT_PANEL_X + PANEL_PADDING, y: rowY, width: RIGHT_BUTTON_WIDTH, height: RIGHT_BUTTON_HEIGHT },
+      columns: SKIN_PICKER_COLUMNS,
+      itemSize: SKIN_PICKER_ITEM_SIZE,
+      triggerDepth: CONTENT_DEPTH,
+      dropdownDepth: DROPDOWN_DEPTH,
+      onToggleOpen: (isOpen) => {
+        if (!isOpen) return;
+        this.skinPicker.close();
+        this.backgroundPicker.close();
+        this.musicPicker.close();
+        this.callbacks.onHeroPickerOpen();
+      },
+      onSelect: (id) => {
+        if (id === USE_DEFAULT_SKIN_ID) this.callbacks.onSelectHero(undefined);
+        else if (id === BUILTIN_SKIN_ID) this.callbacks.onSelectHero(null);
+        else this.callbacks.onSelectHero(id);
+      },
+    });
+    this.setHeroPickerLabel();
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
     // Enemy Size: a placement-time preference (like the palette selection
@@ -1117,6 +1173,32 @@ export class EditorUI {
     return this.levelSkins?.[brush.id] ? "Skin: Custom ▾" : "Skin: Default ▾";
   }
 
+  /**
+   * What the hero trigger says, in the Skin picker's own three words rather
+   * than the Background picker's naming of its choice.
+   *
+   * Naming the chosen hero would read better beside "BG: Meadow", but the
+   * skin's *name* only arrives when the picker is opened (see
+   * onHeroPickerOpen's Drive read), so labelling it that way would mean
+   * resolving the whole library on every editor open to fill in one word.
+   * Built-in / Default / Custom is the same vocabulary the control it is
+   * really a sibling of already uses.
+   */
+  private heroTriggerLabel(): string {
+    if (!this.skinTextureKeys.has(CHARACTER_SKIN_ID)) return "Hero: Built-in ▾";
+    return this.levelSkins?.[CHARACTER_SKIN_ID] ? "Hero: Custom ▾" : "Hero: Default ▾";
+  }
+
+  private setHeroPickerLabel(): void {
+    this.heroPicker.setTriggerLabel(this.heroTriggerLabel());
+  }
+
+  /** Pushed in by EditorScene when its hero picker opens and the library has
+   * resolved — same shape as setSkinPickerItems. */
+  setHeroPickerItems(items: AssetPickerItem[], activeId: string): void {
+    this.heroPicker.setItems(items, activeId);
+  }
+
   private setSkinPickerLabel(): void {
     this.skinPicker.setTriggerLabel(this.skinTriggerLabel());
     const skinnable = !!this.selectedBrush() && isSkinnable(this.selectedBrush()!);
@@ -1129,6 +1211,7 @@ export class EditorUI {
   setLevelSkins(levelSkins: Record<string, string | null> | undefined): void {
     this.levelSkins = levelSkins;
     this.setSkinPickerLabel();
+    this.setHeroPickerLabel();
   }
 
   private onSetDefaultClicked(): void {
@@ -1167,5 +1250,6 @@ export class EditorUI {
     this.skinTextureKeys = skinTextureKeys;
     this.renderIconGrid();
     this.setSkinPickerLabel();
+    this.setHeroPickerLabel();
   }
 }
