@@ -35,12 +35,39 @@ export interface Brush {
   groupEnd?: boolean;
 }
 
-export const CATEGORIES: { id: BrushCategory; label: string }[] = [
+/**
+ * What the palette's dropdown offers, which is the five families **plus one
+ * view**: "Mine", everything this child invented in the Thing Maker.
+ *
+ * Deliberately a wider type than `BrushCategory` rather than a sixth category,
+ * and that is the whole design of the feature. An invented thing keeps the
+ * family it belongs to — `category === "enemies"` is what makes an invented
+ * enemy carry its size, in EntityPlacer and in EditorScene's placement — so
+ * re-pointing custom brushes at a `"mine"` category would quietly break them.
+ * `"mine"` is therefore a *filter over the same brushes*, never a value any
+ * `Brush` holds, which also leaves every exhaustive switch over `BrushCategory`
+ * exhaustive. See EditorUI's `iconPages`.
+ *
+ * It exists because an invented thing is appended to the end of its family, and
+ * Decor ships exactly ten brushes against a grid that holds exactly ten — so an
+ * invented decoration landed on page 2 while the editor sat on page 1, and a
+ * child who had just made a Totem could not find it. It is last in the list
+ * because the five families are where a level is mostly built from; it is in the
+ * list at all because the thing you made yourself is the thing you are looking
+ * for.
+ */
+export type PaletteTab = BrushCategory | "mine";
+
+/** The tab holding invented things rather than a family of built-ins. */
+export const MINE_TAB = "mine";
+
+export const CATEGORIES: { id: PaletteTab; label: string }[] = [
   { id: "blocks", label: "Blocks" },
   { id: "markers", label: "Markers" },
   { id: "enemies", label: "Enemies" },
   { id: "items", label: "Items" },
   { id: "decor", label: "Decor" },
+  { id: MINE_TAB, label: "Mine" },
 ];
 
 /**

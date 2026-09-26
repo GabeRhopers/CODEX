@@ -436,7 +436,7 @@ export async function clickDeleteBadgeFor(page: Page, sceneKey: string, label: s
 export async function selectPaletteCategory(
   page: Page,
   sceneKey: string,
-  label: "Blocks" | "Markers" | "Enemies" | "Items" | "Decor",
+  label: "Blocks" | "Markers" | "Enemies" | "Items" | "Decor" | "Mine",
 ): Promise<void> {
   const chipPoint = await waitForScenePoint(
     page,

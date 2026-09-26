@@ -202,3 +202,85 @@ function paletteLabels(page: Page): Promise<string[]> {
     return out;
   });
 }
+
+/**
+ * "Mine": the one tab holding everything this child invented.
+ *
+ * The paging test above is the *reason* this exists, and reads as its own
+ * indictment — it asserts, correctly, that a freshly invented Totem is **not**
+ * on the palette's first page. Decor ships exactly ten brushes against a grid
+ * that holds exactly ten, so an invented decoration lands on page 2 while the
+ * editor sits on page 1. "I made a thing and it isn't in the editor" was that,
+ * plus a save that lied (see thing-save-failure.spec.ts).
+ *
+ * The tab is a *filter*, never a category — which is the whole point of the
+ * last test here.
+ */
+test("an invented thing is on the first page of Mine, whatever family it is", async ({ page }) => {
+  test.slow();
+  // All three families at once: the tab's job is that "where is my thing" has
+  // one answer rather than three places to look.
+  await gotoApp(page);
+  await seedCustomEntities(page, [
+    customDef({ id: "custom:totem", name: "Totem", category: "decor", basedOn: "decor-tree" }),
+    customDef({ id: "custom:blob", name: "Blob", category: "enemies", basedOn: "enemy-ghost" }),
+    customDef({ id: "custom:star", name: "Star Fruit", category: "items", basedOn: "item-coin" }),
+  ]);
+  await startEditorWithLevel(page, runwayLevel());
+  await selectPaletteCategory(page, "Editor", "Mine");
+
+  // No pager click anywhere in this test — that is the assertion.
+  await expect.poll(() => paletteLabels(page)).toContain("Totem");
+  expect(await paletteLabels(page)).toEqual(expect.arrayContaining(["Totem", "Blob", "Star Fruit"]));
+
+  // Reachable means placeable, the same bar the paging test sets.
+  await clickIconWithLabel(page, "Editor", "Totem");
+  const target = tileCenter(6, 7);
+  await clickScenePoint(page, target.x, target.y);
+  await expect.poll(() => placedTypes(page, "Editor")).toContain("custom:totem");
+});
+
+test("Mine says where things come from before there are any", async ({ page }) => {
+  test.slow();
+  // The tab is shown from the start rather than appearing with the first
+  // invention, so an empty one has to answer "why is this empty" itself.
+  await gotoApp(page);
+  await startEditorWithLevel(page, runwayLevel());
+  await selectPaletteCategory(page, "Editor", "Mine");
+
+  await expect.poll(() => paletteLabels(page).then((l) => l.join(" "))).toContain("Invent one in Things");
+});
+
+test("an invented enemy placed from Mine still carries its size", async ({ page }) => {
+  test.slow();
+  // **The trap this feature had to avoid, as an assertion.** An enemy's size is
+  // stored only when `brush.category === "enemies"` — in EntityPlacer and in
+  // EditorScene's placement — so the one-line version of the Mine tab, which
+  // re-points invented brushes at a "mine" category, silently stops every
+  // invented enemy carrying its size. The tab is a filter for exactly this
+  // reason, and nothing else in the suite would notice if that changed.
+  await gotoApp(page);
+  await seedCustomEntities(page, [
+    customDef({ id: "custom:blob", name: "Blob", category: "enemies", basedOn: "enemy-ghost" }),
+  ]);
+  await startEditorWithLevel(page, runwayLevel());
+
+  // Large rather than the default, so the stored value cannot be confused with
+  // whatever a missing one falls back to.
+  await clickByText(page, "Editor", "Large");
+  await selectPaletteCategory(page, "Editor", "Mine");
+  await clickIconWithLabel(page, "Editor", "Blob");
+  const target = tileCenter(6, 7);
+  await clickScenePoint(page, target.x, target.y);
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const scene = window.__debugGame!.scene.getScene("Editor") as unknown as {
+          level: { entities: { type: string; size?: string }[] };
+        };
+        return scene.level.entities.find((e) => e.type === "custom:blob")?.size;
+      }),
+    )
+    .toBe("large");
+});

@@ -13,9 +13,9 @@ import { AreaKey, EnemySize } from "../level/LevelSchema";
 import { SAVE_STATE_DISPLAY, SaveState } from "../persistence/saveState";
 import { AssetPickerItem, AssetPickerMenu } from "./AssetPickerMenu";
 import { LevelNameInput } from "./LevelNameInput";
-import { Brush, BrushCategory, CATEGORIES, isSkinnable, PALETTE, UP_BASKET_TINT_COLOR } from "./Palette";
+import { Brush, CATEGORIES, isSkinnable, MINE_TAB, PALETTE, PaletteTab, UP_BASKET_TINT_COLOR } from "./Palette";
 import { BrushSlot, layOutBrushes, pageOfBrush } from "./paletteLayout";
-import { CustomEntityDef } from "../entities/customEntity";
+import { CustomEntityDef, isCustomEntityId } from "../entities/customEntity";
 import { customBrushes } from "../entities/entityRegistry";
 import { clampPage, rowsPerPage } from "../ui/pager";
 import { fitWithinTile } from "./spriteFit";
@@ -267,7 +267,7 @@ export class EditorUI {
   private upAreaExists = false;
   private sizeButtons = new Map<EnemySize, PanelButton>();
   private currentSize: EnemySize = "medium";
-  private readonly categoryButtons = new Map<BrushCategory, PanelButton>();
+  private readonly categoryButtons = new Map<PaletteTab, PanelButton>();
   private iconGrid: Phaser.GameObjects.Container;
   private chipButton!: PanelButton;
   private dropdownContainer: Phaser.GameObjects.Container;
@@ -276,7 +276,7 @@ export class EditorUI {
   private handActive = false;
   private clearArmed = false;
   private clearArmTimer?: Phaser.Time.TimerEvent;
-  private activeCategory: BrushCategory;
+  private activeCategory: PaletteTab;
   private selectedBrushId: string;
   // brushId -> texture key for every brush with a custom skin uploaded
   // (see skinLoader.ts) — empty until EditorScene's async resolve pass
@@ -674,7 +674,7 @@ export class EditorUI {
     if (!this.dropdownOpen) this.updateSelectedOutlinePosition();
   }
 
-  private selectCategory(category: BrushCategory): void {
+  private selectCategory(category: PaletteTab): void {
     this.dropdownOpen = false;
     this.dropdownContainer.setVisible(false);
     this.iconGrid.setVisible(true);
@@ -706,8 +706,21 @@ export class EditorUI {
    * brush list, which setCustomBrushes can replace at any time, and the walk is
    * over at most a couple of dozen entries. */
   private iconPages(): BrushSlot[][] {
-    const brushes = this.brushes.filter((brush) => brush.category === this.activeCategory);
-    return layOutBrushes(brushes, ICON_ROWS, ICON_COLS);
+    return layOutBrushes(this.tabBrushes(), ICON_ROWS, ICON_COLS);
+  }
+
+  /**
+   * The brushes the open tab is showing.
+   *
+   * "Mine" is a **filter, not a family** — see PaletteTab. An invented brush
+   * keeps `category: "enemies"`, because that is what makes an invented enemy
+   * carry its size through EntityPlacer and EditorScene's placement, so the tab
+   * cannot be expressed by comparing categories. The `custom:` id prefix already
+   * answers "did somebody invent this", so no `Brush` needed a new field either.
+   */
+  private tabBrushes(): Brush[] {
+    if (this.activeCategory === MINE_TAB) return this.brushes.filter((brush) => isCustomEntityId(brush.id));
+    return this.brushes.filter((brush) => brush.category === this.activeCategory);
   }
 
   /** The texture a brush's icon (and, via EntityPlacer/PlayScene using
@@ -756,7 +769,32 @@ export class EditorUI {
     // brush occupies stays [Image, Text]-adjacent, which is what the e2e helper
     // clickIconWithLabel matches on.
     this.iconGrid.add(this.makeIconPager(pages.length));
+    if (this.activeCategory === MINE_TAB && pages[0].length === 0) this.iconGrid.add(this.makeEmptyMineNote());
     this.updateSelectedOutlinePosition();
+  }
+
+  /**
+   * What "Mine" says before anything has been invented.
+   *
+   * The tab is shown from the start rather than appearing once the first thing
+   * exists, so it needs to answer "why is this empty" itself. A tab that
+   * materialises later is harder to find than one that explains what fills it,
+   * and this is the door a child will use most once there is anything behind it.
+   *
+   * Wrapped to the panel's own width, and a plain label — assertLayoutSound
+   * compares only *interactive* Text, so this one is on nobody's list but the
+   * eye's.
+   */
+  private makeEmptyMineNote(): Phaser.GameObjects.Text {
+    return this.scene.add
+      .text(PANEL_PADDING, ICON_GRID_START_Y - TILE_SIZE / 2, "Nothing yet.\nInvent one in Things,\non the Menu.", {
+        fontSize: "11px",
+        color: "#a6a6c8", // the same muted grey the panel titles use
+        lineSpacing: 4,
+        wordWrap: { width: CHIP_WIDTH },
+      })
+      .setOrigin(0, 0)
+      .setDepth(CONTENT_DEPTH);
   }
 
   /** The compact "‹ 2/3 ›" row under the grid. Nothing at all while the
