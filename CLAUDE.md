@@ -119,6 +119,17 @@ during that window could not see a key already held, and a button press during
 it was silently discarded. If you touch scene start-up, ask what happens to
 input that arrives mid-load.
 
+**Never announce a save you have not seen land.** Every write here goes to
+Drive and every one of them can fail. A `void save(x).then(...)` with no
+`.catch`, or a success message printed from a branch that does not await the
+write, produces a green "Saved" over an empty library — which is
+indistinguishable from the app losing a child's work, because it is. The Thing
+Maker did exactly this and nothing in the suite could see it: `installMockDrive`
+makes Drive work everywhere, so a save path is only tested against failure if
+somebody writes that test. `drive-failure.spec.ts` pins the three properties a
+failing save owes you — say so, keep what is on screen, let a retry work —
+and `failDriveWrites` is how you ask.
+
 ## Comments and commits
 
 Comments here are long on purpose and carry *why*, not *what* — they have
