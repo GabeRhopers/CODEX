@@ -318,6 +318,14 @@ describe("applyPickup", () => {
     expect(stats.hasKey).toBe(true);
     applyPickup(stats, "item-shield", 1000);
     expect(isInvincible(stats, 1000)).toBe(true);
+    // The Feather, added after a live bug report about jumping sent me looking
+    // at this test and finding it checked three of the seven. The double jump
+    // is the one pickup whose effect is invisible until you are already in the
+    // air, so it is the one least likely to be noticed if it silently stopped.
+    applyPickup(stats, "item-feather", 0);
+    expect(canDoubleJump(stats, false), "the Feather is what grants the second jump").toBe(true);
+    applyPickup(stats, "item-thunder-hat", 0);
+    expect(canFireThunderHat(stats, 10_000)).toBe(true);
   });
 
   it("leaves anything it does not recognise alone", () => {

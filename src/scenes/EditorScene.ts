@@ -334,6 +334,41 @@ export class EditorScene extends Phaser.Scene {
     });
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer));
 
+    /**
+     * **A paused scene still hears the keyboard, and this one must not.**
+     *
+     * Test Play launches Play and pauses *this* scene (see testPlay). Pausing
+     * stops `update`; it does nothing to Phaser's keyboard plugin, which goes on
+     * delivering events to every scene that ever registered a handler. So every
+     * binding below stayed live underneath the game — and one of them is Space,
+     * which is the jump key.
+     *
+     * The result was that jumping restarted the level. `testPlay` fired again,
+     * `scene.launch("Play")` re-ran `init()` on the scene already playing, and
+     * the character reappeared at the Spawn marker with fresh `stats` — so a
+     * collected Feather or Thunder Hat was gone too. It reads exactly like the
+     * character refusing to jump forward, because he does jump and then the
+     * level is rebuilt under him mid-arc.
+     *
+     * Present since the MVP commit and invisible for as long, because a tablet
+     * plays with the on-screen D-pad and never sends a Space. It is only the
+     * keyboard that hits it, and only in Test Play.
+     *
+     * Toggled at the scene level rather than guarded inside the Space handler
+     * alone. Measured, because the first version of this comment claimed more
+     * than was true: Ctrl+Z does **not** currently leak — painting a tile, test
+     * playing and pressing it leaves the edited level at 21 tiles, unchanged.
+     * Only Space gets through. The scene-level switch is still the right shape,
+     * because what it protects against is the next binding rather than the
+     * present two, but nothing here should be read as a second fault fixed.
+     */
+    this.events.on(Phaser.Scenes.Events.PAUSE, () => {
+      if (this.input.keyboard) this.input.keyboard.enabled = false;
+    });
+    this.events.on(Phaser.Scenes.Events.RESUME, () => {
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
+
     this.input.keyboard?.on("keydown-SPACE", () => this.onceThisFrame("testPlay", () => this.testPlay()));
     this.input.keyboard?.on("keydown-Z", (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
