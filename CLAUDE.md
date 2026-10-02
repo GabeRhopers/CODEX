@@ -44,6 +44,14 @@ three ways with `retries: 1`; the full single-worker run is ~30 minutes and
 reproduces neither CI's ordering nor its load. Twice, the full suite passed
 locally while CI failed, and `--shard=1/3` found it in ten minutes.
 
+> **But run all three shards after adding or deleting a spec file.** Shards are
+> composed from the file list, so adding one reshuffles which files land where —
+> and a file can then sit in a shard nobody runs for several commits. That is
+> exactly how a `cut-scenes` failure introduced in `530e3fe` rode through two
+> green-looking pushes: it only became visible when a new spec file pulled that
+> file into 1/3 for the first time. One shard is the right habit; it is not a
+> substitute for the suite on the one commit that moves the boundaries.
+
 > **Never pass `--workers=2` to go faster.** `playwright.config.ts` pins
 > `workers: 1` and says why: several specs (basket pairing, checkpoints) drive
 > timing-sensitive physics through software WebGL, and parallel workers on one
