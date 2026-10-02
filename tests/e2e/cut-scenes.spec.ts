@@ -403,12 +403,24 @@ test("a panel of only characters still plays, and draws them", async ({ page }) 
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("CutScene"));
   await expect.poll(() => labels(page, "CutScene")).toContain("1 / 1");
 
-  const drawn = await page.evaluate(() => {
-    const scene = window.__debugGame!.scene.getScene("CutScene");
-    type Obj = { type?: string; texture?: { key: string } };
-    return (scene.children.list as unknown as Obj[]).filter((c) => c.type === "Image").map((c) => c.texture?.key);
-  });
-  expect(drawn).toContain("wizard-idle");
+  // **Polled, not read once.** The panel label appears as soon as the scene is
+  // up, but the actors are drawn later: CutSceneScene awaits
+  // `resolveSkinTextureKeys` and `loadCustomEntities` before it can know what
+  // each one wears. Reading the display list the instant "1 / 1" showed was a
+  // race this test had always been winning by luck, and it started losing when
+  // an unrelated commit added one module to that resolve's import chain —
+  // nothing about the drawing changed, only how long it took to get there.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const scene = window.__debugGame!.scene.getScene("CutScene");
+          type Obj = { type?: string; texture?: { key: string } };
+          return (scene.children.list as unknown as Obj[]).filter((c) => c.type === "Image").map((c) => c.texture?.key);
+        }),
+      { timeout: 10_000 },
+    )
+    .toContain("wizard-idle");
 });
 
 test("characters placed in the maker travel in the published file", async ({ page }) => {
