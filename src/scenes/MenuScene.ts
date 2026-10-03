@@ -535,6 +535,25 @@ export class MenuScene extends Phaser.Scene {
 
   // -------------------------------------------------------- live statuses
 
+  /**
+   * **Everything below awaits, and the Menu can be gone by the time it lands.**
+   *
+   * Both reads are a Drive round trip, and nothing stops somebody tapping a
+   * card while they are in flight — the Menu is the one screen whose whole job
+   * is to be left. When that happened the resolve went on to `setText` a Text
+   * whose canvas the shutdown had already destroyed, and Phaser threw deep
+   * inside `Frame.updateUVs`:
+   *
+   *     TypeError: Cannot read properties of null (reading 'drawImage')
+   *
+   * Uncaught, on an ordinary boot, and invisible — the game carries on because
+   * the scene it broke is already dead. It was found by reading a console, not
+   * by a failing test.
+   *
+   * `isActive()` after every await is how six other scenes in this codebase
+   * already handle the same shape (BootScene, both Cut Scene screens,
+   * EditorScene, GameMakerScene, SkinEditorScene). This one had been missed.
+   */
   private async refreshStatuses(): Promise<void> {
     await Promise.all([this.refreshLevels(), this.refreshWorlds()]);
   }
@@ -543,7 +562,9 @@ export class MenuScene extends Phaser.Scene {
     let levels: LevelSummary[];
     try {
       levels = await this.levelStorage.list();
+      if (!this.scene.isActive()) return;
     } catch {
+      if (!this.scene.isActive()) return;
       // Previously an unhandled rejection: both status lines sat on
       // "Checking…" forever with nothing telling the player why, and the
       // resume bar would have done the same. An offline/consent failure is
@@ -583,12 +604,14 @@ export class MenuScene extends Phaser.Scene {
   private async refreshWorlds(): Promise<void> {
     try {
       const worlds = await this.worldStorage.list();
+      if (!this.scene.isActive()) return;
       this.worldsSubtitle.setText(
         worlds.length === 0
           ? "No Worlds yet — chain a few levels together"
           : `${worlds.length} World${worlds.length === 1 ? "" : "s"} saved`,
       );
     } catch {
+      if (!this.scene.isActive()) return;
       this.worldsSubtitle.setText("Couldn't reach Drive — open to try again");
     }
   }
@@ -603,6 +626,10 @@ export class MenuScene extends Phaser.Scene {
     } catch {
       level = null;
     }
+    // Guarded for a different reason than the refreshes above: this one would
+    // not throw, it would *navigate* — sending somebody who already left the
+    // Menu somewhere they did not ask to go, a load later.
+    if (!this.scene.isActive()) return;
     if (level) this.scene.start("Editor", { level });
     else this.scene.start("LevelBrowser");
   }
