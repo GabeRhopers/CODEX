@@ -5,10 +5,34 @@ import { firstSceneOfGame } from "../game/gameRun";
 import { padConnected } from "../gameplay/gamepad";
 import { installPadNavigation } from "../gameplay/padNavigation";
 
-/** The controls line under the Play button. Held as a constant because the
- * controller notice is appended to it rather than replacing it — a pad joins
- * the keyboard here exactly as it does in gameplay. */
-const KEYBOARD_HINT = "Arrow keys or WASD to move, Space to jump";
+/**
+ * The controls line under the Play button.
+ *
+ * **It named three things a tablet does not have.** Until 2026-10-05 this read
+ * "Arrow keys or WASD to move, Space to jump" — unconditionally, on the one
+ * screen somebody who was *sent a link* actually arrives at. The audience for a
+ * published game is a family opening it on a phone or an iPad, where there is no
+ * keyboard at all, and it said nothing about the D-pad and face buttons that
+ * `HandheldShell` draws around every level. The game was perfectly playable; the
+ * title simply described a different machine.
+ *
+ * Nothing failed and nothing looked broken, so no assertion could have caught
+ * it. It was found by screenshotting the published game and reading it.
+ *
+ * The wording is `MenuScene`'s, which already named all three on the editor
+ * side, minus its "once you're playing" tail — on this screen you are about to.
+ * Deliberately *not* shared as one constant with it: that tail is true there and
+ * false here, and one string forced on both would have to be a little untrue
+ * somewhere. Matching the vocabulary is the point, not the identity.
+ *
+ * No touch detection, deliberately — see `TouchControls`, which has none "to get
+ * wrong" and whose buttons are genuinely clickable with a mouse too. Naming all
+ * three is true on every device and needs no branch.
+ *
+ * Held as a constant because the controller notice is appended to it rather than
+ * replacing it — a pad joins these exactly as it does in gameplay.
+ */
+const CONTROLS_HINT = "Arrow keys/WASD/on-screen buttons to move, Space/▲ to jump";
 
 /**
  * The front door of a published game.
@@ -71,7 +95,7 @@ export class GameTitleScene extends Phaser.Scene {
     installPadNavigation(this, { onConfirm: () => this.start() });
 
     const hint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 42, KEYBOARD_HINT, { fontSize: "12px", color: "#a6a6c8" })
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 42, CONTROLS_HINT, { fontSize: "12px", color: "#a6a6c8" })
       .setOrigin(0.5);
 
     /**
@@ -88,7 +112,7 @@ export class GameTitleScene extends Phaser.Scene {
      * committing to a level.
      */
     const watchPad = (): void => {
-      const text = padConnected() ? `${KEYBOARD_HINT} · Controller ready` : KEYBOARD_HINT;
+      const text = padConnected() ? `${CONTROLS_HINT} · Controller ready` : CONTROLS_HINT;
       if (hint.text !== text) hint.setText(text);
     };
     this.events.on(Phaser.Scenes.Events.UPDATE, watchPad);

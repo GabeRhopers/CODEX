@@ -220,6 +220,18 @@ test("a published bundle plays start to finish with no editor and no sign-in", a
   expect(await labels(page, "GameTitle")).toContain("Play ▶");
   expect(page.url()).not.toContain("game.json");
 
+  // **The controls line has to describe the device it is being read on.** It
+  // said "Arrow keys or WASD to move, Space to jump" unconditionally until
+  // 2026-10-05, on the one screen somebody who was sent a link arrives at — and
+  // that audience is a family on a phone or an iPad, with no keyboard anywhere
+  // near them. The on-screen D-pad and face buttons were there the whole time;
+  // only the title failed to mention them.
+  //
+  // Asserted on "on-screen" rather than on the sentence: what must stay true is
+  // that a control a tablet actually has gets named, not any particular wording.
+  const hint = (await labels(page, "GameTitle")).find((t) => t.includes("to jump")) ?? "";
+  expect(hint, "the title must name a control that exists without a keyboard").toContain("on-screen");
+
   await clickByText(page, "GameTitle", "Play ▶");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMap"));
   await expect.poll(() => labels(page, "WorldMap")).toContain("World One");
