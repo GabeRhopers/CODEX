@@ -5,6 +5,10 @@ from scratch on Phaser 3 (MIT). See
 `docs/spellbound-editor-implementation-plan.md` for the full architecture,
 data model, and milestone plan.
 
+Plans for work not yet built live in `docs/` alongside it —
+`docs/sprite-sequences-plan.md` is the current one, for giving a character a
+sequence of frames per state rather than one still picture each.
+
 ## What's in here
 
 A log of what was built and why, newest work appended into the section it
