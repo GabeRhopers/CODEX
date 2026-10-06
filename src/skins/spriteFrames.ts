@@ -1,4 +1,8 @@
 import { isCustomEntityId } from "../entities/customEntity";
+// Type-only, so this stays a compile-time relationship and adds no runtime edge
+// from the skins layer to the gameplay one: the character's frame groups are
+// keyed by CharacterSituation, which is what stops the two lists drifting.
+import type { CharacterSituation } from "../gameplay/characterState";
 
 /**
  * Which frames a skinnable thing has, and which frame stands in when one
@@ -195,4 +199,209 @@ export function loopLength(plan: FramePlan, painted: Readonly<Record<string, str
     count += 1;
   }
   return count;
+}
+
+/* ------------------------------------------------------------------------- *
+ * Frame groups — a sequence per state, rather than one still per pose.
+ *
+ * Everything below is additive and, as of this commit, unread: the five
+ * existing consumers of `plan.frames` (skinLoader and SkinEditorScene) are
+ * untouched, so no behaviour can have changed by its arrival. That is
+ * deliberate — the alias map below *is* the compatibility guarantee for every
+ * character skin already painted, and it is worth landing alone, where it can
+ * be reviewed and unit-tested without a scene in the way. See
+ * docs/sprite-sequences-plan.md for the phases that consume it.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The ceiling on frames in one state. Four, matching LOOP_FRAMES, and chosen on
+ * storage rather than on screen space.
+ *
+ * Measured 2026-10-06: the one painted frame stored in
+ * public/games/grampa-and-the-lost-sheep.json (an enemy, so a 32x32 grid) is a
+ * 1,994-byte data URL. A character's grid is 48x48, which is 2.25x the area, so
+ * a filled character frame should land in the low single-digit KB and seven
+ * states of four frames in the tens of KB — against a skins.json that is read
+ * whole on every resolve. The Skin Creator column could hold about six rows —
+ * its five-row strip reaches y=318 against a footer at y=421, per the comment
+ * in SkinEditorScene's buildCanvas — so four is the storage answer here, not
+ * the layout one.
+ */
+export const MAX_FRAMES_PER_STATE = 4;
+
+/**
+ * One state's frames, in the order they play.
+ *
+ * `state` is a plain string rather than CharacterSituation because a loop plan
+ * has no situation to name (see UNNAMED_GROUP_STATE) — the character groups are
+ * pinned to the union at their definition instead, which is where the drift
+ * would happen.
+ *
+ * `frames` holds *storage keys*, not display names, and is not derived from
+ * `state` by the reader: an enemy's four frames are still "0".."3" exactly as
+ * they were saved, which is the whole reason this model can cover both.
+ */
+export interface FrameGroup {
+  state: string;
+  frames: readonly string[];
+  loop: boolean;
+}
+
+/**
+ * The state name of a group that answers for whatever the thing is doing. An
+ * enemy cycles on a timer regardless of its situation, so its single group has
+ * no state to name — empty rather than "loop" so nothing reads it as a
+ * CharacterSituation that might one day exist.
+ */
+export const UNNAMED_GROUP_STATE = "";
+
+/**
+ * Which states cycle, and the order the editor will offer them in.
+ *
+ * Keyed by CharacterSituation so a situation cannot be added to the game
+ * without a decision about whether it loops — the compile error is the point.
+ * Order is the literal's own key order (insertion order, for non-numeric keys,
+ * by spec), leading with the states a child paints first, the same instinct
+ * behind CHARACTER_FRAMES' `idle, walk1, walk2, jump, cast`.
+ *
+ * Looping vs playing-once is the one genuinely new mechanic here, and the
+ * reason it is stored rather than inferred: breathing, striding and swimming
+ * repeat, but a jump is one arc (holding the last frame *is* the fall), and a
+ * collapse that cycles back to standing reads as a twitch rather than as
+ * dying.
+ */
+const CHARACTER_STATE_LOOPS: Record<CharacterSituation, boolean> = {
+  idle: true,
+  walk: true,
+  jump: false,
+  swim: true,
+  cast: false,
+  win: false,
+  lose: false,
+};
+
+/** The state every other state falls back to, and the one `imageData` mirrors
+ * — the group form of baseFrameOf's "idle". */
+const CHARACTER_BASE_STATE: CharacterSituation = "idle";
+
+/** `"walk.1"` — the state carries the meaning, the index is genuinely
+ * positional inside it. This does not breach SkinAsset.frames' "addressed by
+ * meaning, not by position" rule for the same reason LOOP_FRAMES does not:
+ * frame 2 of a stride has no name of its own to be addressed by. */
+function frameKeyFor(state: string, index: number): string {
+  return `${state}.${index}`;
+}
+
+const CHARACTER_GROUPS: readonly FrameGroup[] = Object.entries(CHARACTER_STATE_LOOPS).map(([state, loop]) => ({
+  state,
+  frames: Array.from({ length: MAX_FRAMES_PER_STATE }, (_, index) => frameKeyFor(state, index)),
+  loop,
+}));
+
+/** An enemy's existing cycle, unchanged, expressed as one group — which is what
+ * lets a later phase give enemies named groups with no second mechanism. */
+const LOOP_GROUPS: readonly FrameGroup[] = [
+  { state: UNNAMED_GROUP_STATE, frames: LOOP_FRAMES, loop: true },
+];
+
+/**
+ * The frame groups a plan can play, or none.
+ *
+ * **A tile plan has no groups, deliberately.** `top`/`fill` are autotile
+ * *variants*, not playback: `fill` is not frame 1 of `top`, it is what a buried
+ * cell renders as, and groundAutotile.ts is the single source of truth for
+ * which one a cell gets. Returning a two-frame group here would be a tidy lie
+ * that any caller iterating groups would then animate.
+ */
+export function frameGroupsFor(plan: FramePlan): readonly FrameGroup[] {
+  if (plan.kind === "character") return CHARACTER_GROUPS;
+  if (plan.kind === "loop") return LOOP_GROUPS;
+  return [];
+}
+
+/**
+ * Where a character's art lived before states had groups, by new key.
+ *
+ * This map is the compatibility guarantee: every character skin painted before
+ * this commit stores `idle`/`walk1`/`walk2`/`jump`/`cast`, and reading it is
+ * the only thing standing between those five frames and a child's work
+ * vanishing from the editor. Consulted at read time and migrated away on the
+ * next save of each skin, which is exactly the shape pixelData.cells already
+ * uses for the same problem.
+ *
+ * Only these five, because only these five ever existed — a state with no entry
+ * (swim, win, lose, and every index past the ones listed) simply has no legacy
+ * art to find.
+ */
+const LEGACY_FRAME_KEYS: Readonly<Record<string, string>> = {
+  "idle.0": "idle",
+  "walk.0": "walk1",
+  "walk.1": "walk2",
+  "jump.0": "jump",
+  "cast.0": "cast",
+};
+
+/** The single answer to "has this frame been painted", new key or old. Every
+ * public function here goes through it, so there is one place the legacy map is
+ * consulted rather than three that can disagree. */
+function paintedFrame(painted: Readonly<Record<string, string>>, key: string): string | undefined {
+  const own = painted[key];
+  if (own) return own;
+  const legacy = LEGACY_FRAME_KEYS[key];
+  return legacy ? painted[legacy] : undefined;
+}
+
+/**
+ * The key everything in a plan falls back to.
+ *
+ * For a character this is `"idle.0"` rather than baseFrameOf's `"idle"`, and
+ * the difference matters in one direction: paintedFrame("idle.0") finds the
+ * legacy `"idle"` through the alias map, while the reverse is not true, so a
+ * skin painted the *new* way would have no fallback at all if this returned
+ * the old key. baseFrameOf itself keeps answering "idle" until the phase that
+ * migrates its five callers (see the plan doc).
+ */
+function baseGroupKey(plan: FramePlan): string {
+  if (plan.kind === "character") return frameKeyFor(CHARACTER_BASE_STATE, 0);
+  return baseFrameOf(plan);
+}
+
+/**
+ * How many frames of a group are painted, counting from the start and stopping
+ * at the first gap — same rule as loopLength, so a walk with frames 0, 1 and 3
+ * painted strides through 0 and 1 rather than stuttering over the hole.
+ *
+ * It overlaps loopLength by construction: a loop plan is a single group, so
+ * that function is this one's single-group case. Left unmerged here on purpose
+ * — the value of this phase is that it cannot change behaviour, and loopLength
+ * has four live callers. The phase that moves the editor onto groups is where
+ * the two become one.
+ */
+export function groupLength(group: FrameGroup, painted: Readonly<Record<string, string>>): number {
+  let count = 0;
+  for (const key of group.frames) {
+    if (!paintedFrame(painted, key)) break;
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * Which image actually renders for frame `index` of `group`.
+ *
+ * Falls back to the plan's base frame and never to the built-in art, for the
+ * reason resolveFrame already records: a half-finished 16-colour character that
+ * turned into hand-drawn Grampa mid-jump would read as a bug rather than as
+ * unfinished work. Null means nothing at all has been painted, which callers
+ * treat as "keep the built-in art".
+ */
+export function resolveGroupFrame(
+  plan: FramePlan,
+  group: FrameGroup,
+  painted: Readonly<Record<string, string>>,
+  index: number,
+): string | null {
+  const key = group.frames[index];
+  const own = key === undefined ? undefined : paintedFrame(painted, key);
+  return own ?? paintedFrame(painted, baseGroupKey(plan)) ?? null;
 }

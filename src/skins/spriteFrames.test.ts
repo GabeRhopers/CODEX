@@ -5,11 +5,16 @@ import {
   CHARACTER_GRID_SIZE,
   CHARACTER_SKIN_ID,
   ENTITY_GRID_SIZE,
+  frameGroupsFor,
   frameLabel,
   framePlanFor,
   gridSizeFor,
+  groupLength,
   loopLength,
+  MAX_FRAMES_PER_STATE,
   resolveFrame,
+  resolveGroupFrame,
+  UNNAMED_GROUP_STATE,
 } from "./spriteFrames";
 
 /** A painted-frames map, with a distinguishable stand-in per frame so the
@@ -146,6 +151,147 @@ describe("loopLength", () => {
 
   it("is zero for an unpainted skin", () => {
     expect(loopLength(loop, {})).toBe(0);
+  });
+});
+
+describe("frameGroupsFor", () => {
+  const character = framePlanFor(CHARACTER_SKIN_ID)!;
+  const loop = framePlanFor("enemy-bat")!;
+  const tile = framePlanFor("ground-grass")!;
+
+  it("gives the character one group per situation, in editor order", () => {
+    // Seven, matching CharacterSituation exactly — a situation with no group
+    // would animate by falling back to idle, silently.
+    expect(frameGroupsFor(character).map((group) => group.state)).toEqual([
+      "idle",
+      "walk",
+      "jump",
+      "swim",
+      "cast",
+      "win",
+      "lose",
+    ]);
+  });
+
+  it("names a group's frames by state and position", () => {
+    const walk = frameGroupsFor(character).find((group) => group.state === "walk")!;
+    expect(walk.frames).toEqual(["walk.0", "walk.1", "walk.2", "walk.3"]);
+  });
+
+  it("cycles the states that repeat and plays the rest once", () => {
+    // The one genuinely new mechanic. A jump is a single arc, so holding its
+    // last frame *is* the fall; a collapse that cycles back to standing reads
+    // as a twitch rather than as dying.
+    const looping = frameGroupsFor(character)
+      .filter((group) => group.loop)
+      .map((group) => group.state);
+    expect(looping).toEqual(["idle", "walk", "swim"]);
+  });
+
+  it("keeps an enemy's cycle exactly as it was saved, as one unnamed group", () => {
+    // Storage keys unchanged: every enemy skin already painted must keep
+    // working, and an enemy cycles on a timer whatever it is doing, so there is
+    // no situation for the group to name.
+    expect(frameGroupsFor(loop)).toEqual([{ state: UNNAMED_GROUP_STATE, frames: ["0", "1", "2", "3"], loop: true }]);
+  });
+
+  it("gives a tile no groups at all", () => {
+    // `fill` is not frame 1 of `top` — it is what a buried cell renders as, and
+    // groundAutotile.ts decides which. A two-frame group here would make any
+    // caller iterating groups animate a wall.
+    expect(frameGroupsFor(tile)).toEqual([]);
+  });
+
+  it("holds every group inside the storage budget", () => {
+    for (const group of [...frameGroupsFor(character), ...frameGroupsFor(loop)]) {
+      expect(group.frames.length, group.state).toBeLessThanOrEqual(MAX_FRAMES_PER_STATE);
+    }
+  });
+});
+
+describe("frames painted before states had groups", () => {
+  const character = framePlanFor(CHARACTER_SKIN_ID)!;
+  const groups = frameGroupsFor(character);
+  const groupFor = (state: string) => groups.find((group) => group.state === state)!;
+
+  /** What a character skin saved before this model looked like, in full. */
+  const legacy = painted("idle", "walk1", "walk2", "jump", "cast");
+
+  it("finds all five of them at their new slots", () => {
+    // This map is the compatibility guarantee: if it is wrong, every character
+    // skin a child has already painted loses the art it is wrong about.
+    expect(resolveGroupFrame(character, groupFor("idle"), legacy, 0)).toBe("png:idle");
+    expect(resolveGroupFrame(character, groupFor("walk"), legacy, 0)).toBe("png:walk1");
+    expect(resolveGroupFrame(character, groupFor("walk"), legacy, 1)).toBe("png:walk2");
+    expect(resolveGroupFrame(character, groupFor("jump"), legacy, 0)).toBe("png:jump");
+    expect(resolveGroupFrame(character, groupFor("cast"), legacy, 0)).toBe("png:cast");
+  });
+
+  it("counts the old two-frame stride as a two-frame walk", () => {
+    expect(groupLength(groupFor("walk"), legacy)).toBe(2);
+    expect(groupLength(groupFor("idle"), legacy)).toBe(1);
+  });
+
+  it("has nothing to find for a state that never existed", () => {
+    // swim/win/lose had no frame of their own, so they fall back to idle —
+    // which is what they do on screen today, by a different route.
+    expect(groupLength(groupFor("swim"), legacy)).toBe(0);
+    expect(resolveGroupFrame(character, groupFor("win"), legacy, 0)).toBe("png:idle");
+  });
+
+  it("prefers the new key when a skin carries both", () => {
+    // What a half-migrated skin looks like: the new art is the art the child
+    // just painted, so it wins.
+    const both = painted("walk1", "walk.0");
+    expect(resolveGroupFrame(character, groupFor("walk"), both, 0)).toBe("png:walk.0");
+  });
+
+  it("leaves a skin painted the new way untouched by the aliases", () => {
+    const modern = painted("idle.0", "idle.1", "walk.0", "walk.1", "walk.2");
+    expect(groupLength(groupFor("idle"), modern)).toBe(2);
+    expect(groupLength(groupFor("walk"), modern)).toBe(3);
+    expect(resolveGroupFrame(character, groupFor("walk"), modern, 2)).toBe("png:walk.2");
+  });
+
+  it("falls back to idle.0 for a skin that only ever knew the new keys", () => {
+    // The one asymmetry worth a test: the alias map points new key -> old, so a
+    // base frame of "idle" would find nothing here and the skin would resolve
+    // to null — i.e. silently revert to Grampa's own art.
+    const modern = painted("idle.0");
+    expect(resolveGroupFrame(character, groupFor("jump"), modern, 0)).toBe("png:idle.0");
+  });
+});
+
+describe("groupLength and resolveGroupFrame", () => {
+  const character = framePlanFor(CHARACTER_SKIN_ID)!;
+  const walk = frameGroupsFor(character).find((group) => group.state === "walk")!;
+  const loop = framePlanFor("enemy-golem")!;
+  const cycle = frameGroupsFor(loop)[0]!;
+
+  it("stops at the first gap rather than stuttering over a hole", () => {
+    // Same rule loopLength documents, and for the same reason: cycling
+    // 0,1,blank,3 flickers and cycling 0,1,3 jumps.
+    expect(groupLength(walk, painted("walk.0", "walk.1", "walk.3"))).toBe(2);
+  });
+
+  it("counts a full group and an empty one", () => {
+    expect(groupLength(walk, painted("walk.0", "walk.1", "walk.2", "walk.3"))).toBe(4);
+    expect(groupLength(walk, {})).toBe(0);
+  });
+
+  it("agrees with loopLength about an enemy, because it is the same question", () => {
+    const half = painted("0", "1");
+    expect(groupLength(cycle, half)).toBe(loopLength(loop, half));
+  });
+
+  it("reports nothing for an entirely unpainted skin, so callers keep the built-in art", () => {
+    expect(resolveGroupFrame(character, walk, {}, 0)).toBeNull();
+  });
+
+  it("falls back for a frame index past the end of the group", () => {
+    // Guards the storage boundary the way resolveFrame's "somersault" test
+    // does: an index can arrive from a skin saved against a different cap.
+    expect(resolveGroupFrame(character, walk, painted("idle.0", "walk.0"), 9)).toBe("png:idle.0");
   });
 });
 
