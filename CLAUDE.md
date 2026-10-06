@@ -85,6 +85,17 @@ can: it does not ban the call, it requires a comment beside every one with a
 numeric argument, and leaves you to write the sentence that decides which you
 have. A named constant is its own justification and is exempt.
 
+**A key held for a fixed time is the same mistake, and hides better.** An input
+is only seen on an update tick, so a hold measured in milliseconds is not a hold
+measured in frames: under a starved loop — software WebGL, three shards sharing
+loaded CI runners — a wall-clock 80ms can span *zero* of them, and the press
+never happened as far as the game is concerned. The test then fails on whatever
+it asserts next, naming something that has nothing to do with the bug. This cost
+a red CI run on 2026-10-06: `test-play-keys` held Space for 80ms, failed shard 3
+twice including the retry, and passed in isolation locally every time. Hold until
+the game's own `loop.frame` has advanced (`holdKeyForFrames` there), or until the
+state the press causes is visible — never for a duration.
+
 **Assert the precondition, or the test passes vacuously.** If a test depends on
 a *state* — the level is still loading, the area is not yet built, the menu is
 open — assert that state before acting on it. Tests that skipped this have

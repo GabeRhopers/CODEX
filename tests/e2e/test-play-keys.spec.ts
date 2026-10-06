@@ -57,6 +57,28 @@ async function testPlay(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Holds a key down until the game loop has certainly seen it.
+ *
+ * A hold measured in milliseconds is not a hold measured in frames. A key is
+ * only observed on an update tick, and under a starved loop — software WebGL,
+ * three shards sharing loaded CI runners — a wall-clock 80ms can span zero of
+ * them, so the press never happens as far as the game is concerned. That is not
+ * hypothetical: an 80ms hold here failed CI shard 3 on 2026-10-06, twice
+ * including the retry, while passing in isolation locally. `loop.frame` is the
+ * game's own count and the only thing that answers "has this been seen"; the
+ * same counter is what waitForInputReady in support/coords.ts gates on.
+ *
+ * Two frames rather than one, so the key is down across a whole tick instead of
+ * straddling the boundary of one.
+ */
+async function holdKeyForFrames(page: Page, key: string, frames = 2): Promise<void> {
+  const start = await page.evaluate(() => window.__debugGame!.loop.frame);
+  await page.keyboard.down(key);
+  await page.waitForFunction((until) => window.__debugGame!.loop.frame > until, start + frames, { timeout: 10_000 });
+  await page.keyboard.up(key);
+}
+
 /** Walks right onto the coin, so there is a piece of progress that a restart
  * would visibly throw away. */
 async function takeTheCoin(page: Page): Promise<void> {
@@ -72,22 +94,21 @@ test("jumping with Space does not restart the level", async ({ page }) => {
   await takeTheCoin(page);
   const before = await play(page);
 
-  // Held rather than pressed: a press can be shorter than a frame, and a jump
-  // that never registered would pass this test for the wrong reason — which is
-  // why the airborne assertion below comes first.
+  // Held until the game itself says he left the ground, rather than for a fixed
+  // number of milliseconds. This is one gesture doing two jobs, and both matter:
+  // the hold cannot be too short to register (see holdKeyForFrames for why that
+  // is not theoretical), and it **is the precondition** — if he never leaves the
+  // ground, this times out here saying exactly that, instead of letting the
+  // score check below pass vacuously over a jump that never happened.
   await page.keyboard.down("Space");
-  await page.waitForTimeout(80);
-  await page.keyboard.up("Space");
-  // A second jump, mid-air, because that is the press the fault appears on —
-  // a player jumping repeatedly, which is what anybody does.
-  await page.waitForTimeout(200);
-  await page.keyboard.down("Space");
-  await page.waitForTimeout(80);
+  await expect.poll(async () => (await play(page)).grounded, { timeout: 10_000 }).toBe(false);
   await page.keyboard.up("Space");
 
-  // **The precondition.** If he never left the ground there is no jump here to
-  // have survived, and the score check would prove nothing.
-  await expect.poll(async () => (await play(page)).grounded, { timeout: 5_000 }).toBe(false);
+  // A second jump, mid-air, because that is the press the fault appears on — a
+  // player jumping repeatedly, which is what anybody does. He is airborne right
+  // now by the assertion above, so this press lands mid-arc by construction
+  // rather than by waiting a guessed 200ms for it to.
+  await holdKeyForFrames(page, "Space");
 
   // An absence, so a fixed wait is the tool: `scene.launch` is *queued* and
   // lands on a later scene-manager step, so asserting the instant he leaves the
