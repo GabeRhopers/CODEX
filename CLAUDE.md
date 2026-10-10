@@ -25,7 +25,11 @@ because of this (local co-op needs no split screen, for one).
 
 ## Verification, in the order that matters
 
-**1. `npm run check`** — typecheck, lint, unit tests. Fast; run it constantly.
+**1. `npm run check`** — typecheck and unit tests (`tsc --noEmit && vitest run`).
+Fast; run it constantly. **There is no linter in this project** — no ESLint, no
+Biome, no Prettier, no config and no dependency. `tsc` and the tests are the
+whole net, so nothing catches an unused import, a stray `console.log` or a
+formatting slip for you.
 
 **2. Look at it.** Take a screenshot and read it. Every visual defect this
 project has had was found this way and not by an assertion: a World Map that was
