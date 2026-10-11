@@ -1580,7 +1580,13 @@ export class PlayScene extends Phaser.Scene {
       this.fireThunderBolt(player, time);
     }
 
-    updatePlayerMovement(sprite, player.input, touch, speedMultiplierAt(this.stats, time) * (swimming ? SWIM_SPEED_MULTIPLIER : 1));
+    // Resolved once and shared with the animation below, so the legs and the
+    // body cannot disagree about how fast this character is travelling. The
+    // swim factor stays out of what the animation sees: swimming is its own
+    // situation with its own single frame, so there is no stride for it to
+    // re-time, and folding it in would only make this number mean two things.
+    const speedMultiplier = speedMultiplierAt(this.stats, time);
+    updatePlayerMovement(sprite, player.input, touch, speedMultiplier * (swimming ? SWIM_SPEED_MULTIPLIER : 1));
     // The cast pose used to be re-applied here as a special case *after* the
     // animation had already picked a frame; it's now just one more situation
     // the resolver ranks (see characterState.resolveSituation), so swimming
@@ -1591,6 +1597,7 @@ export class PlayScene extends Phaser.Scene {
       swimming,
       casting: time < player.castFlashUntil,
       frameKeys: this.characterFrameKeys,
+      speedMultiplier,
     });
     this.updateCharacterVisuals(player, situation, time);
     this.updateAccessoryVisuals(player);

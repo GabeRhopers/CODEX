@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { CharacterSituation } from "./characterState";
 import { LOOP_FRAME_INTERVAL_MS } from "./spriteLoop";
+import { SPEED_MULTIPLIER } from "./PlayerStats";
 import {
   advanceSituation,
   createWizardAnimState,
+  strideIntervalMs,
   updateWizardAnimation,
   WALK_FRAME_INTERVAL_MS,
   WizardAnimContext,
@@ -308,5 +310,58 @@ describe("advanceSituation", () => {
   it("honours the interval it is given", () => {
     const slow = createWizardAnimState();
     expect(advanceSituation(slow, "walk", STEP, 4, STEP * 2)).toBe(0);
+  });
+});
+
+describe("running takes faster steps", () => {
+  it("shortens the stride in proportion to how fast he is moving", () => {
+    // Measured against the real constants rather than written out: 140 / 1.6 =
+    // 87.5ms per frame while a Speed Potion is up.
+    expect(strideIntervalMs(SPEED_MULTIPLIER)).toBeCloseTo(WALK_FRAME_INTERVAL_MS / SPEED_MULTIPLIER);
+    expect(strideIntervalMs(SPEED_MULTIPLIER)).toBeLessThan(WALK_FRAME_INTERVAL_MS);
+  });
+
+  it("walks at the ordinary cadence when nothing is boosting him", () => {
+    // speedMultiplierAt returns exactly 1 when no potion is active, and that
+    // must leave the stride bit-for-bit what it was before this existed.
+    expect(strideIntervalMs(1)).toBe(WALK_FRAME_INTERVAL_MS);
+  });
+
+  it("falls back to the ordinary cadence rather than freezing on a nonsense speed", () => {
+    // An interval of Infinity would hold one leg forward forever, which reads
+    // as a broken sprite rather than as a character standing still.
+    for (const bad of [0, -1, Number.NaN]) {
+      expect(strideIntervalMs(bad), `multiplier ${bad}`).toBe(WALK_FRAME_INTERVAL_MS);
+    }
+  });
+
+  it("takes more steps than an ordinary walk over the same stretch of time", () => {
+    // The property as a player sees it, counted in actual texture swaps rather
+    // than in timer internals. An earlier version of this test compared the two
+    // elapsed times, which is true whether the boosted stride is faster *or*
+    // slower — it survived inverting the division, so it was not a test.
+    const steps = (speedMultiplier: number): number => {
+      const { sprite, applied } = fakeSprite();
+      const state = createWizardAnimState();
+      set(sprite, "walk");
+      for (let elapsed = 0; elapsed < WALK_FRAME_INTERVAL_MS * 2; elapsed += 10) {
+        updateWizardAnimation(sprite, state, 10, { ...PLAYING, speedMultiplier });
+      }
+      return applied.length;
+    };
+
+    // Over 280ms: an ordinary stride steps at 140 and 280, a boosted one at
+    // 87.5, 175 and 262.5.
+    expect(steps(SPEED_MULTIPLIER)).toBeGreaterThan(steps(1));
+  });
+
+  it("leaves a caller that says nothing about speed walking exactly as before", () => {
+    const { sprite } = fakeSprite();
+    const state = createWizardAnimState();
+    set(sprite, "walk");
+    updateWizardAnimation(sprite, state, WALK_FRAME_INTERVAL_MS - 1, PLAYING);
+    expect(sprite.texture.key).toBe("wizard-walk1");
+    updateWizardAnimation(sprite, state, 1, PLAYING);
+    expect(sprite.texture.key).toBe("wizard-walk2");
   });
 });

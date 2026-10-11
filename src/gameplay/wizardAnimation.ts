@@ -42,6 +42,31 @@ const BODY_HEIGHT = 40;
 export const WALK_FRAME_INTERVAL_MS = 140;
 const MOVING_VELOCITY_THRESHOLD = 5;
 
+/**
+ * How long one stride frame lasts for a character moving at `speedMultiplier`
+ * times normal.
+ *
+ * A character who covers ground faster takes faster steps. Before this, a Speed
+ * Potion moved Grampa at 1.6x while his legs kept the same 140ms cadence, so he
+ * visibly skated — the one place in the game where the animation and the physics
+ * disagreed about what was happening. Measured: 140 / 1.6 = 87.5ms per frame
+ * while boosted.
+ *
+ * Deliberately derived from the multiplier the movement code is *already* using
+ * rather than stored anywhere: nothing new to save, nothing to get out of step
+ * with how fast he is actually travelling. This is the whole of "running" —
+ * there is no run state and no run art, because a stride at speed is what
+ * running looks like.
+ *
+ * A multiplier of zero, negative or NaN falls back to the ordinary cadence
+ * rather than dividing: an interval of Infinity would freeze the stride
+ * mid-step, which reads as a bug rather than as standing still.
+ */
+export function strideIntervalMs(speedMultiplier: number): number {
+  if (!(speedMultiplier > 0)) return WALK_FRAME_INTERVAL_MS;
+  return WALK_FRAME_INTERVAL_MS / speedMultiplier;
+}
+
 /** How many frames the built-in art has for a walk: walk1 and walk2. Every
  * other situation is a single picture (see characterState's FRAME_BY_SITUATION),
  * which is exactly what the frame groups landed in Phase 1 are meant to end —
@@ -120,6 +145,16 @@ export interface WizardAnimContext {
   swimming: boolean;
   casting: boolean;
   /**
+   * How fast this character is travelling compared with normal — the same
+   * `speedMultiplierAt(stats, now)` PlayScene already hands to
+   * `updatePlayerMovement`, passed in rather than recomputed so the legs and the
+   * body can never disagree about the speed.
+   *
+   * Absent means normal pace, which is what every caller that does not care
+   * about a Speed Potion should leave it as.
+   */
+  speedMultiplier?: number;
+  /**
    * A custom character skin's frames, keyed by frame name ("idle", "walk1",
    * …) — see spriteFrames.ts. Absent (the ordinary case) means Grampa's own
    * built-in art, exactly as before this existed.
@@ -185,7 +220,7 @@ export function updateWizardAnimation(
   // *number fed to a timer* rather than a hand-rolled boolean flip, so the step
   // that gives a situation four frames is a different count, not different code.
   const frameCount = situation === "walk" ? WALK_FRAME_COUNT : 1;
-  const index = advanceSituation(state, situation, deltaMs, frameCount, WALK_FRAME_INTERVAL_MS);
+  const index = advanceSituation(state, situation, deltaMs, frameCount, strideIntervalMs(context.speedMultiplier ?? 1));
 
   applyWizardTexture(player, textureKeyFor(frameFor(situation, index === 1 ? 1 : 0), context.frameKeys));
   return situation;

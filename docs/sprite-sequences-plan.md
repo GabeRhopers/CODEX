@@ -185,12 +185,27 @@ tests. It is therefore pinned on `advanceSituation`, which the rule was
 extracted into so it can be driven with two multi-frame counts directly. That
 mutation now fails as it should.
 
-### Phase 2½ — Running, nearly free *(independent of everything else)*
+### Phase 2½ — Running, nearly free — **done (2026-10-11)**
 
 Scale `WALK_FRAME_INTERVAL_MS` by the existing `speedMultiplierAt(stats, now)`.
 **No new state, no new art, no new storage** — a character moving faster takes
-faster steps. Roughly ten lines, and the cheapest visible win on this list; it
-depends on no other phase and can land at any point.
+faster steps. The cheapest visible win on this list, and the estimate held: a
+`strideIntervalMs` rule, one optional context field, and two lines in PlayScene.
+
+It was cheap *because* Phase 2 went first. The stride's cadence had just become
+a number passed to `advanceSituation` rather than a hard-coded comparison, so
+there was a seam to scale. Done before Phase 2 it would have meant unpicking the
+hand-rolled timer at the same time.
+
+Measured: 140 / 1.6 = **87.5ms** per frame while a Speed Potion is up. What this
+fixes is a disagreement rather than a missing feature — a boosted Grampa moved
+at 1.6x while his legs kept the 140ms cadence, so he skated. `PlayScene` now
+resolves the multiplier once and hands the same number to the movement and the
+animation, so the two cannot drift apart.
+
+The swim factor is deliberately *not* folded in: swimming is its own situation
+with its own single frame, so there is no stride to re-time, and including it
+would make one number mean two things.
 
 ### Phase 3 — The editor can paint them
 
