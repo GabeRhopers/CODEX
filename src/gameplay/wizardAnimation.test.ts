@@ -5,6 +5,7 @@ import { SPEED_MULTIPLIER } from "./PlayerStats";
 import {
   advanceSituation,
   createWizardAnimState,
+  situationTextureKey,
   strideIntervalMs,
   updateWizardAnimation,
   WALK_FRAME_INTERVAL_MS,
@@ -363,5 +364,37 @@ describe("running takes faster steps", () => {
     expect(sprite.texture.key).toBe("wizard-walk1");
     updateWizardAnimation(sprite, state, 1, PLAYING);
     expect(sprite.texture.key).toBe("wizard-walk2");
+  });
+});
+
+describe("the pose a run ends on", () => {
+  // The bug this guards: applyTerminalPose wrote the built-in key directly, and
+  // PlayScene.update returns early once a run is over, so a painted character
+  // finished every run — won or lost — wearing Grampa's art, permanently.
+  const painted = new Map([
+    ["idle", "skin-frame-player-idle"],
+    ["cast", "skin-frame-player-cast"],
+  ]);
+
+  it("keeps a painted character's own art when they win", () => {
+    expect(situationTextureKey("win", 0, painted)).toBe("skin-frame-player-cast");
+  });
+
+  it("keeps it when they lose", () => {
+    expect(situationTextureKey("lose", 0, painted)).toBe("skin-frame-player-idle");
+  });
+
+  it("agrees with what the per-frame path would have shown", () => {
+    // One answer to "which texture for this situation", not two that can drift.
+    const { sprite } = fakeSprite();
+    const state = createWizardAnimState();
+    set(sprite, "idle");
+    updateWizardAnimation(sprite, state, 16, { ...PLAYING, outcome: "won", frameKeys: painted });
+    expect(sprite.texture.key).toBe(situationTextureKey("win", 0, painted));
+  });
+
+  it("still falls back to the built-in art for an unpainted character", () => {
+    expect(situationTextureKey("win", 0)).toBe("wizard-cast");
+    expect(situationTextureKey("lose", 0, new Map())).toBe("wizard-idle");
   });
 });

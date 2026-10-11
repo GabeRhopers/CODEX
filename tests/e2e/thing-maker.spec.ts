@@ -202,15 +202,23 @@ test("the sprite is drawn on the same screen, and saving keeps it", async ({ pag
   // its default, so the thing wears it rather than the ghost it copies. Without
   // the second assertion this would pass on art that saved and was never used —
   // which is exactly the bug adoptsFirstSkin was written for.
-  const skin = await page.evaluate(async () => {
-    const storage = (await import("/src/skins/skinStorage.ts")) as {
-      loadCustomSkins(): Promise<Record<string, { activeId: string | null; items: { id: string }[] }>>;
-    };
-    const all = await storage.loadCustomSkins();
-    const key = Object.keys(all).find((k) => k.startsWith("custom:"));
-    return key ? all[key] : null;
-  });
-  expect(skin, "nothing was saved for the invented thing").not.toBeNull();
+  // Polled, not sampled once. Save writes the thing and its skin as two writes,
+  // and only the first is what storedThings above waits for — so a single read
+  // here races the second one and fails saying nothing was ever saved. That is
+  // a positive assertion, which this repo's rule says must be polled for.
+  const readSkin = () =>
+    page.evaluate(async () => {
+      const storage = (await import("/src/skins/skinStorage.ts")) as {
+        loadCustomSkins(): Promise<Record<string, { activeId: string | null; items: { id: string }[] }>>;
+      };
+      const all = await storage.loadCustomSkins();
+      const key = Object.keys(all).find((k) => k.startsWith("custom:"));
+      return key ? all[key] : null;
+    });
+  await expect
+    .poll(readSkin, { timeout: 15_000, message: "nothing was saved for the invented thing" })
+    .not.toBeNull();
+  const skin = await readSkin();
   expect(skin!.items).toHaveLength(1);
   expect(skin!.activeId).toBe(skin!.items[0].id);
 });

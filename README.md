@@ -138,6 +138,7 @@ appear under more than one heading if it belongs to both.
 - [One list of everything you can paint](#one-list-of-everything-you-can-paint-2026-09-15)
 - [One screen for a thing, with two tabs](#one-screen-for-a-thing-with-two-tabs-2026-09-19)
 - [A walk cycle for the things you invent (2026-09-20)](#a-walk-cycle-for-the-things-you-invent-2026-09-20)
+- [Somebody else took the bow (2026-10-11)](#somebody-else-took-the-bow-2026-10-11)
 - [Exporting a game to one file (2026-09-02)](#exporting-a-game-to-one-file-2026-09-02)
 - [A published game: no editor, no sign-in (2026-09-02)](#a-published-game-no-editor-no-sign-in-2026-09-02)
 - [Why a query parameter rather than a deployment per game](#why-a-query-parameter-rather-than-a-deployment-per-game)
@@ -6006,6 +6007,33 @@ name instead of two, and one Save that writes both halves.
 `editor/thingFields.ts` (extracted in the phase before this one, deliberately as
 a no-op) is what made the move cheap: the form draws into a caller's scene, the
 way `ui/savedList.ts` already does for My Levels and My Worlds.
+
+### Somebody else took the bow (2026-10-11)
+
+Paint your own character, reach the goal, and the victory pose was Grampa. Die,
+and Grampa died for you. The painted character came back the moment you pressed
+R, which is probably why nobody caught it: the art was fine everywhere except
+the one frame the run ends on.
+
+**One call that skipped the lookup.** `applyTerminalPose` set the final pose
+with `frameFor(situation, 0)` — the *built-in* texture key — while every other
+pose went through `textureKeyFor`, which consults the painted skin first. Two
+callers deriving the same answer, one of them wrong.
+
+**And it stuck, because the correcting frame never came.** `PlayScene.update`
+returns on its first line when the outcome is settled, so nothing re-ran the
+animation afterwards. Had the run kept ticking, the next frame would have put
+the right texture back and this would have been a flicker nobody reported.
+Instead it was the last thing on screen, held under the Trophy.
+
+The fix is a `situationTextureKey` that both callers go through, so there is one
+answer to "which texture for this situation" rather than two that can drift.
+
+**It was found by a test failing for the wrong reason.** CI reported a walk
+cycle showing `wizard-cast`, which reads as an animation bug. The walk was fine;
+the sampling loop had no stop condition, so it ran on past the goal and caught
+the win pose. The loop now stops when the run does, and the win pose has an
+assertion of its own — the test that would have caught this in the first place.
 
 ## Project layout
 

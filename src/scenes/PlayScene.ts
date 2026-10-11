@@ -15,7 +15,7 @@ import {
   updateGhostPatrol,
 } from "../gameplay/EnemyBehaviors";
 import { createBolt, isBoltExpired } from "../gameplay/Bolt";
-import { angleFor, CharacterSituation, frameFor, resolveTint, TINT_COLORS } from "../gameplay/characterState";
+import { angleFor, CharacterSituation, resolveTint, TINT_COLORS } from "../gameplay/characterState";
 import {
   connectedPadCount,
   connectedPadNames,
@@ -55,7 +55,14 @@ import {
 import { HandheldShell, LEFT_BAND, makeConsoleButton, SCREEN_RECT, VOLUME_CONTROL } from "../gameplay/HandheldShell";
 import { recordCompletion } from "../world/worldProgress";
 import { TouchControls } from "../gameplay/TouchControls";
-import { applyWizardTexture, createWizardAnimState, FRAME_HEIGHT, updateWizardAnimation, WizardAnimState } from "../gameplay/wizardAnimation";
+import {
+  applyWizardTexture,
+  createWizardAnimState,
+  FRAME_HEIGHT,
+  situationTextureKey,
+  updateWizardAnimation,
+  WizardAnimState,
+} from "../gameplay/wizardAnimation";
 import { BOUNCE_FRAMES, buildRenderGrid, HAZARD_FRAMES, WATER_FRAMES } from "../level/groundAutotile";
 import { buildEdgeGrid, EDGE_GID_BASE, GROUND_EDGE_TEXTURE_KEY } from "../level/groundEdges";
 import { CANVAS_BACKGROUND_COLOR, GroundSkin, GROUND_SKINS } from "../level/groundSkins";
@@ -1990,7 +1997,11 @@ export class PlayScene extends Phaser.Scene {
   private applyTerminalPose(situation: "win" | "lose"): void {
     for (const player of this.players) {
       player.anim = createWizardAnimState();
-      applyWizardTexture(player.sprite, frameFor(situation, 0));
+      // Through situationTextureKey, not frameFor, so a painted character keeps
+      // their own art for the pose a run ends on. update() returns early once
+      // the outcome is settled, so whatever is written here is final — there is
+      // no later frame to correct it.
+      applyWizardTexture(player.sprite, situationTextureKey(situation, 0, this.characterFrameKeys));
       this.updateCharacterVisuals(player, situation, this.time.now);
     }
   }

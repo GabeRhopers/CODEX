@@ -176,6 +176,30 @@ function textureKeyFor(builtIn: WizardFrameKey, frameKeys?: ReadonlyMap<string, 
 }
 
 /**
+ * Which texture a situation actually shows — **the single answer to that
+ * question**, for every caller rather than just the per-frame one below.
+ *
+ * It is exported because a second caller derived it independently and got it
+ * wrong. `PlayScene.applyTerminalPose` set the pose for a won or lost run with
+ * `frameFor(situation, 0)` straight off, skipping the painted-skin lookup, and
+ * `PlayScene.update` returns early once a run is over — so the built-in texture
+ * it wrote was never corrected. A child who painted their own character reached
+ * the goal and watched Grampa take the bow, and died as Grampa too. It was the
+ * last frame of every run, which is the worst place in the game to show
+ * somebody else's art.
+ *
+ * Absent `frameKeys` still yields the built-in key, so the ordinary unpainted
+ * case is unchanged.
+ */
+export function situationTextureKey(
+  situation: CharacterSituation,
+  walkFrame: 0 | 1,
+  frameKeys?: ReadonlyMap<string, string>,
+): string {
+  return textureKeyFor(frameFor(situation, walkFrame), frameKeys);
+}
+
+/**
  * Advances the character's pose one frame and returns which situation it
  * settled on, so the caller can apply the matching tint/tilt without
  * resolving the same precedence a second time (see PlayScene's
@@ -222,6 +246,6 @@ export function updateWizardAnimation(
   const frameCount = situation === "walk" ? WALK_FRAME_COUNT : 1;
   const index = advanceSituation(state, situation, deltaMs, frameCount, strideIntervalMs(context.speedMultiplier ?? 1));
 
-  applyWizardTexture(player, textureKeyFor(frameFor(situation, index === 1 ? 1 : 0), context.frameKeys));
+  applyWizardTexture(player, situationTextureKey(situation, index === 1 ? 1 : 0, context.frameKeys));
   return situation;
 }

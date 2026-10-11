@@ -31,6 +31,15 @@ async function playerTexture(page: Page): Promise<string> {
   });
 }
 
+/** Whether the run is still going. `outcome` is `private` on PlayScene, which
+ * TypeScript erases at runtime — the same way every other probe in this suite
+ * reaches scene state. */
+const outcome = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Play") as unknown as { outcome?: string };
+    return scene.outcome ?? "";
+  });
+
 const status = (page: Page): Promise<string> =>
   page.evaluate(() => {
     const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as { statusText?: { text: string } };
@@ -128,14 +137,34 @@ test("a painted character skin replaces Grampa, animates, and cannot change his 
 
   // Walking cycles walk1 and walk2; walk2 resolves to the idle texture, so two
   // distinct keys should both appear while moving.
+  //
+  // **Sampling stops at the goal.** This level is 17 tiles of clear ground and
+  // a character crosses it in a second or two, so a loop watching only the
+  // clock will eventually fold the *win* pose into `seen` and fail reporting a
+  // walk-cycle problem it never had. That is how CI found the applyTerminalPose
+  // bug on 2026-10-11 — the sample was honest, the diagnosis in the failure
+  // message was not. The outcome check keeps this test about the stride; the
+  // win pose has its own assertion below.
   await page.keyboard.down("ArrowRight");
   const seen = new Set<string>();
   const deadline = Date.now() + 6000;
-  while (Date.now() < deadline && seen.size < 2) seen.add(await playerTexture(page));
-  await page.keyboard.up("ArrowRight");
+  while (Date.now() < deadline && seen.size < 2 && (await outcome(page)) === "playing") {
+    seen.add(await playerTexture(page));
+  }
 
-  expect(seen.size).toBeGreaterThanOrEqual(2);
+  expect(seen.size, "the stride never showed two distinct frames before the goal").toBeGreaterThanOrEqual(2);
   for (const key of seen) expect(key).toContain("skin-frame-player-");
+
+  // **Winning must not hand the level back to Grampa.** applyTerminalPose wrote
+  // the built-in texture straight off, and PlayScene.update returns early once
+  // the outcome is settled — so the wrong art was not a flicker, it was the
+  // last frame of the run, held under the Trophy. A child who painted their own
+  // character watched somebody else take the bow.
+  await expect.poll(() => outcome(page), { timeout: 15_000 }).toBe("won");
+  await page.keyboard.up("ArrowRight");
+  expect(await playerTexture(page), "the winning pose is still the painted character").toContain(
+    "skin-frame-player-",
+  );
 });
 
 test("a painted enemy skin loops through its frames", async ({ page }) => {
