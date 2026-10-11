@@ -1,7 +1,11 @@
 # Sprite sequences — implementation plan
 
-Status: **Planning only.** No code has been written for this. Every number
-below was measured from the current codebase on 2026-10-06, not estimated;
+Status: **Phases 1 and 2 are built; 2½ onwards are still plan.** Phase 1 landed
+the frame-group model as data nothing read (`dc45a43`); Phase 2 taught the
+runtime to play sequences. Each phase below says where it stands, and the ones
+already built say what the plan got wrong — the corrections are the useful part.
+
+Every number below was measured from the codebase on 2026-10-06, not estimated;
 where a figure comes from an existing comment rather than a fresh measurement,
 it says so.
 
@@ -129,7 +133,7 @@ can paint them**, never the reverse. An editor that saves frames the runtime
 ignores would silently lose a child's work, which is the worst failure mode this
 codebase has (see CLAUDE.md, "Never announce a save you have not seen land").
 
-### Phase 1 — The model, pure and additive
+### Phase 1 — The model, pure and additive — **done (`dc45a43`)**
 
 Land `FrameGroup`, `frameGroupsFor` and the legacy alias as pure data rules.
 **Do not touch `CHARACTER_FRAMES`** — nothing reads the new functions yet, so
@@ -142,23 +146,44 @@ character skin already painted breaks.
 *Verify:* a unit test per legacy key. Mutation-check by deleting one alias entry
 and confirming exactly that frame fails.
 
-### Phase 2 — The runtime plays sequences
+### Phase 2 — The runtime plays sequences — **done (2026-10-11)**
 
-*Files:* `spriteLoop.ts`, `characterState.ts`, `wizardAnimation.ts` + tests.
+*Files as built:* `spriteLoop.ts`, `wizardAnimation.ts` + tests.
+`characterState.ts` was listed here and turned out to need nothing: it maps a
+situation to a built-in texture, and the built-in art still has five pictures.
 
-- **`advanceOnce(state, deltaMs, frameCount)`** — plays through and holds the
-  last frame. A separate function rather than a mode flag on `advanceLoop`,
-  whose "it cycles" contract is documented and tested.
-- **Per-situation timing in `WizardAnimState`**, resetting when the situation
-  changes — mirroring what `walkTimer` already does, "so the cycle always
-  restarts from the same foot rather than resuming mid-stride after a jump".
+- **`advanceOnce(state, deltaMs, frameCount, intervalMs?)`** — plays through and
+  holds the last frame. A separate function rather than a mode flag on
+  `advanceLoop`, whose "it cycles" contract is documented and tested.
+- **`advanceLoop` gained an optional `intervalMs`.** Not in the original plan and
+  not optional in practice: `advanceLoop` hard-coded `LOOP_FRAME_INTERVAL_MS`
+  (180ms) while the character's stride is 140ms, so moving walk onto the shared
+  timer without this would have slowed him by 29% — a re-timing with no visible
+  diff. The parameter defaults to 180, so all seven existing tests pass untouched.
+- **Per-situation timing in `WizardAnimState`**, reset when the situation changes.
 
-**The safety property, and it is testable:** with only legacy frames present,
-every state resolves to one frame, `advanceLoop` returns 0, and the texture
-sequence is byte-identical to today's.
+**The safety property, corrected.** The plan said "every state resolves to one
+frame, `advanceLoop` returns 0". That is wrong for walk: the Phase 1 alias map
+gives it *two* legacy frames (`walk1→walk.0`, `walk2→walk.1`), so walk resolves
+to two and must keep alternating. What actually holds is: every state **but
+walk** is a still, and walk alternates its two frames at 140ms exactly as before.
+
+**Two deliberate behaviour changes, both small and both improvements.** A stride
+now restarts on the same foot every time — the old code reset `walkTimer` but
+*preserved* `walkFrame`, so a walk resumed on whichever foot it left on, which
+contradicted the docstring directly above it. And the walk timer now keeps its
+sub-interval remainder, because `advanceLoop` accumulates rather than zeroing;
+that is the documented anti-drift behaviour, so the stride no longer runs slow
+under a starved loop. Neither is visible in ordinary play.
 
 *Risk:* forgetting the reset, so a jump after walking starts mid-sequence.
-*Verify:* pure unit tests, no scene required. Mutation-check the reset.
+*What that cost:* the reset is **not observable through `updateWizardAnimation`
+today**, because `advanceLoop` zeroes any state it is handed a `frameCount` of 1
+for, and walk is the only situation with more than one frame — so stepping
+through a jump launders the timer and deleting the reset passed all thirteen
+tests. It is therefore pinned on `advanceSituation`, which the rule was
+extracted into so it can be driven with two multi-frame counts directly. That
+mutation now fails as it should.
 
 ### Phase 2½ — Running, nearly free *(independent of everything else)*
 
