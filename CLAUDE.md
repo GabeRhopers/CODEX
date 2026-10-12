@@ -100,6 +100,21 @@ twice including the retry, and passed in isolation locally every time. Hold unti
 the game's own `loop.frame` has advanced (`holdKeyForFrames` there), or until the
 state the press causes is visible — never for a duration.
 
+**A test that samples a moving thing is racing it, and its failures will blame
+the wrong side.** Three in one day (2026-10-11/12) named the feature when the
+watcher was at fault: a walk cycle "showing `wizard-cast`" was a sampling loop
+with no stop condition running past the goal — a real bug, but in the *winning*
+pose, not the stride; "a three-frame stride showed one texture" was a held key
+that had not produced movement yet; and the same test "showed two" because the
+run ended at the goal after ~1.5s while the cycle turns every 140ms and each
+sample cost two page round-trips. All three passed in isolation.
+
+So when a test watches something change: bound the window with something that
+cannot close early (move the goal out of reach rather than hoping to finish
+first), assert the motion has actually started (poll velocity, not the keypress),
+and spend one round trip per sample rather than two. Sampling at ~10/s against a
+7/s cycle aliases, and the message you get back will describe the sampler.
+
 **Assert the precondition, or the test passes vacuously.** If a test depends on
 a *state* — the level is still loading, the area is not yet built, the menu is
 open — assert that state before acting on it. Tests that skipped this have
