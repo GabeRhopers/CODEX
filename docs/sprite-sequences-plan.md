@@ -1,9 +1,9 @@
 # Sprite sequences — implementation plan
 
-Status: **Phases 1 and 2 are built; 2½ onwards are still plan.** Phase 1 landed
-the frame-group model as data nothing read (`dc45a43`); Phase 2 taught the
-runtime to play sequences. Each phase below says where it stands, and the ones
-already built say what the plan got wrong — the corrections are the useful part.
+Status: **The MVP is built — Phases 1, 2, 2½ and 3 are done.** What remains is
+Phase 4 (art for Grampa) and Phase 5 (new states), both optional. Each phase
+below says where it stands, and the ones already built say what the plan got
+wrong — the corrections are the useful part, and there were four of them.
 
 Every number below was measured from the codebase on 2026-10-06, not estimated;
 where a figure comes from an existing comment rather than a fresh measurement,
@@ -207,22 +207,56 @@ The swim factor is deliberately *not* folded in: swimming is its own situation
 with its own single frame, so there is no stride to re-time, and including it
 would make one number mean two things.
 
-### Phase 3 — The editor can paint them
+### Phase 3 — The editor can paint them — **done, in two halves**
 
-*Files:* `SkinEditorScene.ts`, `scenes/skin/layout.ts`, `tests/e2e/sprite-frames.spec.ts`.
+The plan had one phase here and it needed two, because moving the writer without
+first moving the reader loses artwork. Split into **3a (the reader speaks
+groups)** and **3b (the editor writes them)**.
 
-- `CHARACTER_FRAMES` switches to groups; the frame strip becomes a **"Pose ▾"
-  selector plus up to four frame rows** (152px, see §4).
-- `onSave` writes `"<state>.<index>"` and drops the legacy keys — migration
-  happens here.
-- **`imageData` must stay `idle.0`.** The browse list, the picker thumbnails and
-  `EntityPlacer` all read that single field.
+**Phase 3a — the reader (2026-10-11).** `skinLoader` registers one texture per
+*group slot*; `wizardAnimation` takes its frame count from the skin rather than
+a hard-coded 2. Without this first, the editor writing `"walk.0"` would have
+left `resolveFrameTextureKeys` asking for `"walk1"` and finding nothing — the
+Phase 1 alias points new → old, not old → new — so a repainted walk would have
+become a static idle.
 
-*Risk — the significant one:* a child who already painted `walk1`/`walk2` opens
-the editor and their art is not under Walk. That is work lost, silently.
-*Verify:* an e2e that paints with the **old** keys, reopens, and asserts the art
-appears under the new ones. Plus screenshots — every visual defect this project
-has had was found by looking, not by asserting.
+*What it cost to learn:* 3a shipped a regression. `groupLength` counts the
+contiguous painted run, so a skin with `walk1` painted and `walk2` blank
+reported a one-frame walk and the leg froze. The old loader registered all five
+legacy frames and let the blank one fall back to idle, which is documented
+behaviour a child relies on. Fixed with `FrameGroup.minFrames` — two for the
+walk, one elsewhere. **741 unit tests stayed green through it**; the e2e caught
+it, because the behaviour lives at a seam no unit test spans.
+
+**Phase 3b — the editor (2026-10-12).**
+
+- The frame strip became a **"Pose ▾" selector over up to four frame rows**,
+  reusing `AssetPickerMenu` with Grampa's own shipped pose as each thumbnail.
+  An enemy's single unnamed group has no pose to choose, so its strip is
+  untouched — which is what keeps the invented-thing specs passing as-is.
+- **All seven poses are offered**, not the five that had buttons. `win` and
+  `lose` have never been paintable; "celebrating" and "dying" were in the
+  original request for this feature.
+- `openForEditing` reads each slot through `paintedGroupFrame` — **that loop is
+  the migration**, with no separate step to get wrong. `paintedGroupFrame` and
+  not `resolveGroupFrame` because the latter falls back: it would fill all seven
+  poses with idle art and Save would write every one as real.
+- `onSave` writes `"<state>.<index>"` and stops writing the legacy names, so
+  each skin migrates itself on its next save.
+- `baseFrameOf` finally returns `"idle.0"` for a character — the move Phase 1
+  flagged and deliberately deferred until the readers had stopped asking for
+  `"idle"`.
+
+*Corrections to this section as written:* `scenes/skin/layout.ts` needed no
+change (the strip's constants are local to `buildFrameStrip`), and
+`referenceSources.ts` needed none either — it lists Grampa's five *shipped*
+textures to trace over, which is independent of how a painted skin is keyed.
+
+*Verified:* an e2e that seeds a skin under the old names, reopens it, saves, and
+asserts the art is under `idle.0`/`walk.0`/`walk.1` with the legacy keys gone —
+written first and watched to fail. Plus one that paints a **three-frame walk**
+and plays it, which is the capability the whole plan exists for and nothing
+could demonstrate before. Plus screenshots of the selector open and closed.
 
 ### Phase 4 — Built-in sequences for Grampa *(art, not code)*
 

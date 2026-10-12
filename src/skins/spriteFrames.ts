@@ -108,6 +108,15 @@ const LOOP_BRUSH_IDS = new Set(["enemy-ghost", "enemy-spike", "enemy-bat", "enem
  * this problem, and only the loop is changed.
  */
 export function frameLabel(plan: FramePlan, name: string): string {
+  // A group slot says its position already — "walk.1" — and the pose it belongs
+  // to is on the selector directly above the row, so the row only has to say
+  // which frame of that pose it is. Counted from one, like the loop below and
+  // for the same reason: "Frame 0" is a programmer counting.
+  const dot = name.lastIndexOf(".");
+  if (dot > 0) {
+    const index = Number(name.slice(dot + 1));
+    if (Number.isInteger(index) && index >= 0) return `Frame ${index + 1}`;
+  }
   if (plan.kind !== "loop") return name;
   const index = plan.frames.indexOf(name);
   return index < 0 ? name : `Frame ${index + 1}`;
@@ -159,12 +168,21 @@ export function gridSizeFor(targetId: string): number {
   return framePlanFor(targetId)?.gridSize ?? ENTITY_GRID_SIZE;
 }
 
-/** The frame every other frame falls back to: the character's resting pose,
- * or the first frame of a loop. Both are the frame a skin is guaranteed to
- * have, because it's the one the editor starts you on and the one `imageData`
- * mirrors. */
+/**
+ * The frame every other frame falls back to: the character's resting pose, or
+ * the first frame of a loop. Both are the frame a skin is guaranteed to have,
+ * because it's the one the editor starts you on and the one `imageData`
+ * mirrors.
+ *
+ * **The character's answer became `"idle.0"` when the editor learned to write
+ * slots.** Phase 1 recorded that this would have to move and deliberately did
+ * not move it then, because the readers were still asking for `"idle"`. They no
+ * longer are: after the loader went group-shaped, `resolveFrame` and
+ * `ActiveSkinArt.frame()` serve only tiles and loops, whose answers here are
+ * unchanged.
+ */
 export function baseFrameOf(plan: FramePlan): string {
-  if (plan.kind === "character") return "idle";
+  if (plan.kind === "character") return frameKeyFor(CHARACTER_BASE_STATE, 0);
   if (plan.kind === "tile") return "top";
   return "0";
 }
@@ -186,7 +204,12 @@ export function resolveFrame(
   painted: Readonly<Record<string, string>>,
   name: string,
 ): string | null {
-  return painted[name] ?? painted[baseFrameOf(plan)] ?? null;
+  // Through paintedGroupFrame on both halves, so this keeps answering for a
+  // character skin stored under the old names even though its base frame is now
+  // "idle.0". Nothing in the app asks it about a character any more — the
+  // loader went group-shaped first — but a resolver that quietly returns null
+  // for data it can plainly see is a trap for whoever calls it next.
+  return paintedGroupFrame(painted, name) ?? paintedGroupFrame(painted, baseFrameOf(plan)) ?? null;
 }
 
 /** How many frames of a loop are actually painted, counting from the start and
@@ -367,10 +390,21 @@ const LEGACY_FRAME_KEYS: Readonly<Record<string, string>> = {
   "cast.0": "cast",
 };
 
-/** The single answer to "has this frame been painted", new key or old. Every
- * public function here goes through it, so there is one place the legacy map is
- * consulted rather than three that can disagree. */
-function paintedFrame(painted: Readonly<Record<string, string>>, key: string): string | undefined {
+/**
+ * The single answer to "has this frame been painted", new key or old, **with no
+ * fallback of any kind**.
+ *
+ * Every public function here goes through it, so there is one place the legacy
+ * map is consulted rather than three that can disagree.
+ *
+ * Exported because the editor needs exactly this and nothing softer. Loading a
+ * skin through `resolveGroupFrame` would hand back the base art for every pose
+ * nobody painted, and Save would then write all seven as real frames — turning
+ * "unpainted, falls back at runtime" into "painted blank", which is both bigger
+ * on disk and a different picture on screen. `openForEditing` keeps that
+ * distinction by reading each slot through here.
+ */
+export function paintedGroupFrame(painted: Readonly<Record<string, string>>, key: string): string | undefined {
   const own = painted[key];
   if (own) return own;
   const legacy = LEGACY_FRAME_KEYS[key];
@@ -380,15 +414,15 @@ function paintedFrame(painted: Readonly<Record<string, string>>, key: string): s
 /**
  * The key everything in a plan falls back to.
  *
- * For a character this is `"idle.0"` rather than baseFrameOf's `"idle"`, and
- * the difference matters in one direction: paintedFrame("idle.0") finds the
- * legacy `"idle"` through the alias map, while the reverse is not true, so a
- * skin painted the *new* way would have no fallback at all if this returned
- * the old key. baseFrameOf itself keeps answering "idle" until the phase that
- * migrates its five callers (see the plan doc).
+ * Now the same answer `baseFrameOf` gives, and kept as its own name rather than
+ * inlined: these were deliberately different for two phases. While the readers
+ * still asked for `"idle"`, a group falling back to `baseFrameOf` would have
+ * found nothing for a skin painted the new way — `paintedGroupFrame("idle.0")`
+ * finds a legacy `"idle"` through the alias map, but not the reverse. They
+ * converged when the editor started writing slots, and the one-way nature of
+ * that alias is why the order mattered.
  */
 function baseGroupKey(plan: FramePlan): string {
-  if (plan.kind === "character") return frameKeyFor(CHARACTER_BASE_STATE, 0);
   return baseFrameOf(plan);
 }
 
@@ -406,7 +440,7 @@ function baseGroupKey(plan: FramePlan): string {
 export function groupLength(group: FrameGroup, painted: Readonly<Record<string, string>>): number {
   let count = 0;
   for (const key of group.frames) {
-    if (!paintedFrame(painted, key)) break;
+    if (!paintedGroupFrame(painted, key)) break;
     count += 1;
   }
   return count;

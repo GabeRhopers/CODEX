@@ -28,7 +28,18 @@ import {
   ReferenceSource,
   skinReferenceId,
 } from "../skins/referenceSources";
-import { baseFrameOf, CHARACTER_SKIN_ID, frameLabel, framePlanFor, gridSizeFor, HERO_TEXTURE_KEY } from "../skins/spriteFrames";
+import { CharacterSituation, frameFor } from "../gameplay/characterState";
+import {
+  baseFrameOf,
+  CHARACTER_SKIN_ID,
+  FrameGroup,
+  frameGroupsFor,
+  frameLabel,
+  framePlanFor,
+  gridSizeFor,
+  HERO_TEXTURE_KEY,
+  paintedGroupFrame,
+} from "../skins/spriteFrames";
 import { hasFinePointer } from "../ui/pointer";
 import { cellHitArgs } from "../ui/touchTarget";
 import { DEFAULT_PIXEL_PALETTE_ID, findPalette, PALETTE_SWATCH_NAME, PIXEL_PALETTES, PixelPalette } from "../skins/pixelPalettes";
@@ -103,6 +114,13 @@ interface EditingTarget {
    * scene, and an edit made on one tab must survive a trip to the other.
    */
   draft?: CustomEntityDef;
+}
+
+/** A pose's name as a child reads it: "Walk", "Win". The state ids are
+ * lowercase because they are CharacterSituation values and storage keys; only
+ * the button says them out loud. */
+function poseLabel(state: string): string {
+  return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
 /** The frame name a single-frame skin's cells live under — an internal
@@ -234,6 +252,10 @@ export class SkinEditorScene extends Phaser.Scene {
    * screen, so the two have to know about each other — see buildPalettePicker
    * for why, and rebuild() for the teardown neither can skip. */
   private palettePicker?: AssetPickerMenu;
+  /** The character's "Pose: Walk ▾" selector. Only ever built for a plan with
+   * more than one frame group — an enemy's single unnamed cycle has no pose to
+   * choose, so its strip stays exactly the four rows it has always been. */
+  private posePicker?: AssetPickerMenu;
   // Phaser's keyboard queue can re-emit one physical keydown more than
   // once within a single rendered frame under frame stalls — see
   // EditorScene's onceThisFrame for the same guard and why.
@@ -333,6 +355,8 @@ export class SkinEditorScene extends Phaser.Scene {
     this.referencePicker = undefined;
     this.palettePicker?.destroy();
     this.palettePicker = undefined;
+    this.posePicker?.destroy();
+    this.posePicker = undefined;
     this.nameInput?.destroy();
     this.nameInput = undefined;
     this.clearArmTimer?.remove(false);
@@ -591,10 +615,21 @@ export class SkinEditorScene extends Phaser.Scene {
         // Only frames that were actually painted are decoded. Leaving the rest
         // undefined is what keeps "unpainted" distinguishable from "painted
         // blank" all the way through to Save.
+        //
+        // **This loop is the migration.** Reading each slot through
+        // `paintedGroupFrame` finds a skin saved under the old names — a
+        // character's `walk1` answers for `walk.0`, `walk2` for `walk.1` — so
+        // artwork painted before frame groups opens under the right pose with
+        // no separate migration step to get wrong. `paintedGroupFrame` and not
+        // `resolveGroupFrame` precisely because the latter falls back: it would
+        // fill all seven poses with the idle art, and Save would write every
+        // one of them as real.
         const painted = asset.frames ?? { [baseFrameOf(plan)]: asset.imageData };
-        for (const name of plan.frames) {
-          const dataUrl = painted[name];
-          if (dataUrl) frameCells[name] = await cellsFromPngDataUrl(dataUrl, gridSize);
+        for (const group of frameGroupsFor(plan)) {
+          for (const key of group.frames) {
+            const dataUrl = paintedGroupFrame(painted, key);
+            if (dataUrl) frameCells[key] = await cellsFromPngDataUrl(dataUrl, gridSize);
+          }
         }
       }
     } catch (err) {
@@ -1866,6 +1901,50 @@ export class SkinEditorScene extends Phaser.Scene {
    * Returns where the column has reached, so the caller can carry on beneath it
    * without knowing whether anything was drawn.
    */
+  /**
+   * "Pose: Walk ▾" — the character's seven frame groups as a dropdown.
+   *
+   * The same AssetPickerMenu the palette and trace pickers already use, so a
+   * child who has met one has met all three. Thumbnails are Grampa's own
+   * shipped pose for each state (`frameFor`), which is the one picture
+   * guaranteed to exist whatever this skin has painted so far — a pose is
+   * chosen by looking at it rather than by reading a word.
+   */
+  private buildPoseSelector(
+    active: FrameGroup,
+    groups: readonly FrameGroup[],
+    x: number,
+    y: number,
+    width: number,
+  ): number {
+    const height = SMALL_BUTTON_H;
+    this.posePicker = new AssetPickerMenu({
+      scene: this,
+      trigger: { x, y, width, height },
+      columns: 2,
+      itemSize: 30,
+      triggerDepth: 10,
+      dropdownDepth: 20,
+      onToggleOpen: (open) => {
+        if (open) {
+          this.palettePicker?.close();
+          this.referencePicker?.close();
+        }
+      },
+      onSelect: (id) => this.selectPose(id),
+    });
+    this.posePicker.setTriggerLabel(`Pose: ${poseLabel(active.state)} ▾`);
+    this.posePicker.setItems(
+      groups.map((group) => ({
+        id: group.state,
+        label: poseLabel(group.state),
+        textureKey: frameFor(group.state as CharacterSituation, 0),
+      })),
+      active.state,
+    );
+    return y + height + 6;
+  }
+
   private buildFrameStrip(
     target: EditingTarget,
     x: number,
@@ -1877,9 +1956,23 @@ export class SkinEditorScene extends Phaser.Scene {
 
     const buttonWidth = 96;
     const rowHeight = 30;
-    let y = heading(x, top, "Frames");
+    const groups = frameGroupsFor(plan);
 
-    for (const name of plan.frames) {
+    // Which pose is being painted, *derived* from the active slot rather than
+    // stored beside it. One source of truth, and it costs nothing: switching
+    // frame already rebuilds this whole column, so there is no second thing to
+    // keep in step. CLAUDE.md's "derive, don't store" applied to a selection.
+    const group = groups.find((candidate) => target.activeFrame.startsWith(`${candidate.state}.`)) ?? groups[0];
+
+    let y = heading(x, top, groups.length > 1 ? "Pose" : "Frames");
+    if (groups.length > 1 && group) y = this.buildPoseSelector(group, groups, x, y, buttonWidth);
+
+    // An enemy's one unnamed cycle has no pose to pick, so `names` is simply
+    // its four frames and the strip below is unchanged from before groups
+    // existed — which is what keeps every invented-thing test passing as-is.
+    const names = group ? group.frames : plan.frames;
+
+    for (const name of names) {
       const painted = hasPaintedCells(target.frameCells[name]);
       const active = name === target.activeFrame;
       const bg = this.add
@@ -1926,6 +2019,18 @@ export class SkinEditorScene extends Phaser.Scene {
     if (!this.target || name === this.target.activeFrame) return;
     this.target = { ...this.captureActiveFrame(), activeFrame: name };
     this.goTo("canvas");
+  }
+
+  /**
+   * Switches which pose is being painted, landing on that pose's first frame.
+   *
+   * Goes through switchFrame rather than setting activeFrame itself, so the
+   * live drawing is folded back in first — selectPalette's docstring explains
+   * what forgetting that costs: canvas mode rebuilds from the frame's *stored*
+   * cells, so every stroke since the last switch would be thrown away.
+   */
+  private selectPose(state: string): void {
+    this.switchFrame(`${state}.0`);
   }
 
   /**
@@ -2014,7 +2119,12 @@ export class SkinEditorScene extends Phaser.Scene {
       const gridSize = gridSizeFor(target.brush.id);
       const base = baseFrameOf(plan);
       frames = {};
-      for (const name of plan.frames) {
+      // Slots, not the old flat list — so a character writes "walk.0" and the
+      // legacy names it was loaded from simply are not written back. Each skin
+      // migrates itself the first time it is saved, which is the shape
+      // `pixelData.cells` already set for this problem.
+      const names = frameGroupsFor(plan).flatMap((group) => [...group.frames]);
+      for (const name of names.length > 0 ? names : plan.frames) {
         const cells = target.frameCells[name];
         // An all-blank frame is "not painted yet", not "painted invisible" —
         // writing it would give the skin a blank pose and make resolveFrame's

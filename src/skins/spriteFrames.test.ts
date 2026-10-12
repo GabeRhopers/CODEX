@@ -122,9 +122,13 @@ describe("resolveFrame", () => {
   });
 
   it("names the frame everything else falls back to", () => {
-    expect(baseFrameOf(character)).toBe("idle");
+    // "idle.0", not "idle", since the editor started writing group slots — the
+    // one deliberate contract change in that step, flagged two phases earlier
+    // as the thing that would have to move last. A loop is untouched: its
+    // frames were always positional.
+    expect(baseFrameOf(character)).toBe("idle.0");
     expect(baseFrameOf(loop)).toBe("0");
-    expect(CHARACTER_FRAMES[0]).toBe(baseFrameOf(character));
+    expect(CHARACTER_FRAMES[0], "the legacy name it aliases is still idle").toBe("idle");
   });
 });
 
