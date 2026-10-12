@@ -387,6 +387,38 @@ export function groupLength(group: FrameGroup, painted: Readonly<Record<string, 
 }
 
 /**
+ * **Which stored key supplies** frame `index` of `group` — the slot itself, the
+ * legacy name it aliases, or the base frame it falls back to.
+ *
+ * Separate from `resolveGroupFrame` because the texture loader needs the
+ * *identity* of the source, not only its image: it registers one Phaser texture
+ * per (target, skin, supplying frame), so seven poses falling back to one idle
+ * share a single texture instead of uploading the same PNG seven times. That
+ * dedupe is not an optimisation to a loader that already registers by hand —
+ * see registerTexture's own note on freeing a texture a live sprite still
+ * points at.
+ *
+ * Returns null when nothing at all has been painted.
+ */
+export function groupFrameSource(
+  plan: FramePlan,
+  group: FrameGroup,
+  painted: Readonly<Record<string, string>>,
+  index: number,
+): string | null {
+  const key = group.frames[index];
+  if (key !== undefined) {
+    if (painted[key]) return key;
+    const legacy = LEGACY_FRAME_KEYS[key];
+    if (legacy && painted[legacy]) return legacy;
+  }
+  const base = baseGroupKey(plan);
+  if (painted[base]) return base;
+  const baseLegacy = LEGACY_FRAME_KEYS[base];
+  return baseLegacy && painted[baseLegacy] ? baseLegacy : null;
+}
+
+/**
  * Which image actually renders for frame `index` of `group`.
  *
  * Falls back to the plan's base frame and never to the built-in art, for the
@@ -394,6 +426,11 @@ export function groupLength(group: FrameGroup, painted: Readonly<Record<string, 
  * turned into hand-drawn Grampa mid-jump would read as a bug rather than as
  * unfinished work. Null means nothing at all has been painted, which callers
  * treat as "keep the built-in art".
+ *
+ * Expressed through `groupFrameSource` so the two cannot disagree about which
+ * frame answers for a slot — one of them deciding "the legacy walk2" while the
+ * other hands back the idle art is precisely the bug this phase is here to
+ * avoid.
  */
 export function resolveGroupFrame(
   plan: FramePlan,
@@ -401,7 +438,6 @@ export function resolveGroupFrame(
   painted: Readonly<Record<string, string>>,
   index: number,
 ): string | null {
-  const key = group.frames[index];
-  const own = key === undefined ? undefined : paintedFrame(painted, key);
-  return own ?? paintedFrame(painted, baseGroupKey(plan)) ?? null;
+  const source = groupFrameSource(plan, group, painted, index);
+  return source === null ? null : painted[source];
 }

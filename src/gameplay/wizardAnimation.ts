@@ -67,11 +67,11 @@ export function strideIntervalMs(speedMultiplier: number): number {
   return WALK_FRAME_INTERVAL_MS / speedMultiplier;
 }
 
-/** How many frames the built-in art has for a walk: walk1 and walk2. Every
- * other situation is a single picture (see characterState's FRAME_BY_SITUATION),
- * which is exactly what the frame groups landed in Phase 1 are meant to end —
- * but until the editor can paint a sequence, one is the honest count. */
-const WALK_FRAME_COUNT = 2;
+/** How many frames **the built-in art** has for a walk: walk1 and walk2. Every
+ * other built-in situation is a single picture (see characterState's
+ * FRAME_BY_SITUATION). A painted skin is no longer bound by this — its count
+ * comes from what it actually painted, via situationFrameCount. */
+const BUILT_IN_WALK_FRAMES = 2;
 
 export interface WizardAnimState {
   /**
@@ -166,13 +166,12 @@ export interface WizardAnimContext {
   frameKeys?: ReadonlyMap<string, string>;
 }
 
-/** The frame *name* a built-in texture key corresponds to — "wizard-walk1"
- * becomes "walk1". */
-const WIZARD_KEY_PREFIX = "wizard-";
-
-function textureKeyFor(builtIn: WizardFrameKey, frameKeys?: ReadonlyMap<string, string>): string {
-  if (!frameKeys) return builtIn;
-  return frameKeys.get(builtIn.slice(WIZARD_KEY_PREFIX.length)) ?? builtIn;
+/** Where a situation's frame lives in a painted skin: `"walk.1"`. The same key
+ * `frameGroupsFor` names and `skinLoader` registers textures under, written
+ * here rather than imported because this module must not depend on the skins
+ * layer — the two are pinned together by wizardAnimation.test.ts instead. */
+function slotKey(situation: CharacterSituation, index: number): string {
+  return `${situation}.${index}`;
 }
 
 /**
@@ -193,10 +192,40 @@ function textureKeyFor(builtIn: WizardFrameKey, frameKeys?: ReadonlyMap<string, 
  */
 export function situationTextureKey(
   situation: CharacterSituation,
-  walkFrame: 0 | 1,
+  index: number,
   frameKeys?: ReadonlyMap<string, string>,
 ): string {
-  return textureKeyFor(frameFor(situation, walkFrame), frameKeys);
+  // The built-in art has one frame per situation and two for a walk, so any
+  // index past the first collapses onto walk2 — there is no third picture to
+  // show, whatever a painted skin alongside it might have.
+  const builtIn = frameFor(situation, index >= 1 ? 1 : 0);
+  if (!frameKeys) return builtIn;
+  // Slot first, then the group's own frame 0, then the built-in. The middle
+  // step matters: an index past what this skin painted should hold that
+  // character's pose rather than snap back to Grampa's.
+  return frameKeys.get(slotKey(situation, index)) ?? frameKeys.get(slotKey(situation, 0)) ?? builtIn;
+}
+
+/**
+ * How many frames a situation can actually play.
+ *
+ * Without a painted skin this is the built-in art's own count. With one it is
+ * whatever that skin painted — which is the step that makes the frame groups
+ * landed in Phase 1 mean something at runtime, and the reason this had to move
+ * before the editor learned to write them. `skinLoader` registers a contiguous
+ * run of slots per group, so counting until one is missing is the same answer
+ * `groupLength` gives, asked of the map the runtime actually holds.
+ */
+export function situationFrameCount(
+  situation: CharacterSituation,
+  frameKeys?: ReadonlyMap<string, string>,
+): number {
+  if (!frameKeys) return situation === "walk" ? BUILT_IN_WALK_FRAMES : 1;
+  let count = 0;
+  while (frameKeys.has(slotKey(situation, count))) count += 1;
+  // A skin with nothing registered for this situation still shows one frame —
+  // its base pose, which skinLoader guarantees a slot 0 for.
+  return Math.max(1, count);
 }
 
 /**
@@ -243,9 +272,9 @@ export function updateWizardAnimation(
   // the editor can paint one. What has changed is that the count is now a
   // *number fed to a timer* rather than a hand-rolled boolean flip, so the step
   // that gives a situation four frames is a different count, not different code.
-  const frameCount = situation === "walk" ? WALK_FRAME_COUNT : 1;
+  const frameCount = situationFrameCount(situation, context.frameKeys);
   const index = advanceSituation(state, situation, deltaMs, frameCount, strideIntervalMs(context.speedMultiplier ?? 1));
 
-  applyWizardTexture(player, situationTextureKey(situation, index === 1 ? 1 : 0, context.frameKeys));
+  applyWizardTexture(player, situationTextureKey(situation, index, context.frameKeys));
   return situation;
 }

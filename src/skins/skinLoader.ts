@@ -2,7 +2,16 @@ import Phaser from "phaser";
 import { CustomSkinsFile, SkinAsset } from "./CustomSkins";
 import { displaySkinName } from "./skinNames";
 import { LevelSkins, resolveSkinId } from "./skinSelection";
-import { baseFrameOf, framePlanFor, loopLength, resolveFrame } from "./spriteFrames";
+import {
+  baseFrameOf,
+  FrameGroup,
+  frameGroupsFor,
+  groupFrameSource,
+  groupLength,
+  framePlanFor,
+  loopLength,
+  resolveFrame,
+} from "./spriteFrames";
 import { loadCustomSkins } from "./skinStorage";
 
 /** Keyed by (brushId, skinId) — a skin's own uploaded imageData never
@@ -186,6 +195,19 @@ export interface ResolvedSkinFrame {
 export interface ActiveSkinArt {
   id: string;
   frame(name?: string): ResolvedSkinFrame | null;
+  /**
+   * One slot of one frame group, resolved the same way `frame` resolves a name.
+   *
+   * The group-shaped half of this interface. It exists so the painted map stays
+   * private here: a caller asks "slot 1 of the walk group" and gets back both
+   * the art and which stored frame supplied it, without needing to know that
+   * `walk.1` may be answered by a legacy `walk2` or by the base frame.
+   */
+  slot(group: FrameGroup, index: number): ResolvedSkinFrame | null;
+  /** How many frames of `group` this skin actually painted, counting from the
+   * start and stopping at the first gap. Here rather than on the caller for the
+   * same reason as `slot`: it needs the painted map, which stays private. */
+  slotCount(group: FrameGroup): number;
 }
 
 /** The single-frame case has no frame *names* — one image, no plan, nothing to
@@ -211,7 +233,8 @@ export async function resolveActiveSkinArt(targetId: string, levelSkins?: LevelS
   if (!active) return null;
   const plan = framePlanFor(targetId);
   if (!plan) {
-    return { id: active.id, frame: () => ({ dataUrl: active.imageData, suppliedBy: SINGLE_FRAME }) };
+    const only = { dataUrl: active.imageData, suppliedBy: SINGLE_FRAME };
+    return { id: active.id, frame: () => only, slot: () => only, slotCount: () => 1 };
   }
   // A skin saved before multi-frame support has no `frames` at all; treat its
   // single `imageData` as the base frame so it reads as a one-frame still
@@ -224,6 +247,11 @@ export async function resolveActiveSkinArt(targetId: string, levelSkins?: LevelS
       if (!dataUrl) return null;
       return { dataUrl, suppliedBy: painted[name] ? name : baseFrameOf(plan) };
     },
+    slot: (group, index) => {
+      const suppliedBy = groupFrameSource(plan, group, painted, index);
+      return suppliedBy === null ? null : { dataUrl: painted[suppliedBy], suppliedBy };
+    },
+    slotCount: (group) => groupLength(group, painted),
   };
 }
 
@@ -260,17 +288,46 @@ export async function resolveFrameTextureKeys(
   if (!art) return null;
 
   const keys: FrameTextureKeys = new Map();
-  for (const name of plan.frames) {
-    const resolved = art.frame(name);
-    if (!resolved) continue;
-    // Keyed by the frame that *supplied* the image, not the one being asked
-    // for, so five poses falling back to one idle share a single texture
-    // instead of registering the same PNG five times over.
-    const key = await registerTexture(scene, frameTextureKey(targetId, art.id, resolved.suppliedBy), resolved.dataUrl);
-    // A frame that would not decode is simply absent, which is already how an
-    // unpainted frame behaves — the animation falls back the way it does for a
-    // skin that never had that pose.
-    if (key) keys.set(name, key);
+  const groups = frameGroupsFor(plan);
+
+  // A plan with no groups is a tile (top/fill are autotile variants, not
+  // playback — see frameGroupsFor). Nothing reaches here with one today, since
+  // blocks are painted into a tileset strip rather than placed as sprites, but
+  // falling back to the flat list keeps the answer correct rather than silently
+  // empty if one ever does.
+  if (groups.length === 0) {
+    for (const name of plan.frames) {
+      const resolved = art.frame(name);
+      if (!resolved) continue;
+      const key = await registerTexture(scene, frameTextureKey(targetId, art.id, resolved.suppliedBy), resolved.dataUrl);
+      if (key) keys.set(name, key);
+    }
+    return keys.size > 0 ? keys : null;
+  }
+
+  for (const group of groups) {
+    // Every group gets at least slot 0, even one nobody painted: it resolves to
+    // the skin's base frame, which is what keeps an unpainted pose showing this
+    // character rather than reverting to the built-in art mid-run. Beyond that,
+    // only the contiguous painted run — groupLength stops at the first gap, so
+    // a walk with 0, 1 and 3 painted strides through two frames rather than
+    // stuttering over the hole.
+    const slots = Math.min(Math.max(1, art.slotCount(group)), group.frames.length);
+    for (let index = 0; index < slots; index++) {
+      const resolved = art.slot(group, index);
+      if (!resolved) continue;
+      // Keyed by the frame that *supplied* the image, not the slot asking for
+      // it, so seven poses falling back to one idle share a single texture
+      // instead of registering the same PNG seven times over.
+      const key = await registerTexture(scene, frameTextureKey(targetId, art.id, resolved.suppliedBy), resolved.dataUrl);
+      // A frame that would not decode is simply absent, which is already how an
+      // unpainted frame behaves — the animation falls back the way it does for a
+      // skin that never had that pose.
+      // `group.frames[index]` *is* the storage key — "walk.1" for a character,
+      // and an enemy loop's own "0".."3" unchanged, which is what keeps every
+      // skin already saved for an enemy reading exactly as it did.
+      if (key) keys.set(group.frames[index], key);
+    }
   }
   return keys.size > 0 ? keys : null;
 }

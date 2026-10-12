@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CharacterSituation } from "./characterState";
 import { LOOP_FRAME_INTERVAL_MS } from "./spriteLoop";
 import { SPEED_MULTIPLIER } from "./PlayerStats";
 import {
   advanceSituation,
   createWizardAnimState,
+  situationFrameCount,
   situationTextureKey,
   strideIntervalMs,
   updateWizardAnimation,
@@ -62,6 +62,13 @@ function body(sprite: Sprite): { velocity: { x: number; y: number }; blocked: { 
 }
 
 const PLAYING: WizardAnimContext = { outcome: "playing", swimming: false, casting: false };
+
+/** A skin painted the way the loader now registers one: by group slot. */
+const PAINTED = new Map([
+  ["idle.0", "skin-idle.0"],
+  ["walk.0", "skin-walk.0"],
+  ["walk.1", "skin-walk.1"],
+]);
 
 /** Puts the stub into the motion a situation resolves from, so the tests read
  * as "while walking" rather than as velocity arithmetic. */
@@ -201,55 +208,105 @@ describe("a painted skin stands in for the built-in art", () => {
   it("uses the skin's own frame for each pose", () => {
     const { sprite } = fakeSprite();
     const state = createWizardAnimState();
-    const frameKeys = new Map([
-      ["idle", "skin-idle"],
-      ["walk1", "skin-walk1"],
-      ["walk2", "skin-walk2"],
-    ]);
-
     set(sprite, "walk");
-    updateWizardAnimation(sprite, state, WALK_FRAME_INTERVAL_MS, { ...PLAYING, frameKeys });
-    expect(sprite.texture.key).toBe("skin-walk2");
+    updateWizardAnimation(sprite, state, WALK_FRAME_INTERVAL_MS, { ...PLAYING, frameKeys: PAINTED });
+    expect(sprite.texture.key).toBe("skin-walk.1");
   });
 
   it("falls back to the built-in frame for a pose the skin never painted", () => {
     const { sprite } = fakeSprite();
     const state = createWizardAnimState();
-    const frameKeys = new Map([["idle", "skin-idle"]]);
+    const frameKeys = new Map([["idle.0", "skin-idle"]]);
 
     set(sprite, "jump");
     updateWizardAnimation(sprite, state, 16, { ...PLAYING, frameKeys });
     expect(sprite.texture.key).toBe("wizard-jump");
   });
 
-  it("asks only for the five frame names a stored skin can have", () => {
-    // Pins the storage boundary this phase deliberately did not move: the
-    // runtime still looks skins up by their legacy names. The step that changes
-    // this is the one that teaches the editor to write "walk.0".
+  it("looks a painted skin up by group slot, not by the old frame names", () => {
+    // Pins the storage boundary this phase moved. Until 2026-10-12 the runtime
+    // asked for "walk1"/"walk2" and skinLoader registered textures under those
+    // names; it now asks for "walk.0"/"walk.1", which is what frameGroupsFor
+    // names and what lets a pose hold more than two frames at all. The two ends
+    // are in different modules by design, so this is where they are pinned
+    // together.
     const asked = new Set<string>();
     const frameKeys = {
       get(name: string) {
         asked.add(name);
         return undefined;
       },
+      has: () => false,
     } as unknown as ReadonlyMap<string, string>;
 
     const { sprite } = fakeSprite();
     const state = createWizardAnimState();
-    const situations: Array<[CharacterSituation, "walk" | "idle" | "jump"]> = [
-      ["walk", "walk"],
-      ["idle", "idle"],
-      ["jump", "jump"],
-    ];
-    for (const [, motion] of situations) {
+    for (const motion of ["walk", "idle", "jump"] as const) {
       set(sprite, motion);
       updateWizardAnimation(sprite, state, WALK_FRAME_INTERVAL_MS, { ...PLAYING, frameKeys });
       updateWizardAnimation(sprite, state, WALK_FRAME_INTERVAL_MS, { ...PLAYING, frameKeys });
     }
     for (const name of asked) {
-      expect(["idle", "walk1", "walk2", "jump", "cast"], `asked for "${name}"`).toContain(name);
+      expect(name, `asked for "${name}"`).toMatch(/^(idle|walk|jump|swim|cast|win|lose)\.\d+$/);
     }
-    expect(asked.has("walk1") && asked.has("walk2"), "both stride frames were asked for").toBe(true);
+  });
+});
+
+describe("how many frames a situation has", () => {
+  it("uses the built-in count when nothing is painted", () => {
+    // Two walk pictures and one of everything else, exactly as before skins.
+    expect(situationFrameCount("walk")).toBe(2);
+    expect(situationFrameCount("idle")).toBe(1);
+    expect(situationFrameCount("lose")).toBe(1);
+  });
+
+  it("takes a painted skin's own count instead", () => {
+    const four = new Map([
+      ["walk.0", "a"],
+      ["walk.1", "b"],
+      ["walk.2", "c"],
+      ["walk.3", "d"],
+    ]);
+    expect(situationFrameCount("walk", four)).toBe(4);
+  });
+
+  it("stops at the first gap, the way groupLength does", () => {
+    const holed = new Map([
+      ["walk.0", "a"],
+      ["walk.1", "b"],
+      ["walk.3", "d"],
+    ]);
+    expect(situationFrameCount("walk", holed)).toBe(2);
+  });
+
+  it("never reports fewer than one, so a pose always has something to show", () => {
+    expect(situationFrameCount("swim", new Map([["idle.0", "a"]]))).toBe(1);
+    expect(situationFrameCount("walk", new Map())).toBe(1);
+  });
+
+  it("plays a four-frame walk all the way round", () => {
+    // The point of the whole phase: a painted stride longer than two frames.
+    const four = new Map([
+      ["walk.0", "w0"],
+      ["walk.1", "w1"],
+      ["walk.2", "w2"],
+      ["walk.3", "w3"],
+    ]);
+    const { sprite } = fakeSprite();
+    const state = createWizardAnimState();
+    set(sprite, "walk");
+    const seen: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      updateWizardAnimation(sprite, state, WALK_FRAME_INTERVAL_MS, { ...PLAYING, frameKeys: four });
+      seen.push(sprite.texture.key);
+    }
+    expect(seen).toEqual(["w1", "w2", "w3", "w0", "w1"]);
+  });
+
+  it("holds the skin's own pose for an index it never painted", () => {
+    // Not Grampa's: a half-finished character must not borrow built-in art.
+    const one = new Map([["walk.0", "w0"]]);
+    expect(situationTextureKey("walk", 3, one)).toBe("w0");
   });
 });
 
@@ -372,8 +429,10 @@ describe("the pose a run ends on", () => {
   // PlayScene.update returns early once a run is over, so a painted character
   // finished every run — won or lost — wearing Grampa's art, permanently.
   const painted = new Map([
-    ["idle", "skin-frame-player-idle"],
-    ["cast", "skin-frame-player-cast"],
+    ["idle.0", "skin-frame-player-idle"],
+    ["cast.0", "skin-frame-player-cast"],
+    ["win.0", "skin-frame-player-cast"],
+    ["lose.0", "skin-frame-player-idle"],
   ]);
 
   it("keeps a painted character's own art when they win", () => {
