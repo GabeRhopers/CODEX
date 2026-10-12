@@ -376,7 +376,15 @@ test("a three-frame walk is painted, saved and actually played", async ({ page }
   const level = makeLevel(
     makeArea(20, 8, 6, [
       { type: "player-spawn", x: 1, y: 5 },
-      { type: "goal", x: 18, y: 5 },
+      // **Out of reach on purpose.** The stride test above puts the goal on the
+      // ground and has to stop sampling when the run ends; here the run must
+      // not end at all. Three frames at 140ms need a longer window than the
+      // ~1.5s it takes to cross this level, and under a loaded shard each
+      // sample costs a round trip — so a goal he can walk into turns this into
+      // a race between the cycle and the sampler. It failed exactly that way in
+      // shard 3/3 on 2026-10-12, seeing two of the three frames. Four tiles up
+      // and never jumped at, so walking right simply never finishes.
+      { type: "goal", x: 18, y: 1 },
     ]),
   );
   await startEditorWithLevel(page, level);
@@ -392,11 +400,21 @@ test("a three-frame walk is painted, saved and actually played", async ({ page }
   await page.keyboard.down("ArrowRight");
   await expect.poll(() => playerVelocityX(page), { timeout: 10_000 }).toBeGreaterThan(5);
 
-  // Sampling stops at the goal, for the reason the stride test above records.
+  // One round trip per sample rather than two: the sampler is racing a 140ms
+  // cycle, so halving its cost is the difference between catching three frames
+  // and aliasing past one.
   const seen = new Set<string>();
-  const deadline = Date.now() + 6000;
-  while (Date.now() < deadline && seen.size < 3 && (await outcome(page)) === "playing") {
-    seen.add(await playerTexture(page));
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline && seen.size < 3) {
+    const shot = await page.evaluate(() => {
+      const scene = window.__debugGame!.scene.getScene("Play") as unknown as {
+        player?: { texture: { key: string } };
+        outcome?: string;
+      };
+      return { texture: scene.player?.texture.key ?? "", outcome: scene.outcome ?? "" };
+    });
+    if (shot.outcome !== "playing") break;
+    seen.add(shot.texture);
   }
   await page.keyboard.up("ArrowRight");
 
