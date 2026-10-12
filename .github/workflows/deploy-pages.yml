@@ -1,5 +1,9 @@
 name: Deploy to GitHub Pages
 
+# Both branches run the whole gate; only `main` deploys (see the deploy job's
+# `if`). Keeping the working branch here is deliberate — dropping it would mean
+# the branch the work happens on got no CI until it reached `main`, which is the
+# wrong moment to find out a shard is red.
 on:
   push:
     branches:
@@ -12,8 +16,13 @@ permissions:
   pages: write
   id-token: write
 
+# Per-ref rather than one shared "pages" group (2026-10-12, when `main` became
+# the deploy source). Both branches run this workflow, so a single group with
+# cancel-in-progress would let an ordinary working-branch push cancel a `main`
+# run that was midway through deploying the site. Two pushes to the same branch
+# still supersede each other, which is the behaviour worth keeping.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -85,6 +94,12 @@ jobs:
 
   deploy:
     needs: [build, e2e]
+    # `main` is the deploy source as of 2026-10-12; every other branch runs the
+    # full gate (build + three e2e shards) and stops there. The alternative was
+    # dropping the working branch from the triggers above, which would have
+    # bought the same thing at the price of no CI at all on the branch the work
+    # actually happens on.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
