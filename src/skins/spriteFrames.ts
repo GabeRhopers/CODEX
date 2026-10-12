@@ -245,6 +245,22 @@ export interface FrameGroup {
   state: string;
   frames: readonly string[];
   loop: boolean;
+  /**
+   * The fewest frames this group plays, however few were painted.
+   *
+   * One everywhere except the character's walk, which is two — and that is not
+   * a preference, it is behaviour that already shipped. A character skin with
+   * `walk1` painted and `walk2` left blank has always strided by alternating
+   * the painted frame with the skin's own idle, because every pose used to be
+   * registered and an unpainted one fell back to the base frame. Counting only
+   * the contiguous painted run would quietly turn that into a frozen leg;
+   * `sprite-frames.spec.ts` paints exactly that skin and caught it.
+   *
+   * A slot inside the minimum that nobody painted still resolves through
+   * `groupFrameSource`, so it shows this character's base pose rather than
+   * Grampa's — which is the half of the old behaviour worth keeping.
+   */
+  minFrames: number;
 }
 
 /**
@@ -270,14 +286,21 @@ export const UNNAMED_GROUP_STATE = "";
  * collapse that cycles back to standing reads as a twitch rather than as
  * dying.
  */
-const CHARACTER_STATE_LOOPS: Record<CharacterSituation, boolean> = {
-  idle: true,
-  walk: true,
-  jump: false,
-  swim: true,
-  cast: false,
-  win: false,
-  lose: false,
+interface CharacterStateSpec {
+  loop: boolean;
+  /** See FrameGroup.minFrames. Two for the walk because a half-painted stride
+   * has always alternated against the skin's own idle; one everywhere else. */
+  minFrames: number;
+}
+
+const CHARACTER_STATES: Record<CharacterSituation, CharacterStateSpec> = {
+  idle: { loop: true, minFrames: 1 },
+  walk: { loop: true, minFrames: 2 },
+  jump: { loop: false, minFrames: 1 },
+  swim: { loop: true, minFrames: 1 },
+  cast: { loop: false, minFrames: 1 },
+  win: { loop: false, minFrames: 1 },
+  lose: { loop: false, minFrames: 1 },
 };
 
 /** The state every other state falls back to, and the one `imageData` mirrors
@@ -292,16 +315,19 @@ function frameKeyFor(state: string, index: number): string {
   return `${state}.${index}`;
 }
 
-const CHARACTER_GROUPS: readonly FrameGroup[] = Object.entries(CHARACTER_STATE_LOOPS).map(([state, loop]) => ({
+const CHARACTER_GROUPS: readonly FrameGroup[] = Object.entries(CHARACTER_STATES).map(([state, spec]) => ({
   state,
   frames: Array.from({ length: MAX_FRAMES_PER_STATE }, (_, index) => frameKeyFor(state, index)),
-  loop,
+  loop: spec.loop,
+  minFrames: spec.minFrames,
 }));
 
 /** An enemy's existing cycle, unchanged, expressed as one group — which is what
  * lets a later phase give enemies named groups with no second mechanism. */
 const LOOP_GROUPS: readonly FrameGroup[] = [
-  { state: UNNAMED_GROUP_STATE, frames: LOOP_FRAMES, loop: true },
+  // minFrames 1: an enemy skin with one painted frame is a still, which is
+  // what "a thing with one frame still stands perfectly still" already pins.
+  { state: UNNAMED_GROUP_STATE, frames: LOOP_FRAMES, loop: true, minFrames: 1 },
 ];
 
 /**

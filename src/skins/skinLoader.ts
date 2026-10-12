@@ -312,7 +312,11 @@ export async function resolveFrameTextureKeys(
     // only the contiguous painted run — groupLength stops at the first gap, so
     // a walk with 0, 1 and 3 painted strides through two frames rather than
     // stuttering over the hole.
-    const slots = Math.min(Math.max(1, art.slotCount(group)), group.frames.length);
+    // `minFrames`, not 1: a character whose walk2 was never painted still gets
+    // a second walk slot, which resolves to their own idle and keeps the stride
+    // alternating exactly as it did before groups existed. Counting only what
+    // was painted froze that leg, and sprite-frames.spec.ts caught it.
+    const slots = Math.min(Math.max(group.minFrames, art.slotCount(group)), group.frames.length);
     for (let index = 0; index < slots; index++) {
       const resolved = art.slot(group, index);
       if (!resolved) continue;

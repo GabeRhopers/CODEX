@@ -192,7 +192,9 @@ describe("frameGroupsFor", () => {
     // Storage keys unchanged: every enemy skin already painted must keep
     // working, and an enemy cycles on a timer whatever it is doing, so there is
     // no situation for the group to name.
-    expect(frameGroupsFor(loop)).toEqual([{ state: UNNAMED_GROUP_STATE, frames: ["0", "1", "2", "3"], loop: true }]);
+    expect(frameGroupsFor(loop)).toEqual([
+      { state: UNNAMED_GROUP_STATE, frames: ["0", "1", "2", "3"], loop: true, minFrames: 1 },
+    ]);
   });
 
   it("gives a tile no groups at all", () => {
@@ -317,5 +319,40 @@ describe("what a frame button says", () => {
     // A skin saved against a frame set that has since changed. Showing the
     // stored name beats showing "Frame 0" or crashing.
     expect(frameLabel(loop, "9")).toBe("9");
+  });
+});
+
+describe("the fewest frames a group plays", () => {
+  const character = framePlanFor(CHARACTER_SKIN_ID)!;
+  const loop = framePlanFor("enemy-bat")!;
+  const groupFor = (state: string) => frameGroupsFor(character).find((g) => g.state === state)!;
+
+  it("gives the walk two, because a half-painted stride has always alternated", () => {
+    // The behaviour this protects shipped long before groups: a skin with
+    // walk1 painted and walk2 blank registered both, the blank one falling back
+    // to the skin's own idle, and the character strided against it. Counting
+    // only the painted run would freeze that leg.
+    expect(groupFor("walk").minFrames).toBe(2);
+  });
+
+  it("gives every other pose one, so a still stays a still", () => {
+    for (const state of ["idle", "jump", "swim", "cast", "win", "lose"]) {
+      expect(groupFor(state).minFrames, state).toBe(1);
+    }
+    expect(frameGroupsFor(loop)[0]!.minFrames, "an enemy with one frame stands still").toBe(1);
+  });
+
+  it("never asks for more slots than the group has", () => {
+    for (const group of [...frameGroupsFor(character), ...frameGroupsFor(loop)]) {
+      expect(group.minFrames, group.state).toBeLessThanOrEqual(group.frames.length);
+    }
+  });
+
+  it("resolves a slot inside the minimum that nobody painted to this skin's own base", () => {
+    // Not to the built-in art: a half-finished character must not borrow
+    // Grampa's leg mid-stride.
+    const halfPainted = painted("idle", "walk1");
+    expect(resolveGroupFrame(character, groupFor("walk"), halfPainted, 0)).toBe("png:walk1");
+    expect(resolveGroupFrame(character, groupFor("walk"), halfPainted, 1)).toBe("png:idle");
   });
 });
