@@ -72,12 +72,17 @@ describe("frameFor", () => {
     expect(frameFor("jump", 0)).toBe("wizard-jump");
   });
 
-  it("reuses the idle frame for losing — the tint and tilt carry that pose", () => {
-    expect(frameFor("lose", 0)).toBe("wizard-idle");
+  it("has a defeated pose of its own rather than a tilted idle", () => {
+    // This asserted "wizard-idle" until lose.png existed, when the tint and an
+    // 18° tilt were all that said the run was over. Both the frame and the
+    // absence of a tilt (see angleFor below) have to hold, or he reads as
+    // standing about with a grey wash over him.
+    expect(frameFor("lose", 0)).toBe("wizard-lose");
+    expect(frameFor("lose", 0)).not.toBe(frameFor("idle", 0));
   });
 
-  it("only ever returns one of the five textures that actually exist", () => {
-    const existing = ["wizard-idle", "wizard-walk1", "wizard-walk2", "wizard-jump", "wizard-cast"];
+  it("only ever returns one of the six textures that actually exist", () => {
+    const existing = ["wizard-idle", "wizard-walk1", "wizard-walk2", "wizard-jump", "wizard-cast", "wizard-lose"];
     const situations: CharacterSituation[] = ["lose", "win", "cast", "swim", "jump", "walk", "idle"];
     for (const situation of situations) {
       expect(existing).toContain(frameFor(situation, 0));
@@ -116,21 +121,22 @@ describe("resolveTint", () => {
 });
 
 describe("angleFor", () => {
-  it("leaves every ordinary pose upright", () => {
-    for (const situation of ["idle", "walk", "jump", "cast", "win"] as CharacterSituation[]) {
+  it("leaves every pose but swimming upright", () => {
+    // `lose` joined this list when it got a frame of its own. It is the whole
+    // reason the dedicated frame is worth having: pixelArt:true filters NEAREST,
+    // so any rotation renders with chewed edges, and on the idle frame an 18°
+    // tilt detached the hat's bobble.
+    for (const situation of ["idle", "walk", "jump", "cast", "win", "lose"] as CharacterSituation[]) {
       expect(angleFor(situation, false)).toBe(0);
       expect(angleFor(situation, true)).toBe(0);
     }
   });
 
-  it("topples over on a loss, and leans while swimming", () => {
-    expect(angleFor("lose", false)).toBeGreaterThan(0);
+  it("leans while swimming, which still reuses the jump frame", () => {
     expect(Math.abs(angleFor("swim", false))).toBeGreaterThan(0);
-    expect(Math.abs(angleFor("lose", false))).toBeGreaterThan(Math.abs(angleFor("swim", false)));
   });
 
   it("tilts toward whichever way the character is facing", () => {
-    expect(angleFor("lose", true)).toBe(-angleFor("lose", false));
     expect(angleFor("swim", true)).toBe(-angleFor("swim", false));
   });
 });

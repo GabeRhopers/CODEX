@@ -165,14 +165,19 @@ test("losing gives the character a distinct slumped pose instead of freezing mid
   await page.keyboard.up("ArrowRight");
 
   const lost = await readPlayer(page);
-  // Before this change the character simply froze in whatever frame they
-  // happened to be in, with no tint and no tilt — all three now differ.
-  expect(lost.texture).toBe("wizard-idle");
+  // Originally the character froze in whatever frame they happened to be in,
+  // with no tint and no tilt. The first fix gave losing the *idle* frame, a
+  // tint and an 18° tilt, because there was no defeated pose to show. There is
+  // one now (lose.png), so the frame is its own and the tilt is gone — a
+  // slumped sprite tilted as well read as toppling, and pixelArt:true filters
+  // NEAREST, so rotating it visibly chewed the hat.
+  expect(lost.texture).toBe("wizard-lose");
   expect(lost.tinted).toBe(true);
-  expect(Math.abs(lost.angle)).toBeGreaterThan(0);
+  expect(lost.angle).toBe(0);
 
   // The guarantee that protects the 2026-08-19 gravity retune: Arcade bodies
-  // stay axis-aligned, so a tilted pose must not have resized the hitbox.
+  // stay axis-aligned, and a new frame of a different width must not have
+  // resized the hitbox either.
   expect(lost.bodyWidth).toBe(22);
   expect(lost.bodyHeight).toBe(40);
 });

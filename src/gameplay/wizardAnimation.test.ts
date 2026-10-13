@@ -198,7 +198,7 @@ describe("situations with a single picture", () => {
     const state = createWizardAnimState();
     set(sprite, "walk");
     updateWizardAnimation(sprite, state, 16, { ...PLAYING, outcome: "lost" });
-    expect(sprite.texture.key).toBe("wizard-idle");
+    expect(sprite.texture.key).toBe("wizard-lose");
     updateWizardAnimation(sprite, state, 16, { ...PLAYING, outcome: "won" });
     expect(sprite.texture.key).toBe("wizard-cast");
   });
@@ -454,6 +454,6 @@ describe("the pose a run ends on", () => {
 
   it("still falls back to the built-in art for an unpainted character", () => {
     expect(situationTextureKey("win", 0)).toBe("wizard-cast");
-    expect(situationTextureKey("lose", 0, new Map())).toBe("wizard-idle");
+    expect(situationTextureKey("lose", 0, new Map())).toBe("wizard-lose");
   });
 });

@@ -10,11 +10,15 @@ import { advanceLoop, createLoopState, LoopState } from "./spriteLoop";
 /**
  * Player character art: cropped/normalized from a hand-drawn sprite sheet
  * the user supplied (idle, walk1, walk2, jump, cast — all originally
- * facing right). All frames are pre-scaled offline to the same display
- * height (48px) so swapping textures at runtime never jitters the
- * character's vertical size; only width varies slightly per pose.
+ * facing right), plus `lose`, which was built later from idle's own pixels
+ * (see characterState.ts's header for how, and why not by rotating).
+ * All frames are the same 48px display height so swapping textures at
+ * runtime never jitters the character's vertical size; only width varies
+ * slightly per pose. `lose` keeps that height with transparent rows at the
+ * top rather than a shorter canvas — he is slumped, not floating, and
+ * applyWizardTexture's body offset below assumes the frame is 48 tall.
  *
- * Which of these five shows for a given game situation is decided by
+ * Which of these shows for a given game situation is decided by
  * characterState.ts, not here — this module owns the sprite mechanics
  * (texture swap, body re-centering, facing, walk timing), that one owns the
  * rules. `satisfies` keeps this preload list and that module's own
@@ -26,6 +30,7 @@ export const WIZARD_FRAME_KEYS = [
   "wizard-walk2",
   "wizard-jump",
   "wizard-cast",
+  "wizard-lose",
 ] as const satisfies readonly WizardFrameKey[];
 
 // Exported for PlayScene's accessory sprites (Chicken Slipper/Thunder Hat —

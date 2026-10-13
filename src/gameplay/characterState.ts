@@ -5,24 +5,37 @@
  * without a Phaser scene, exactly like PlayerStats.ts. Nothing here touches a
  * GameObject; PlayScene owns applying the result.
  *
- * Deliberately built on the five sprites the character already has (see
+ * Deliberately built on the sprites the character already has (see
  * public/assets/wizard/) rather than new art. Those frames are ~950-1010
  * distinct colors each with roughly a third of their pixels at partial alpha
  * — hand-drawn art, not palette-constrained pixel art — so the Skin Creator's
  * own 32x32/16-color canvas could never reproduce or re-edit them without
  * wrecking them (the same reason CustomSkins.ts's PixelSkinData docstring
- * gives for uploaded photos not being re-editable). Situations the five
- * frames don't literally cover — losing, swimming, being hurt — reuse the
- * closest existing frame plus a visual treatment instead of inventing art
- * that wouldn't match.
+ * gives for uploaded photos not being re-editable). Situations the art doesn't
+ * literally cover — swimming, being hurt — reuse the closest existing frame
+ * plus a visual treatment instead of inventing art that wouldn't match.
+ *
+ * Losing used to be on that list and no longer is. `lose.png` was added by
+ * translating three bands of `idle.png` (head+hat down and forward, torso a
+ * little, legs not at all) with no rotation and no resampling, so every pixel
+ * is one of idle's own and the "wouldn't match" problem does not arise — a
+ * property its generation checked by asserting the new frame contains no color
+ * absent from idle.png. Rotating the upper body was tried first and rejected:
+ * it turned the hat from a curved cone into a blue slab.
  */
 
-/** The five textures BootScene preloads from public/assets/wizard/ — declared
- * here rather than imported from wizardAnimation.ts because this module owns
- * the situation→frame mapping and must not depend on the module that consumes
- * it. wizardAnimation's own WIZARD_FRAME_KEYS array is `satisfies`-checked
- * against this union, so the two can't drift. */
-export type WizardFrameKey = "wizard-idle" | "wizard-walk1" | "wizard-walk2" | "wizard-jump" | "wizard-cast";
+/** The textures BootScene preloads from public/assets/wizard/ — declared here
+ * rather than imported from wizardAnimation.ts because this module owns the
+ * situation→frame mapping and must not depend on the module that consumes it.
+ * wizardAnimation's own WIZARD_FRAME_KEYS array is `satisfies`-checked against
+ * this union, so the two can't drift. */
+export type WizardFrameKey =
+  | "wizard-idle"
+  | "wizard-walk1"
+  | "wizard-walk2"
+  | "wizard-jump"
+  | "wizard-cast"
+  | "wizard-lose";
 
 /** Every distinct thing the character can be *doing*, in priority order (see
  * resolveSituation). Deliberately no separate "fall": it would map to the
@@ -70,10 +83,12 @@ export function resolveSituation(motion: CharacterMotion): CharacterSituation {
  * only situation that alternates (see walkFrame), so it's handled in frameFor
  * rather than here. */
 const FRAME_BY_SITUATION: Record<Exclude<CharacterSituation, "walk">, WizardFrameKey> = {
-  // Slumping over is conveyed by the treatment (see angleFor/resolveTint), not
-  // by a frame — a defeated pose is the one thing the five frames genuinely
-  // don't contain.
-  lose: "wizard-idle",
+  // His own pose, as of lose.png: head sunk into the shoulders and carried
+  // forward, feet where they were. This used to be `wizard-idle` plus an 18°
+  // tilt, with a comment saying a defeated pose was the one thing the frames
+  // genuinely didn't contain. It is now the one thing they do — so the tilt is
+  // gone (see angleFor) and only the tint remains.
+  lose: "wizard-lose",
   // Unchanged from before this module existed: the cast pose doubles as the
   // victory pose, arms up.
   win: "wizard-cast",
@@ -131,22 +146,28 @@ export function resolveTint(input: CharacterTintInput): TintReason {
   return "none";
 }
 
-/** Toppling-over angle for the lose pose, and the gentler lean that
- * distinguishes swimming from jumping. Applied via setAngle, which in Arcade
- * Physics rotates only what's *drawn* — bodies stay axis-aligned, so no
- * treatment here can change the hitbox. That matters: the 2026-08-19 gravity
- * retune verified every bundled template against a fixed 22x40 body (Desert
- * Canyon's pillar down to roughly a tile of margin), and a cosmetic pose must
- * not be able to invalidate that. */
-const LOSE_ANGLE = 18;
+/** The gentle lean that distinguishes swimming from jumping. Applied via
+ * setAngle, which in Arcade Physics rotates only what's *drawn* — bodies stay
+ * axis-aligned, so no treatment here can change the hitbox. That matters: the
+ * 2026-08-19 gravity retune verified every bundled template against a fixed
+ * 22x40 body (Desert Canyon's pillar down to roughly a tile of margin), and a
+ * cosmetic pose must not be able to invalidate that.
+ *
+ * **Losing has no angle any more, and that is the point of lose.png.** It was
+ * 18°, standing in for the defeated pose the art didn't have. Keeping it would
+ * tilt a frame that is already slumped, and would reintroduce the cost the new
+ * frame exists to avoid: gameConfig sets `pixelArt: true`, so textures filter
+ * NEAREST and a rotated sprite renders with visibly chewed edges — on the idle
+ * frame it detached the hat's bobble. Swimming keeps its lean because swimming
+ * still reuses the jump frame. */
 const SWIM_ANGLE = 10;
 
-/** Tilts toward the direction the character is facing, so both poses read as
- * falling/leaning *forward* rather than snapping to a fixed side regardless of
- * which way they were going. `facingLeft` is the sprite's own flipX (see
+/** Tilts toward the direction the character is facing, so the swim pose reads
+ * as leaning *forward* rather than snapping to a fixed side regardless of which
+ * way they were going. `facingLeft` is the sprite's own flipX (see
  * updateWizardAnimation), and a positive Phaser angle is clockwise. */
 export function angleFor(situation: CharacterSituation, facingLeft: boolean): number {
-  const magnitude = situation === "lose" ? LOSE_ANGLE : situation === "swim" ? SWIM_ANGLE : 0;
+  const magnitude = situation === "swim" ? SWIM_ANGLE : 0;
   // Explicit early return rather than falling through to the negation below:
   // `facingLeft ? -0 : 0` yields negative zero for every upright pose, which
   // renders identically but isn't `Object.is`-equal to 0 — a needless trap for
