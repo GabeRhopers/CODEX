@@ -35,6 +35,7 @@ import { ConfirmButton } from "../ui/confirmButton";
 import { MUTED_COLOR } from "../ui/theme";
 import { makeTextButton } from "../ui/textButton";
 import { drawScreenHeader } from "../ui/screenHeader";
+import { coverFit } from "../ui/coverFit";
 
 /**
  * Writing a cut scene: the panels, and what each one shows.
@@ -295,11 +296,10 @@ export class CutSceneMakerScene extends Phaser.Scene {
     const textureKey = panel.imageId ? this.pictureTextureKey(panel.imageId) : null;
     if (textureKey) {
       const image = this.add.image(PREVIEW.x + PREVIEW.width / 2, PREVIEW.y + PREVIEW.height / 2, textureKey);
-      const scale = Math.max(PREVIEW.width / image.width, PREVIEW.height / image.height);
-      image.setScale(scale);
-      const shape = this.make.graphics({ x: 0, y: 0 }, false);
-      shape.fillRect(PREVIEW.x, PREVIEW.y, PREVIEW.width, PREVIEW.height);
-      image.setMask(shape.createGeometryMask());
+      // Cover-fit and clip — see ui/coverFit.ts. The Graphics object this
+      // replaces was rebuilt on every panel redraw and never destroyed.
+      const fit = coverFit(image.width, image.height, PREVIEW.width, PREVIEW.height);
+      image.setCrop(fit.crop.x, fit.crop.y, fit.crop.width, fit.crop.height).setScale(fit.scale);
     } else if (panel.imageId) {
       // A picture is chosen but its thumbnail is not resolved yet (the library
       // read happens when the picker first opens) or has been deleted since.

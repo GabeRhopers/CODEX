@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { coverFit } from "../ui/coverFit";
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
 
 const VIEWPORT_HEIGHT = GRID_ROWS * TILE_SIZE;
@@ -6,7 +7,7 @@ const VIEWPORT_HEIGHT = GRID_ROWS * TILE_SIZE;
 /**
  * A plain, non-scrolling background: one Image, scaled to cover the
  * level's placeable viewport (like CSS `background-size: cover`) and
- * centered, masked to *exactly* that viewport (`GRID_ORIGIN_X` across,
+ * centered, cropped to *exactly* that viewport (`GRID_ORIGIN_X` across,
  * starting at `GRID_ORIGIN_Y` down for `VIEWPORT_HEIGHT` — see
  * gameConfig.ts) exactly like ParallaxBackground was — see that file for
  * why the mask matters (painting past the level's placeable area
@@ -25,25 +26,19 @@ const VIEWPORT_HEIGHT = GRID_ROWS * TILE_SIZE;
  */
 export class StaticBackground {
   private image: Phaser.GameObjects.Image;
-  private maskShape: Phaser.GameObjects.Graphics;
 
   constructor(scene: Phaser.Scene, viewportWidth: number, textureKey: string) {
-    this.maskShape = scene.make.graphics({ x: 0, y: 0 }, false);
-    this.maskShape.fillRect(GRID_ORIGIN_X, GRID_ORIGIN_Y, viewportWidth, VIEWPORT_HEIGHT);
-    const mask = this.maskShape.createGeometryMask();
-
     this.image = scene.add
       .image(GRID_ORIGIN_X + viewportWidth / 2, GRID_ORIGIN_Y + VIEWPORT_HEIGHT / 2, textureKey)
       .setScrollFactor(0)
-      .setDepth(-100)
-      .setMask(mask);
+      .setDepth(-100);
 
-    // Cover-fit: scale by whichever axis needs it more so the image never
-    // falls short of the viewport on either dimension — each source in the
-    // pool is its own native size/aspect, none pre-cropped to any
-    // particular canvas.
-    const scale = Math.max(viewportWidth / this.image.width, VIEWPORT_HEIGHT / this.image.height);
-    this.image.setScale(scale);
+    // Cropped rather than masked (2026-10-12). This was a Graphics object whose
+    // whole content was one fillRect, turned into a geometry mask — a general
+    // mechanism doing a rectangle's job. See ui/coverFit.ts for the arithmetic
+    // and for why removing it mattered beyond tidiness.
+    const fit = coverFit(this.image.width, this.image.height, viewportWidth, VIEWPORT_HEIGHT);
+    this.image.setCrop(fit.crop.x, fit.crop.y, fit.crop.width, fit.crop.height).setScale(fit.scale);
   }
 
   /** No-op — see class docstring. */
@@ -51,6 +46,5 @@ export class StaticBackground {
 
   destroy(): void {
     this.image.destroy();
-    this.maskShape.destroy();
   }
 }

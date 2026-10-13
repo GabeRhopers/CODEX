@@ -28,6 +28,7 @@ import { ellipsize } from "../ui/labels";
 import { clampPage, pageSlice, rowsPerPage } from "../ui/pager";
 import { makePagerControls } from "../ui/PagerControls";
 import { circleHitArgs } from "../ui/touchTarget";
+import { coverFit } from "../ui/coverFit";
 
 interface WorldMakerSceneData {
   world?: WorldData;
@@ -508,26 +509,21 @@ export class WorldMakerScene extends Phaser.Scene {
     this.backdropContainer.removeAll(true);
 
     const key = staticBackgroundDef(resolveWorldBackground(this.world)).textureKey;
-    const maskShape = this.make.graphics({ x: 0, y: 0 }, false);
-    maskShape.fillRect(MAP_RECT.x, MAP_RECT.y, MAP_RECT.width, MAP_RECT.height);
-
-    const image = this.add
-      .image(MAP_RECT.x + MAP_RECT.width / 2, MAP_RECT.y + MAP_RECT.height / 2, key)
-      .setDepth(-2)
-      .setMask(maskShape.createGeometryMask());
-    // Cover-fit: scale by whichever axis needs it more, so the image never falls
-    // short of the rect on either.
-    image.setScale(Math.max(MAP_RECT.width / image.width, MAP_RECT.height / image.height));
+    const image = this.add.image(MAP_RECT.x + MAP_RECT.width / 2, MAP_RECT.y + MAP_RECT.height / 2, key).setDepth(-2);
+    // Cover-fit and clip, in one step and without a Graphics object standing in
+    // for a rectangle — see ui/coverFit.ts.
+    const fit = coverFit(image.width, image.height, MAP_RECT.width, MAP_RECT.height);
+    image.setCrop(fit.crop.x, fit.crop.y, fit.crop.width, fit.crop.height).setScale(fit.scale);
 
     const dim = this.add
       .rectangle(MAP_RECT.x, MAP_RECT.y, MAP_RECT.width, MAP_RECT.height, 0x10121f, 0.82)
       .setOrigin(0, 0)
       .setDepth(-1);
 
-    // The Graphics is never added to the display list (make, not add), so the
-    // container cannot destroy it for us.
+    // No shutdown hook any more: the mask's Graphics was never on the display
+    // list (`make`, not `add`), so the container could not destroy it and this
+    // had to. A crop owns nothing, so there is nothing left to tidy up.
     this.backdropContainer.add([image, dim]);
-    this.events.once("shutdown", () => maskShape.destroy());
   }
 
   /** Cycles the map backdrop through the four built-ins. A one-button cycle

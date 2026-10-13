@@ -24,6 +24,17 @@ const ZOOM = 1.2;
  * the editor toolbar (see gameConfig.ts's GAME_WIDTH), and painting scenery
  * into that unplaceable margin is what made it look like part of the level
  * even though clicks there were always silently rejected.
+ *
+ * **Dormant, and the last geometry mask in the project (2026-10-12).** Nothing
+ * constructs this class — `StaticBackground` is what PlayScene builds, and every
+ * other mention of this file is a comment. The three live backgrounds moved from
+ * a rectangular mask to a crop (see ui/coverFit.ts), which removed the project's
+ * exposure to Phaser 4 dropping `GeometryMask` under WebGL. This one did not
+ * move, for a reason worth knowing before reviving it: its layers *pan*
+ * (`layer.image.x` changes every frame), and a crop is in texture pixels, so a
+ * moving image needs its crop recomputed each frame rather than set once. Left
+ * as it is because deleting a file is not a side effect a rendering change gets
+ * to have — but if this comes back, it needs that per-frame crop, not a mask.
  */
 export class ParallaxBackground {
   private layers: { image: Phaser.GameObjects.Image; factor: number; maxOffset: number }[] = [];
