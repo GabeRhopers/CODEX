@@ -170,10 +170,32 @@ test("a painted character skin replaces Grampa, animates, and cannot change his 
   // message was not. The outcome check keeps this test about the stride; the
   // win pose has its own assertion below.
   await page.keyboard.down("ArrowRight");
+  // **Assert he is walking before sampling the walk**, the same guard the
+  // three-frame test below already carries. Without it the loop can spend part
+  // of its budget on the idle texture and report one distinct frame — which
+  // reads as a broken stride and is really a keypress that has not moved him
+  // yet.
+  await expect.poll(() => playerVelocityX(page), { timeout: 10_000 }).toBeGreaterThan(5);
+
+  // **One round trip per sample, not two.** The goal has to stay on the ground
+  // here, unlike the three-frame test, because the win assertion below needs
+  // the run to actually finish — so the sampling window is only the ~1.5s it
+  // takes to cross the level, and against a 140ms cycle the cost of each sample
+  // is the difference between catching both frames and aliasing past one.
+  // Measured 2026-10-14: in its old form this failed 1 run in 15 on an
+  // untouched tree, and took shard 3/3 of CI down with it.
   const seen = new Set<string>();
   const deadline = Date.now() + 6000;
-  while (Date.now() < deadline && seen.size < 2 && (await outcome(page)) === "playing") {
-    seen.add(await playerTexture(page));
+  while (Date.now() < deadline && seen.size < 2) {
+    const shot = await page.evaluate(() => {
+      const scene = window.__debugGame!.scene.getScene("Play") as unknown as {
+        player?: { texture: { key: string } };
+        outcome?: string;
+      };
+      return { texture: scene.player?.texture.key ?? "", outcome: scene.outcome ?? "" };
+    });
+    if (shot.outcome !== "playing") break;
+    seen.add(shot.texture);
   }
 
   expect(seen.size, "the stride never showed two distinct frames before the goal").toBeGreaterThanOrEqual(2);
