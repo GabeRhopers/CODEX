@@ -207,3 +207,51 @@ test("a delete that fails says so and keeps the row", async ({ page }) => {
     .toContain("Couldn't delete");
   expect(await listedNames(page)).toEqual(before);
 });
+
+/**
+ * The failure the other tests here cannot reach: the tab closing.
+ *
+ * Everything above protects work for as long as the editor stays open — the
+ * level stays dirty, stays on screen, and `leaveToMenu` refuses to navigate.
+ * None of it survives someone closing the tab during an outage, which is
+ * exactly when someone gives up and does. `EditorScene.handlePageHide` fires
+ * `void persistLevel()`, an async Drive write the browser is free to discard
+ * mid-teardown, so before this there was no copy of that work anywhere.
+ *
+ * A synchronous localStorage draft is the fix, and this is the only test that
+ * can tell whether it works, because the property is "the work is still there
+ * after the page that held it is gone".
+ */
+test("work survives closing the tab mid-outage, and comes back on reopen", async ({ page }) => {
+  test.slow();
+  // One level object, passed twice. Playwright structure-clones an evaluate
+  // argument, so the browser's copy is the one that gets painted and this one
+  // stays as Drive still has it — which is what the reopen below must simulate.
+  const stored = LEVEL();
+
+  await gotoApp(page);
+  await startEditorWithLevel(page, stored);
+  await failDriveWrites(page);
+
+  await paintOneTile(page);
+  // Assert the precondition, or the reopen below proves nothing: a test that
+  // "restores" a level that was never painted passes against a broken feature.
+  expect(await paintedTileCount(page)).toBeGreaterThan(0);
+
+  // The tab goes away. A plain Event, not PageTransitionEvent — the handler
+  // reads nothing off it, and PageTransitionEvent is not constructible
+  // everywhere.
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+
+  const draft = await page.evaluate((id) => localStorage.getItem(`rhopers:draft:${id}`), stored.id);
+  expect(draft, "pagehide must leave a draft behind — it is the only write that can finish").not.toBeNull();
+
+  // Reopening with the copy Drive still holds: unpainted, older. The draft is
+  // newer, so the editor should take it.
+  await startEditorWithLevel(page, stored);
+
+  expect(await paintedTileCount(page)).toBeGreaterThan(0);
+  // Restored work has not reached Drive, so it must still be dirty — otherwise
+  // the next save would never push it and the recovery would be cosmetic.
+  expect(await readSceneField<boolean>(page, "Editor", "dirty")).toBe(true);
+});

@@ -32,6 +32,7 @@ import { MusicAsset } from "../music/MusicLibrary";
 import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musicLibraryStorage";
 import { CHARACTER_SKIN_ID, HERO_TEXTURE_KEY } from "../skins/spriteFrames";
 import { getLevelStorage } from "../persistence/storage";
+import { clearDraft, isDraftNewer, loadDraft, saveDraft } from "../persistence/draftStore";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { loadActiveProfile } from "../profile/Profile";
 import { builtInGroundTilesets, composeGroundTilesets, sameGroundTilesets } from "../skins/groundTileset";
@@ -183,8 +184,19 @@ export class EditorScene extends Phaser.Scene {
   private musicLibrary: MusicAsset[] = [];
   // A stable bound reference so it can be removed on shutdown — an inline
   // arrow passed straight to addEventListener can never be un-registered.
+  //
+  // The draft is written *first*, and synchronously, because the Drive write
+  // below cannot be relied on here at all: `persistLevel` is async and this is
+  // page teardown, so the browser is free to discard the in-flight request —
+  // which is precisely how unsaved work used to disappear. localStorage is
+  // synchronous and therefore the only write guaranteed to complete. The Drive
+  // attempt still runs: when it does land (a slow teardown, a hidden tab that
+  // is never actually closed) it clears the draft itself, so the fast path is
+  // unchanged and the draft is just the belt to its braces.
   private readonly handlePageHide = (): void => {
-    if (this.dirty) void this.persistLevel();
+    if (!this.dirty) return;
+    this.writeDraft();
+    void this.persistLevel();
   };
 
   constructor() {
@@ -207,6 +219,7 @@ export class EditorScene extends Phaser.Scene {
 
   create(): void {
     this.level = this.initialLevel ?? createEmptyLevel();
+    const restoredDraft = this.adoptNewerDraft();
     this.cameras.main.setBackgroundColor(CANVAS_BACKGROUND_COLOR);
     this.backgroundId = resolveStaticBackground(this.level);
     // Bounded to the area's actual placeable width, not the (often wider,
@@ -393,6 +406,16 @@ export class EditorScene extends Phaser.Scene {
       window.removeEventListener("pagehide", this.handlePageHide);
       this.autosaveTimer?.remove(false);
     });
+
+    // Said here rather than at the point of adoption because `this.ui` does not
+    // exist that early, and the restore has to happen before the UI reads the
+    // level's name and size off it. Deliberately gentle: the work is already
+    // back on screen, so this explains what they are looking at rather than
+    // asking them to decide anything.
+    if (restoredDraft) {
+      this.ui.setStatus("Restored changes that never reached Google Drive");
+      this.markDirty();
+    }
   }
 
   /** A library-backed background/track's real display name lives in
@@ -1428,16 +1451,90 @@ export class EditorScene extends Phaser.Scene {
       await this.storage.save(this.level);
       this.dirty = false;
       this.ui.setSaveState("saved");
+      // The work is in storage, so the local copy is no longer unsent mail —
+      // and leaving it would make the editor offer to "restore" the very thing
+      // it just saved on the next open.
+      const draftStorage = this.draftStorage;
+      if (draftStorage) clearDraft(draftStorage, this.level.id);
     } catch (err) {
       // Left dirty on purpose — nothing was actually persisted. Surfaces
       // once here rather than retrying on a timer: if storage is genuinely
       // full/unavailable, retrying every couple seconds would just be
       // noise. The next edit (via markDirty) or another manual Save click
       // will try again.
+      //
+      // Keeping a draft matters most here: `dirty` staying true protects the
+      // work only for as long as the tab is open, and an outage is exactly
+      // when someone gives up and closes it.
+      this.writeDraft();
       this.ui.setSaveState("error");
       this.ui.setStatus("Save failed — your browser may be out of storage space");
       console.error("Level save failed:", err);
     }
+  }
+
+  /**
+   * Swaps in a local draft when it is newer than what storage handed us, and
+   * reports whether it did.
+   *
+   * Runs before anything in `create` reads the level — the UI takes its name,
+   * size and entity count straight off `this.level`, so adopting afterwards
+   * would show the draft's content under the stored copy's labels.
+   *
+   * **It restores rather than asking.** A draft only exists when work did not
+   * reach Drive, so there is nothing to weigh up: the alternative to restoring
+   * is losing it. A dialog here would be asking a child to adjudicate their own
+   * data loss, and the *stored* copy is not destroyed by this — it is still in
+   * Drive until the next save replaces it.
+   */
+  private adoptNewerDraft(): boolean {
+    const storage = this.draftStorage;
+    if (!storage || !this.level.id) return false;
+    const draft = loadDraft(storage, this.level.id);
+    if (!draft || !isDraftNewer(draft, this.initialLevel ?? null)) return false;
+    this.level = draft;
+    return true;
+  }
+
+  /** Where drafts live. A getter rather than a captured field so a test (or a
+   * browser that denies storage entirely) can be handled in one place, and so
+   * nothing touches `localStorage` at construction time. */
+  private get draftStorage(): Storage | null {
+    try {
+      return window.localStorage;
+    } catch {
+      // Safari in private mode throws on access, not just on write.
+      return null;
+    }
+  }
+
+  /**
+   * Best-effort local copy of the current level. Silent by design: it is a
+   * safety net, and a child who is already being told their save failed does
+   * not need a second message about the backup of it.
+   *
+   * **Stamps its own `updatedAt`, and that is load-bearing.** Editing does not
+   * touch `updatedAt` — only `persistLevel` does, just before it writes — so on
+   * the pagehide path the level still carries the timestamp of the *last
+   * successful save*. Writing that verbatim would produce a draft that
+   * `isDraftNewer` correctly judges to be no newer than the stored copy, and
+   * the restore would never fire. Stamped on a copy rather than on `this.level`
+   * because this runs during teardown, where mutating the live level buys
+   * nothing and could be seen by an in-flight `persistLevel`.
+   *
+   * **One gap, measured and left alone.** A level keeps `id: ""` until a save
+   * mints one (createEmptyLevel, then persistLevel), and a draft is keyed by
+   * id, so a brand-new level is unprotected until its first save *attempt*.
+   * That window is AUTOSAVE_DEBOUNCE_MS — 2 seconds after the first edit — and
+   * no longer, because persistLevel mints the id before the write, so even a
+   * failed save closes it. Minting earlier would shut the window but would
+   * change when ids come into existence for every other reader of one, which is
+   * a bigger change than two seconds of exposure on an empty grid is worth.
+   */
+  private writeDraft(): void {
+    const storage = this.draftStorage;
+    if (!storage || !this.level.id) return;
+    saveDraft(storage, { ...this.level, updatedAt: new Date().toISOString() });
   }
 
   private async saveLevel(): Promise<void> {
