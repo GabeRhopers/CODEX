@@ -297,3 +297,73 @@ function visibleLabels(page: Page): Promise<string[]> {
     return out;
   });
 }
+
+/** How many cells the live canvas has painted — the drawing itself, read off
+ * the one object that holds it. */
+const paintedCellCount = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("SkinEditor") as unknown as {
+      pixelCanvas?: { getCells(): (string | null)[] };
+    };
+    return (scene.pixelCanvas?.getCells() ?? []).filter((c) => c !== null).length;
+  });
+
+const paintCells = async (page: Page, cells: [number, number][]): Promise<void> => {
+  const box = await pixelCanvasBox(page, 32);
+  const cell = box.width / 32;
+  for (const [x, y] of cells) await page.mouse.click(box.left + (x + 0.5) * cell, box.top + (y + 0.5) * cell);
+};
+
+/**
+ * The drawing survives the tab closing.
+ *
+ * This scene had no autosave, no pagehide flush and no dirty tracking of any
+ * kind — Save was a button and nothing else ever wrote — so the only copy of a
+ * drawing was the one on screen, for the whole session. A closed tab lost it,
+ * and the authoring walk measures this stage at 32 of 123 gestures, the largest
+ * outside level-building and the one with a child's own drawing in it.
+ *
+ * **It saves first, deliberately.** An earlier version of this test typed a
+ * name and drew without ever saving, and passed with the stroke hook deleted —
+ * because naming the thing also marks work unsaved, so the draft was being
+ * written on the strength of the *name*. Saving first clears both the draft and
+ * the flag, which leaves the strokes afterwards as the only unsaved thing in
+ * the scene and makes this a test about a drawing.
+ */
+test("a drawing made after the last save survives closing the tab", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  await openNewThing(page);
+  await typeName(page, "Star Fruit");
+  await clickByText(page, "SkinEditor", "Draw");
+  await expect.poll(() => sceneMode(page)).toBe("canvas");
+
+  await paintCells(page, [
+    [10, 10],
+    [11, 10],
+  ]);
+  await clickByText(page, "SkinEditor", "Save");
+  await expect.poll(() => storedThings(page).then((t) => t.map((d) => d.name))).toEqual(["Star Fruit"]);
+  // A successful save is what makes the rest of this test mean anything: it
+  // clears the draft and the unsaved flag, so nothing below can ride on them.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rhopers:thingdraft"))).toBeNull();
+
+  // Still drawing afterwards, the way anyone does.
+  await paintCells(page, [
+    [10, 11],
+    [11, 11],
+  ]);
+  await expect.poll(() => paintedCellCount(page)).toBe(4);
+
+  // The tab goes away. A plain Event — the handler reads nothing off it, and
+  // PageTransitionEvent is not constructible everywhere.
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  const stored = await page.evaluate(() => localStorage.getItem("rhopers:thingdraft"));
+  expect(stored, "pagehide must leave a draft — it is the only write that can finish").not.toBeNull();
+
+  // Coming back. Restarting the scene re-runs create(), which is where a
+  // waiting draft is picked up.
+  await page.evaluate(() => window.__debugGame!.scene.start("SkinEditor"));
+  await expect.poll(() => sceneMode(page)).toBe("canvas");
+  expect(await paintedCellCount(page)).toBe(4);
+});

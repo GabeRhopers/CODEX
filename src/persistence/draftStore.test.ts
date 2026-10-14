@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearDraft, draftIds, isDraftNewer, loadDraft, saveDraft } from "./draftStore";
+import { clearDraft, clearThingDraft, draftIds, isDraftNewer, loadDraft, loadThingDraft, saveDraft, saveThingDraft } from "./draftStore";
 import { LevelData } from "../level/LevelSchema";
 import { createEmptyGrid, SCHEMA_VERSION } from "../level/LevelSchema";
 
@@ -111,6 +111,67 @@ describe("draftStore", () => {
       // A level that was never successfully saved at all — the case with the
       // most to lose, since there is no other copy anywhere.
       expect(isDraftNewer(level("a", "2026-10-14T10:00:00.000Z"), null)).toBe(true);
+    });
+  });
+
+  describe("the Thing Maker's draft", () => {
+    interface Target {
+      brush: { id: string };
+      name: string;
+      frameCells: Record<string, (string | null)[]>;
+    }
+    const target: Target = {
+      brush: { id: "custom:bug" },
+      name: "Grumble Bug",
+      frameCells: { "idle.0": ["#ff0000", null, "#00ff00"] },
+    };
+
+    it("round-trips the whole editing target, nulls and all", () => {
+      // The nulls matter: a null cell is "not painted", and JSON that dropped
+      // them would shift every cell after it and smear the drawing.
+      const storage = fakeStorage();
+      expect(saveThingDraft(storage, target)).toBe(true);
+      expect(loadThingDraft<Target>(storage)).toEqual(target);
+    });
+
+    it("has nothing to offer when none was written", () => {
+      expect(loadThingDraft(fakeStorage())).toBeNull();
+    });
+
+    it("keeps only the newest, since only one thing is drawn at a time", () => {
+      const storage = fakeStorage();
+      saveThingDraft(storage, { ...target, name: "First" });
+      saveThingDraft(storage, { ...target, name: "Second" });
+      expect(loadThingDraft<Target>(storage)?.name).toBe("Second");
+    });
+
+    it("clears, and tolerates clearing nothing", () => {
+      const storage = fakeStorage();
+      saveThingDraft(storage, target);
+      clearThingDraft(storage);
+      expect(loadThingDraft(storage)).toBeNull();
+      expect(() => clearThingDraft(storage)).not.toThrow();
+    });
+
+    it("reports failure instead of throwing when storage is full", () => {
+      expect(saveThingDraft(fullStorage(), target)).toBe(false);
+    });
+
+    it("treats a corrupt draft as absent", () => {
+      const storage = fakeStorage();
+      storage.setItem("rhopers:thingdraft", "{ not json");
+      expect(loadThingDraft(storage)).toBeNull();
+    });
+
+    it("does not collide with a level draft", () => {
+      // Different keyspaces; a child with both an unsaved level and an unsaved
+      // drawing must not lose one to the other.
+      const storage = fakeStorage();
+      saveDraft(storage, level("a", "2026-10-14T10:00:00.000Z"));
+      saveThingDraft(storage, target);
+      expect(loadDraft(storage, "a")).not.toBeNull();
+      expect(loadThingDraft<Target>(storage)?.name).toBe("Grumble Bug");
+      expect(draftIds(storage)).toEqual(["a"]);
     });
   });
 

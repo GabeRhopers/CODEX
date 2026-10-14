@@ -96,6 +96,65 @@ export function isDraftNewer(draft: LevelData, stored: { updatedAt: string } | n
   return draft.updatedAt > stored.updatedAt;
 }
 
+/**
+ * The Thing Maker's draft, under one key.
+ *
+ * **One key, not one per thing, because only one thing is ever being drawn.**
+ * The Thing Maker holds a single editing target at a time, so there is no
+ * second draft to collide with, and the draft carries its own identity (the
+ * brush and the skin id it came from) for the restore to check against.
+ *
+ * Generic rather than typed against `EditingTarget`: that interface lives in
+ * SkinEditorScene, importing it here would drag Phaser into a module whose
+ * whole point is not needing it, and re-declaring its shape would be a second
+ * copy to keep in step. What this module owns is the storage discipline — one
+ * key, never throwing — not the schema, which the scene knows and asserts.
+ *
+ * The exposure here is worse than the level editor's, which is why it is worth
+ * the code: SkinEditorScene has no autosave, no pagehide flush and no dirty
+ * tracking of its own, so before this the only copy of a drawing was the one on
+ * screen, for the whole session.
+ */
+const THING_DRAFT_KEY = "rhopers:thingdraft";
+
+export function saveThingDraft(storage: Storage, value: unknown): boolean {
+  try {
+    storage.setItem(THING_DRAFT_KEY, JSON.stringify(value));
+    return true;
+  } catch {
+    // Quota, or Safari's private mode. Same reasoning as saveDraft: the caller
+    // is in page teardown and has nothing better to do about it.
+    return false;
+  }
+}
+
+/** The stored draft, or null if there is none or it cannot be read. The caller
+ * asserts the shape; a draft written by an older version that no longer parses
+ * is treated as absent, which is the same call `loadDraft` makes. */
+export function loadThingDraft<T>(storage: Storage): T | null {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(THING_DRAFT_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function clearThingDraft(storage: Storage): void {
+  try {
+    storage.removeItem(THING_DRAFT_KEY);
+  } catch {
+    // Nothing useful to do; a stale draft is offered back at most once and the
+    // next save clears it again.
+  }
+}
+
 /** Every level id that currently has a draft. Used by nothing yet; it is here
  * because a "you have unsaved work elsewhere" prompt is the obvious next step
  * and the key layout above is what makes it cheap. */

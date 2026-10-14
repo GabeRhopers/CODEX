@@ -49,6 +49,7 @@ import { resolveSkinThumbnails } from "../skins/skinLoader";
 import { copySkinName, defaultSkinName, displaySkinName, sanitizeSkinName } from "../skins/skinNames";
 import { paletteThumbnail } from "./skin/paletteThumbnail";
 import { listPixelSkins, loadCustomSkins, removeCustomSkin, savePixelSkin, setActiveSkin } from "../skins/skinStorage";
+import { clearThingDraft, loadThingDraft, saveThingDraft } from "../persistence/draftStore";
 import { BUTTON_COLOR, BUTTON_COLOR_NUM, BUTTON_HOVER_COLOR, ROW_BG, SELECTED_COLOR, SELECTED_HOVER_COLOR } from "../ui/theme";
 import {
   ARM_TIMEOUT_MS,
@@ -193,6 +194,25 @@ function skinTargets(customDefs: readonly CustomEntityDef[] = []): Brush[] {
 export class SkinEditorScene extends Phaser.Scene {
   private mode: Mode = "browse";
   private target?: EditingTarget;
+  /**
+   * Whether anything has been drawn or typed since the last successful save.
+   *
+   * This scene has no autosave, no pagehide flush and no dirty tracking — Save
+   * is a button and nothing else writes — so before the draft below the only
+   * copy of a drawing was the one on screen, for the whole session. Closing the
+   * tab lost it outright. This flag is the cheapest honest answer to "is there
+   * anything worth rescuing", set from the two places work actually happens
+   * (a stroke, and an edit to an invented thing's form) rather than by
+   * instrumenting a 2,000-line scene.
+   */
+  private unsavedWork = false;
+  /** A stable bound reference so it can be removed on shutdown — an inline
+   * arrow passed to addEventListener can never be un-registered. Mirrors
+   * EditorScene's handler, including why the draft is written synchronously:
+   * localStorage is the only write that can finish during teardown. */
+  private readonly handlePageHide = (): void => {
+    this.writeThingDraft();
+  };
   private pixelCanvas?: PixelCanvasOverlay;
   private statusText?: Phaser.GameObjects.Text;
   private clearButton?: Phaser.GameObjects.Text;
@@ -287,7 +307,18 @@ export class SkinEditorScene extends Phaser.Scene {
     this.mode = "pick-brush";
     this.target = undefined;
     this.pickPage = 0;
+    this.unsavedWork = false;
+    // Before rebuild(), because adopting sets the target the rebuild draws
+    // from. A rescued drawing opens on the canvas rather than the pick grid:
+    // the child was drawing when the tab went away, and making them find their
+    // way back to it would be a strange way to hand it over.
+    const restored = this.adoptThingDraft();
+    if (restored) this.mode = "canvas";
     this.rebuild();
+    if (restored) this.statusText?.setText("Picked up where you left off — not saved yet").setColor("#facc15");
+
+    window.addEventListener("pagehide", this.handlePageHide);
+    this.events.once("shutdown", () => window.removeEventListener("pagehide", this.handlePageHide));
 
     // Invented things are skinnable targets too, and they arrive asynchronously,
     // so the grid is redrawn once they land rather than rendered without them.
@@ -920,6 +951,9 @@ export class SkinEditorScene extends Phaser.Scene {
         if (!this.target?.draft) return;
         this.target = { ...this.target, draft: update(this.target.draft) };
         this.saveError = undefined;
+        // The form is work too — a name, a sound, what it copies. Cheaper to
+        // redo than a drawing, but there is no reason to lose it either.
+        this.unsavedWork = true;
         if (redraw) this.rebuild();
       },
       onPreviewSound: (sound) => void this.previewSound(sound),
@@ -1429,7 +1463,10 @@ export class SkinEditorScene extends Phaser.Scene {
       viewport: canvasRect,
       initialCells: target.frameCells[target.activeFrame],
       onPaint: () => {
-        /* live strokes need no per-cell UI feedback beyond the canvas's own redraw */
+        /* live strokes need no per-cell UI feedback beyond the canvas's own
+         * redraw — but they are the work this scene can lose, so this is where
+         * "there is something worth rescuing" becomes true. */
+        this.unsavedWork = true;
       },
       onColorPicked: (picked) => {
         // Eyedropper is momentary — sampling a color resumes Paint with
@@ -2006,6 +2043,64 @@ export class SkinEditorScene extends Phaser.Scene {
    * map. Every path that tears the canvas down — switching frame, switching
    * palette, saving — has to go through this first, or that frame's unsaved
    * strokes die with the canvas. */
+  /** The work is in the library, so there is nothing left to rescue. Clears
+   * both the stored draft and the flag, so a pagehide immediately afterwards
+   * writes nothing. */
+  private clearDraftNowSaved(): void {
+    this.unsavedWork = false;
+    const storage = this.draftStorage;
+    if (storage) clearThingDraft(storage);
+  }
+
+  /** Where drafts live, or null when the browser refuses storage outright —
+   * Safari in private mode throws on access, not just on write. */
+  private get draftStorage(): Storage | null {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Best-effort local copy of whatever is being drawn.
+   *
+   * Folds the live canvas in first: `pixelCanvas` holds the only copy of the
+   * strokes made since the last rebuild, which is exactly what `onSave` has to
+   * do before it writes, and for the same reason.
+   *
+   * Silent, and gated on `unsavedWork` so a child who opens a saved thing,
+   * looks at it and closes the tab is not offered their own untouched drawing
+   * back on the next visit.
+   */
+  private writeThingDraft(): void {
+    const storage = this.draftStorage;
+    if (!storage || !this.unsavedWork || !this.target) return;
+    saveThingDraft(storage, this.pixelCanvas ? this.captureActiveFrame() : this.target);
+  }
+
+  /**
+   * Picks a draft back up, if one is waiting.
+   *
+   * Restores straight into the canvas rather than asking. A draft only exists
+   * when work never reached storage, so the alternative to restoring is losing
+   * it, and the saved thing it was based on is untouched in the library either
+   * way — `existingId` rides along in the draft, so saving still updates the
+   * same entry rather than making a duplicate.
+   */
+  private adoptThingDraft(): boolean {
+    const storage = this.draftStorage;
+    if (!storage) return false;
+    const draft = loadThingDraft<EditingTarget>(storage);
+    // A draft written by an older version may not have a brush any more; its
+    // id is what every downstream lookup (framePlanFor, gridSizeFor) needs, so
+    // anything without one is unusable rather than half-restorable.
+    if (!draft?.brush?.id) return false;
+    this.target = draft;
+    this.unsavedWork = true; // still unsaved — restoring is not saving
+    return true;
+  }
+
   private captureActiveFrame(): EditingTarget {
     const target = this.target!;
     if (!this.pixelCanvas) return target;
@@ -2097,6 +2192,7 @@ export class SkinEditorScene extends Phaser.Scene {
     // Nothing has been painted yet — which is a perfectly good state for a
     // thing, since it wears the art of whatever it copies until you draw it.
     if (!this.pixelCanvas) {
+      this.clearDraftNowSaved();
       this.statusText?.setText(draft ? `Saved "${draft.name}".` : "").setColor("#4ade80");
       return;
     }
@@ -2150,6 +2246,11 @@ export class SkinEditorScene extends Phaser.Scene {
     void savePixelSkin(target.brush.id, target.existingId, imageData, { paletteId: target.paletteId }, uploadedBy, frames, name)
       .then((id) => {
         this.target = { ...target, existingId: id, name };
+        // Only here, inside the `then` — the drawing is in the library now, so
+        // the draft has stopped being unsent mail. Clearing on the way *into*
+        // a save would throw the rescue copy away at the exact moment the save
+        // might fail, which is the one thing it exists for.
+        this.clearDraftNowSaved();
         const painted = frames ? ` (${Object.keys(frames).length} frame${Object.keys(frames).length === 1 ? "" : "s"})` : "";
         // Says where it went, because as of 2026-08-23 saving deliberately
         // changes nothing anyone can see yet. Before that it silently became
