@@ -81,9 +81,17 @@ async function makeDefault(page: Page): Promise<void> {
   await expect.poll(() => status(page)).toContain("default set");
 }
 
-test("a painted character skin replaces Grampa, animates, and cannot change his hitbox", async ({ page }) => {
-  test.slow(); // paints across two 48x48 frames, saves through mocked Drive, then plays a level
-
+/**
+ * Paint Grampa an idle and a walk frame, save it, make it the default, and come
+ * back to the Menu.
+ *
+ * Extracted when the test below was split in two (2026-10-16). Both halves need
+ * a painted character and each test gets its own browser context, so the skin
+ * cannot be shared — only the steps can. Painted through the real screens
+ * rather than seeded through the debug hook on purpose: that the editor's
+ * output is what the runtime reads is half of what these tests are for.
+ */
+async function paintWalkingCharacter(page: Page): Promise<void> {
   await gotoApp(page);
   await openThings(page);
 
@@ -135,11 +143,25 @@ test("a painted character skin replaces Grampa, animates, and cannot change his 
   await clickByText(page, "SkinEditor", "← Back");
   await clickByText(page, "SkinEditor", "← Back");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));
+}
+
+test("a painted character skin replaces Grampa, animates, and cannot change his hitbox", async ({ page }) => {
+  test.slow(); // paints across two 48x48 frames, saves through mocked Drive, then plays a level
+  await paintWalkingCharacter(page);
 
   const level = makeLevel(
     makeArea(20, 8, 6, [
       { type: "player-spawn", x: 1, y: 5 },
-      { type: "goal", x: 18, y: 5 },
+      // **Out of reach on purpose**, exactly as the three-frame test below does
+      // it, and for a reason this test learned the hard way. It used to put the
+      // goal on the ground because it also asserted the *winning* pose, which
+      // needs the run to finish — so the stride had only the ~1.5s it takes to
+      // cross the level to show two frames, and on a loaded CI runner it did
+      // not. Polling velocity first and halving the cost of each sample
+      // (2026-10-14) made that rarer without fixing it: shard 3/3 failed again
+      // on 2026-10-16. The window and the finish were in direct conflict, so
+      // the win assertion moved to its own test and this one simply never ends.
+      { type: "goal", x: 18, y: 1 },
     ]),
   );
   await startEditorWithLevel(page, level);
@@ -161,51 +183,72 @@ test("a painted character skin replaces Grampa, animates, and cannot change his 
 
   // Walking cycles walk1 and walk2; walk2 resolves to the idle texture, so two
   // distinct keys should both appear while moving.
-  //
-  // **Sampling stops at the goal.** This level is 17 tiles of clear ground and
-  // a character crosses it in a second or two, so a loop watching only the
-  // clock will eventually fold the *win* pose into `seen` and fail reporting a
-  // walk-cycle problem it never had. That is how CI found the applyTerminalPose
-  // bug on 2026-10-11 — the sample was honest, the diagnosis in the failure
-  // message was not. The outcome check keeps this test about the stride; the
-  // win pose has its own assertion below.
   await page.keyboard.down("ArrowRight");
-  // **Assert he is walking before sampling the walk**, the same guard the
-  // three-frame test below already carries. Without it the loop can spend part
-  // of its budget on the idle texture and report one distinct frame — which
-  // reads as a broken stride and is really a keypress that has not moved him
-  // yet.
+  // **Assert he is walking before sampling the walk.** Without this the loop can
+  // spend part of its budget on the idle texture and report one distinct frame,
+  // which reads as a broken stride and is really a keypress that has not moved
+  // him yet.
   await expect.poll(() => playerVelocityX(page), { timeout: 10_000 }).toBeGreaterThan(5);
 
-  // **One round trip per sample, not two.** The goal has to stay on the ground
-  // here, unlike the three-frame test, because the win assertion below needs
-  // the run to actually finish — so the sampling window is only the ~1.5s it
-  // takes to cross the level, and against a 140ms cycle the cost of each sample
-  // is the difference between catching both frames and aliasing past one.
-  // Measured 2026-10-14: in its old form this failed 1 run in 15 on an
-  // untouched tree, and took shard 3/3 of CI down with it.
+  // One round trip per sample rather than two: the sampler is racing a 140ms
+  // cycle, so halving its cost is the difference between catching both frames
+  // and aliasing past one.
+  //
+  // **He turns round at the wall, and that is the real fix.** Putting the goal
+  // out of reach stops the *run* ending, but it does not stop the *walking*: a
+  // level is exactly one screen wide (CLAUDE.md — the camera never scrolls, and
+  // there is no longer level to make), so he reaches the far side in about a
+  // second and a half and stands still for whatever window is left. That is the
+  // same short window the 2026-10-14 fix was supposed to have cured, which is
+  // why it did not, and why shard 3/3 failed again two days later. Turning him
+  // round keeps him moving for the whole eight seconds instead.
   const seen = new Set<string>();
-  const deadline = Date.now() + 6000;
+  let held: "ArrowRight" | "ArrowLeft" = "ArrowRight";
+  const deadline = Date.now() + 8000;
   while (Date.now() < deadline && seen.size < 2) {
     const shot = await page.evaluate(() => {
       const scene = window.__debugGame!.scene.getScene("Play") as unknown as {
-        player?: { texture: { key: string } };
-        outcome?: string;
+        player?: { texture: { key: string }; body?: { velocity: { x: number } } };
       };
-      return { texture: scene.player?.texture.key ?? "", outcome: scene.outcome ?? "" };
+      return { texture: scene.player?.texture.key ?? "", velocityX: scene.player?.body?.velocity.x ?? 0 };
     });
-    if (shot.outcome !== "playing") break;
     seen.add(shot.texture);
+    if (Math.abs(shot.velocityX) < 5) {
+      await page.keyboard.up(held);
+      held = held === "ArrowRight" ? "ArrowLeft" : "ArrowRight";
+      await page.keyboard.down(held);
+    }
   }
+  await page.keyboard.up(held);
 
-  expect(seen.size, "the stride never showed two distinct frames before the goal").toBeGreaterThanOrEqual(2);
+  expect(seen.size, "the stride never showed two distinct frames").toBeGreaterThanOrEqual(2);
   for (const key of seen) expect(key).toContain("skin-frame-player-");
+});
 
-  // **Winning must not hand the level back to Grampa.** applyTerminalPose wrote
-  // the built-in texture straight off, and PlayScene.update returns early once
-  // the outcome is settled — so the wrong art was not a flicker, it was the
-  // last frame of the run, held under the Trophy. A child who painted their own
-  // character watched somebody else take the bow.
+test("winning keeps the painted character, rather than handing the level back to Grampa", async ({ page }) => {
+  test.slow();
+  await paintWalkingCharacter(page);
+
+  // Goal on the ground, because this test is about the run *finishing* — the
+  // half of the old combined test that needed the opposite of what sampling a
+  // walk cycle needs.
+  const level = makeLevel(
+    makeArea(20, 8, 6, [
+      { type: "player-spawn", x: 1, y: 5 },
+      { type: "goal", x: 18, y: 5 },
+    ]),
+  );
+  await startEditorWithLevel(page, level);
+  await clickByText(page, "Editor", "Test Play (Space)");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
+  await expect.poll(() => playerTexture(page), { timeout: 15_000 }).toContain("skin-frame-player-");
+
+  // **applyTerminalPose wrote the built-in texture straight off**, and
+  // PlayScene.update returns early once the outcome is settled — so the wrong
+  // art was not a flicker, it was the last frame of the run, held under the
+  // Trophy. A child who painted their own character watched somebody else take
+  // the bow.
+  await page.keyboard.down("ArrowRight");
   await expect.poll(() => outcome(page), { timeout: 15_000 }).toBe("won");
   await page.keyboard.up("ArrowRight");
   expect(await playerTexture(page), "the winning pose is still the painted character").toContain(
