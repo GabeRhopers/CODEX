@@ -34,6 +34,23 @@ export interface GameEnding {
   message: string;
 }
 
+/** The kinds of game this tool can make. A closed union so every `switch` over
+ * it keeps its exhaustiveness, the same reason `PlaceableType` is one. */
+export type GameMode = "platformer" | "metroidvania";
+
+/** What a game is when it does not say — see `GameData.mode`. Named rather than
+ * written as a literal at each call site so the places that have to ask "is
+ * this an ordinary game?" cannot drift apart. */
+export const DEFAULT_GAME_MODE: GameMode = "platformer";
+
+/** The mode a game actually runs in. The one place that turns "absent" into
+ * "platformer", so no caller has to remember that absent is not a third kind. */
+export function gameMode(game: Pick<GameData, "mode">): GameMode {
+  return game.mode ?? DEFAULT_GAME_MODE;
+}
+
+const isGameMode = (value: unknown): value is GameMode => value === "platformer" || value === "metroidvania";
+
 export interface GameData {
   id: string;
   title: string;
@@ -52,6 +69,22 @@ export interface GameData {
   opening?: CutScene;
   /** Shown after the last world, before the ending. */
   closing?: CutScene;
+  /**
+   * What kind of game this is.
+   *
+   * **Absent means platformer**, which is every game written before this field
+   * existed and every game anybody makes without asking for anything else — so
+   * nothing migrates and nothing about an ordinary game changes. The same
+   * stance `opening`/`closing` above take, and for the same reason.
+   *
+   * A metroidvania is built from the same levels and worlds; what differs is
+   * that its rooms are joined by edge exits (see `world/roomLinks.ts`) rather
+   * than played in the world's order, so the map's unlock gating is bypassed
+   * and reaching the `goal` in any room ends the game. The mode also decides
+   * whether the editor offers metroidvania-only placeables at all: an ordinary
+   * level must look exactly as it does today.
+   */
+  mode?: GameMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -119,6 +152,12 @@ export function parseGame(raw: unknown): GameData | null {
     // absence is normal and a malformed one is closer to absent than to fatal.
     ...(isCutSceneish(doc.opening) ? { opening: doc.opening as CutScene } : {}),
     ...(isCutSceneish(doc.closing) ? { closing: doc.closing as CutScene } : {}),
+    // Dropped rather than rejected, like the cut scenes above — but note the
+    // asymmetry: an unrecognised mode becomes a *platformer*, not a refusal.
+    // That is the safe direction. A game whose mode string was corrupted still
+    // opens and plays by the rules every game used to follow, where rejecting
+    // it would lose the whole document over one word.
+    ...(isGameMode(doc.mode) ? { mode: doc.mode } : {}),
     createdAt: doc.createdAt as string,
     updatedAt: doc.updatedAt as string,
   };

@@ -6,6 +6,7 @@ import {
   addWorld,
   createEmptyGame,
   isGameComplete,
+  gameMode,
   moveWorld,
   nextWorldId,
   parseGame,
@@ -149,6 +150,24 @@ describe("nextWorldId", () => {
   });
 });
 
+describe("gameMode", () => {
+  it("calls a game with no mode a platformer", () => {
+    // The one place absence becomes a value, so no caller has to remember that
+    // undefined is not a third kind of game.
+    expect(gameMode(createEmptyGame("g1"))).toBe("platformer");
+  });
+
+  it("reports the mode a game does carry", () => {
+    expect(gameMode({ mode: "metroidvania" })).toBe("metroidvania");
+    expect(gameMode({ mode: "platformer" })).toBe("platformer");
+  });
+
+  it("makes a new game an ordinary one", () => {
+    // Nothing a child makes becomes a metroidvania by accident.
+    expect(createEmptyGame("g1")).not.toHaveProperty("mode");
+  });
+});
+
 describe("parseGame", () => {
   const good = () => ({
     id: "g1",
@@ -187,6 +206,30 @@ describe("parseGame", () => {
     const shapeless = { id: "g1" } as unknown as GameData;
     expect(() => validationError(shapeless)).toThrow();
     expect(parseGame(shapeless)).toBeNull();
+  });
+
+  it("keeps a mode it recognises", () => {
+    expect(parseGame({ ...good(), mode: "metroidvania" })?.mode).toBe("metroidvania");
+    expect(parseGame({ ...good(), mode: "platformer" })?.mode).toBe("platformer");
+  });
+
+  it("leaves a game with no mode without one, rather than writing one in", () => {
+    // Every game written before the field existed is this one. Absent has to
+    // stay absent through a read/write cycle, or the first save of an old game
+    // quietly rewrites it and "no migration" stops being true.
+    expect(parseGame(good())).not.toHaveProperty("mode");
+    expect(parseGame(good())).toEqual(good());
+  });
+
+  it("treats an unrecognised mode as an ordinary game instead of losing the document", () => {
+    // The asymmetry worth stating: a corrupt mode is dropped, not fatal. The
+    // game still opens and plays by the rules every game used to follow, where
+    // rejecting it would cost the whole document over one word.
+    for (const mode of ["metroid", "", 7, null, {}]) {
+      const parsed = parseGame({ ...good(), mode });
+      expect(parsed, JSON.stringify(mode)).not.toBeNull();
+      expect(parsed).not.toHaveProperty("mode");
+    }
   });
 
   it("fills a missing or broken ending rather than rejecting the game", () => {
