@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  INWARD_STEP,
   destinationFor,
   exitKey,
   oppositeSide,
   parseRoomLinks,
   reachableRooms,
   resolveRoomLinks,
+  sideOfTile,
   type RoomExit,
   type RoomLink,
 } from "./roomLinks";
@@ -180,6 +182,66 @@ describe("parseRoomLinks", () => {
     // A level is minted with id "" and keeps it until its first save, so an
     // exit linked before that would otherwise point at every unsaved level.
     expect(parseRoomLinks([[{ levelId: "", side: "right" }, { levelId: "b", side: "left" }]])).toBeUndefined();
+  });
+});
+
+describe("sideOfTile", () => {
+  // A 20x12 room, the shape a level actually is (GRID_COLS x GRID_ROWS).
+  const side = (x: number, y: number) => sideOfTile({ x, y }, 20, 12);
+
+  it("names each edge", () => {
+    expect(side(0, 6)).toBe("left");
+    expect(side(19, 6)).toBe("right");
+    expect(side(10, 0)).toBe("top");
+    expect(side(10, 11)).toBe("bottom");
+  });
+
+  it("says nothing for a tile in open floor", () => {
+    // What the editor will use to refuse an exit dropped in the middle of a
+    // room, where it could not be identified at all.
+    expect(side(10, 6)).toBeNull();
+    expect(side(1, 1)).toBeNull();
+  });
+
+  it("calls a corner horizontal, consistently", () => {
+    // A corner tile is on two edges and has to pick one. Which way it goes
+    // matters less than that it is decided in one place.
+    expect(side(0, 0)).toBe("left");
+    expect(side(19, 11)).toBe("right");
+    expect(side(0, 11)).toBe("left");
+  });
+
+  it("works for a room of a different size", () => {
+    // 8x5: the right edge is x=7, so a top-edge tile has to be picked away from
+    // the corners or the corner rule claims it — which is what happened when
+    // this test was first written with x=7.
+    expect(sideOfTile({ x: 4, y: 0 }, 8, 5)).toBe("top");
+    expect(sideOfTile({ x: 7, y: 2 }, 8, 5)).toBe("right");
+    expect(sideOfTile({ x: 4, y: 4 }, 8, 5)).toBe("bottom");
+  });
+});
+
+describe("INWARD_STEP", () => {
+  it("points away from its own edge", () => {
+    // Arriving players are placed a step inside the door they came out of,
+    // which is what stops the arrival counting as walking straight back
+    // through it.
+    expect(INWARD_STEP.left).toEqual({ dx: 1, dy: 0 });
+    expect(INWARD_STEP.right).toEqual({ dx: -1, dy: 0 });
+    expect(INWARD_STEP.top).toEqual({ dx: 0, dy: 1 });
+    expect(INWARD_STEP.bottom).toEqual({ dx: 0, dy: -1 });
+  });
+
+  it("steps a tile on an edge off that edge", () => {
+    // The property that matters, rather than the four literals above: stepping
+    // inward from an edge tile must land somewhere that is no longer that edge.
+    for (const [sideName, step] of Object.entries(INWARD_STEP)) {
+      const start = { left: { x: 0, y: 6 }, right: { x: 19, y: 6 }, top: { x: 10, y: 0 }, bottom: { x: 10, y: 11 } }[
+        sideName as keyof typeof INWARD_STEP
+      ];
+      const landed = { x: start.x + step.dx, y: start.y + step.dy };
+      expect(sideOfTile(landed, 20, 12), sideName).not.toBe(sideName);
+    }
   });
 });
 

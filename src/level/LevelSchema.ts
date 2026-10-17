@@ -48,6 +48,22 @@ export type EntityType =
   | "checkpoint"
   | "basket-sub"
   | "basket-up"
+  /**
+   * A door out of a room, for a metroidvania game — walk into it and the next
+   * room appears, like the original Zelda dungeons.
+   *
+   * Deliberately *not* a second kind of basket. A basket teleports between the
+   * three areas *within* one level and is placed anywhere; an edge exit leads
+   * to a different **level** and is identified by which edge it sits on (see
+   * `world/roomLinks.ts`), because that is what lets a link survive somebody
+   * moving the exit along its edge. The two look similar and mean different
+   * things, which is exactly why they are separate types rather than one with
+   * a flag.
+   *
+   * Inert unless the world it is played in carries links for it, so one left in
+   * an ordinary level does nothing rather than breaking the level.
+   */
+  | "edge-exit"
   | "enemy-ghost"
   | "enemy-spike"
   | "enemy-bat"
@@ -179,6 +195,28 @@ export interface LevelData extends LevelArea {
    * doesn't render Sub/Main/Up as one continuous stacked space; each is
    * its own screen, swapped to instantly on touch, not scrolled into). */
   upArea?: LevelArea;
+  /**
+   * Whether this level is a **room** in a metroidvania, rather than an ordinary
+   * level played in its world's order.
+   *
+   * Lives on the level and not on the game, which is not where it belongs in
+   * theory and is the only place it can work in practice. The thing that needs
+   * to ask — the editor, deciding whether to offer edge exits at all — is
+   * started as `scene.start("Editor", { level })` from the Menu, the Level
+   * Browser or a Template. It never knows the world, let alone the game, and a
+   * level can sit in several of each, so there is no game whose `mode` it could
+   * read (see `game/GameSchema.ts`).
+   *
+   * So the two flags answer two questions and are allowed to disagree:
+   * **this one decides what the editor offers**, `GameData.mode` decides how a
+   * game *plays*. A room dropped into a platformer game keeps its exits and
+   * they do nothing, because the world carries no links for them — which is the
+   * direction that degrades safely.
+   *
+   * Optional, absent on every level ever saved, and absent is an ordinary
+   * level. Nothing migrates.
+   */
+  isRoom?: boolean;
   /**
    * Which custom skin (see skins/skinSelection.ts) this level wears for each
    * Brush id. Level-wide rather than per-`LevelArea` on purpose: Sub/Up are the

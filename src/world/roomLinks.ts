@@ -67,6 +67,44 @@ export function oppositeSide(side: ExitSide): ExitSide {
   return "top";
 }
 
+/**
+ * Which edge a tile sits on, or null if it sits in open floor.
+ *
+ * An exit's side is derived from where it was placed rather than stored
+ * alongside it — see `ExitSide` for why that is the whole point — so this is
+ * the function that derivation runs through, and the editor will use the same
+ * one to refuse an exit dropped in the middle of a room.
+ *
+ * **Left and right beat top and bottom at a corner.** A tile at (0,0) is on two
+ * edges and has to pick one. Side doors are the common case in a side-scrolling
+ * room, so a corner exit reads as the horizontal one; what matters more than
+ * which way it goes is that it is decided here once, rather than differently by
+ * whoever asks.
+ */
+export function sideOfTile(tile: { x: number; y: number }, width: number, height: number): ExitSide | null {
+  if (tile.x <= 0) return "left";
+  if (tile.x >= width - 1) return "right";
+  if (tile.y <= 0) return "top";
+  if (tile.y >= height - 1) return "bottom";
+  return null;
+}
+
+/**
+ * One tile further into the room from an edge.
+ *
+ * Arriving players are placed a step inside the door they came out of, which is
+ * what stops the arrival immediately counting as walking back through it. The
+ * basket teleport solves the same problem with a latch it has to remember (see
+ * PlayScene's `latchedBasketTile`); a step costs nothing to remember and cannot
+ * be forgotten across a scene restart, which is exactly what a room change is.
+ */
+export const INWARD_STEP: Record<ExitSide, { dx: number; dy: number }> = {
+  left: { dx: 1, dy: 0 },
+  right: { dx: -1, dy: 0 },
+  top: { dx: 0, dy: 1 },
+  bottom: { dx: 0, dy: -1 },
+};
+
 const sameExit = (a: RoomExit, b: RoomExit): boolean => a.levelId === b.levelId && a.side === b.side;
 
 const isExitSide = (value: unknown): value is ExitSide => EXIT_SIDES.includes(value as ExitSide);

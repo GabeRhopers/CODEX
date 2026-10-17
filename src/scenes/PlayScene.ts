@@ -54,6 +54,7 @@ import {
 } from "../gameplay/PlayerStats";
 import { HandheldShell, LEFT_BAND, makeConsoleButton, SCREEN_RECT, VOLUME_CONTROL } from "../gameplay/HandheldShell";
 import { recordCompletion } from "../world/worldProgress";
+import { destinationFor, ExitSide, INWARD_STEP, RoomLink, sideOfTile } from "../world/roomLinks";
 import { TouchControls } from "../gameplay/TouchControls";
 import {
   applyWizardTexture,
@@ -126,6 +127,19 @@ interface WorldPlayContext {
    * back the run would quietly stop being part of a game the moment a level was
    * played. Opaque here — PlayScene never reads inside it. */
   game?: GameRunContext;
+  /**
+   * The doors between this world's rooms, for a metroidvania game.
+   *
+   * Carried rather than read, for the reason `game` above is: a room change
+   * restarts this scene, and re-reading the world from Drive on every door
+   * would put a network round trip in the middle of walking through one.
+   *
+   * **Its presence is what makes edge exits live.** A platformer world has no
+   * links, so an `edge-exit` left in one of its levels is inert rather than
+   * broken — which means PlayScene needs no notion of game mode at all, and a
+   * room played outside a metroidvania degrades to an ordinary level.
+   */
+  roomLinks?: RoomLink[];
 }
 
 /** Tile coordinates (plus which area they're in — see "Sub/Up areas"
@@ -170,6 +184,15 @@ interface PlaySceneData {
    * behavior, when omitted. */
   returnScene?: string;
   checkpoint?: CheckpointCoord;
+  /**
+   * Which edge of *this* room the players just walked in through.
+   *
+   * Set only by a room change, and it is how the arrival knows where to stand:
+   * at the matching exit, one tile further in (see `INWARD_STEP`). Absent for
+   * every ordinary start, which then spawns at the `player-spawn` marker as it
+   * always has.
+   */
+  enteredFrom?: ExitSide;
 }
 
 /**
@@ -225,6 +248,14 @@ interface CoopPlayer {
 export class PlayScene extends Phaser.Scene {
   private level!: LevelData;
   private world?: WorldPlayContext;
+  /** Which edge the players walked in through, when this scene start was a room
+   * change. Read once, by `arrivalTile`. */
+  private enteredFrom?: ExitSide;
+  /** True from the moment a door is taken until this scene is replaced. A room
+   * change is a scene start and cannot be undone halfway, so the second overlap
+   * callback of the same step must find the door already used — see
+   * `useEdgeExit`. */
+  private changingRoom = false;
   private returnScene?: string;
   private get levelStorage(): StorageAdapter {
     return getLevelStorage();
@@ -519,6 +550,11 @@ export class PlayScene extends Phaser.Scene {
     this.world = data.world;
     this.returnScene = data.returnScene;
     this.checkpoint = data.checkpoint;
+    this.enteredFrom = data.enteredFrom;
+    // Reset here with everything else rather than left from the previous room:
+    // Phaser reuses this instance, so a latch set on the way *out* of one room
+    // would arrive in the next one already true and seal every door in it.
+    this.changingRoom = false;
     this.activeCheckpointSprite = undefined;
     this.outcome = "playing";
     this.paused = false;
@@ -783,9 +819,35 @@ export class PlayScene extends Phaser.Scene {
         for (const def of defs) {
           if (def.sound) void registerSound(this, soundKeyFor(def.id), def.sound);
         }
-        this.enterArea(this.checkpoint?.area ?? this.startingAreaKey());
+        // A room arrival lands at its door, which `landingTile` already means
+        // ("a basket teleport, which always wins outright" — see enterArea).
+        // Reusing it rather than teaching the spawn code a second idea of where
+        // to put somebody is the whole reason the room change needs no new
+        // spawn logic, and it is why both players arrive together: this runs
+        // once for the scene, not once per character.
+        this.enterArea(this.checkpoint?.area ?? this.startingAreaKey(), this.arrivalTile());
       },
     );
+  }
+
+  /**
+   * Where the players stand when they have just walked in through a door, or
+   * undefined for every ordinary start.
+   *
+   * The matching exit is the one on the edge named by `enteredFrom`, stepped a
+   * tile inward so that arriving is not immediately read as walking back out.
+   * If the destination has no exit on that edge the link was half-authored —
+   * the room still opens, at its own Spawn marker, because a door into a room
+   * you cannot leave is better than a room that will not load.
+   */
+  private arrivalTile(): { x: number; y: number } | undefined {
+    if (!this.enteredFrom) return undefined;
+    const door = this.level.entities.find(
+      (e) => e.type === "edge-exit" && sideOfTile(e, this.level.width, this.level.height) === this.enteredFrom,
+    );
+    if (!door) return undefined;
+    const step = INWARD_STEP[this.enteredFrom];
+    return { x: door.x + step.dx, y: door.y + step.dy };
   }
 
   /**
@@ -1082,6 +1144,23 @@ export class PlayScene extends Phaser.Scene {
       );
     }
 
+    // Edge exits — doors out of a *room*, for a metroidvania game. Rendered
+    // with the basket's art for now: 1b is about whether walking through one
+    // works at all, and inventing a door sprite before anyone has seen a room
+    // change would be art drawn against a guess. They are only reachable in a
+    // world that carries links (see useEdgeExit), so an exit in an ordinary
+    // level draws and does nothing.
+    for (const entity of area.entities.filter((e) => e.type === "edge-exit")) {
+      const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
+      const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
+      this.trackSprite("edge-exit", this.add.image(x, y, "magic-basket").setDepth(5).setAlpha(0.75));
+      const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
+      this.physics.add.existing(zone, true);
+      this.areaColliders.push(
+        this.physics.add.overlap(this.playerGroup, zone, () => void this.useEdgeExit(entity)),
+      );
+    }
+
     // Baskets (see "Sub/Up areas" under Art) — two-way teleport triggers
     // between Main and their own satellite area. Both types render with
     // the same texture (see Palette.ts) and only differ in which area they
@@ -1312,6 +1391,45 @@ export class PlayScene extends Phaser.Scene {
    * result). The cooldown is claimed up front for *both* outcomes so
    * standing on an inert basket doesn't retrigger the toast every physics
    * frame of continued overlap. */
+  /**
+   * Walk out of a room and into the one its door leads to.
+   *
+   * **Inert without links**, which is what keeps this out of every ordinary
+   * level: a platformer world carries none, so an `edge-exit` in one is a
+   * drawing. That is also why PlayScene never asks what mode the game is in —
+   * the links either exist or they do not.
+   *
+   * `changingRoom` is a plain latch rather than the timed cooldown the baskets
+   * use. A door is one scene start, and Arcade runs this overlap every physics
+   * frame of contact *and* keeps running them while the level load below is
+   * awaited — so without it a single step through a door fires several room
+   * changes, each racing the others to start a scene.
+   */
+  private async useEdgeExit(entity: { x: number; y: number }): Promise<void> {
+    if (this.changingRoom || !this.world?.roomLinks?.length) return;
+    const side = sideOfTile(entity, this.level.width, this.level.height);
+    if (!side) return; // not on an edge, so it names no door
+    const destination = destinationFor(this.world.roomLinks, { levelId: this.level.id, side });
+    if (!destination) return;
+
+    this.changingRoom = true;
+    const level = await this.levelStorage.load(destination.levelId);
+    if (!level) {
+      // Same tolerance the world map has for a level deleted elsewhere: say so
+      // and stay put, rather than ending the run over a missing room.
+      this.changingRoom = false;
+      this.showToast("That room is missing", WARNING_TOAST_COLOR);
+      return;
+    }
+    this.scene.start("Play", {
+      level,
+      // Carried whole, with only the index moved, so a room change cannot
+      // quietly drop the world or the game the run belongs to.
+      world: { ...this.world, index: Math.max(0, this.world.levelIds.indexOf(destination.levelId)) },
+      enteredFrom: destination.side,
+    } satisfies PlaySceneData);
+  }
+
   private useBasket(basketType: "basket-sub" | "basket-up", tile: { x: number; y: number }): void {
     // Only the pad the player is standing on from a previous teleport is
     // latched; any other basket is free to fire.

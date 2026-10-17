@@ -203,3 +203,115 @@ test("a world whose level was deleted elsewhere still opens", async ({ page }) =
   // The rest of the world is still reachable rather than the screen being dead.
   expect((await nodes(page)).filter((n) => n.interactive)).toHaveLength(1);
 });
+
+/** The level the Play scene currently holds. A room change is a scene restart,
+ * so this is what actually moving between rooms looks like from outside. */
+const playingLevelId = (page: Page): Promise<string | undefined> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Play") as unknown as { level?: { id: string } };
+    return scene.level?.id;
+  });
+
+const playerTileX = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Play") as unknown as {
+      player?: { x: number };
+    };
+    // GRID_ORIGIN_X is 190 and TILE_SIZE 32 (see config/gameConfig.ts); read as
+    // a tile so the assertion says something a person can picture.
+    return Math.round(((scene.player?.x ?? 0) - 190) / 32);
+  });
+
+/**
+ * Walking out of one room and into the next — the first thing the metroidvania
+ * mode can actually do.
+ *
+ * A room is a level (Gabriel, 2026-10-16) and rooms are joined at their edges
+ * because the camera never scrolls (CLAUDE.md), so this is the whole mechanism:
+ * an exit on one room's edge, a link in the world, and the next screen.
+ *
+ * Seeded rather than authored, because placing and linking exits is 1c. What
+ * this proves is that the runtime half works, which is what the editor half
+ * will be built against.
+ */
+test("walking into an edge exit opens the room it links to", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+
+  const rooms = [
+    { id: "room-a", name: "Room A", exitX: 19, spawnX: 2, background: "meadow" }, // door on the right edge
+    // **Room B's spawn sits at the far end from its door, on purpose.** The
+    // assertion below has to tell "arrived at the door" apart from "started at
+    // the Spawn marker", and the two are only a tile apart if the spawn is
+    // where Room A's is. Putting 14 tiles between them means the check does not
+    // depend on exactly when the held key is released — see the comment there.
+    // A different backdrop so a screenshot can show the room changed. The
+    // level-id assertion is what *proves* it; this is so a person looking at
+    // the two pictures can see it too.
+    { id: "room-b", name: "Room B", exitX: 0, spawnX: 15, background: "frozen-volcano" }, // door on the left edge
+  ];
+  await page.evaluate(async (rooms) => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      levelStorage: { save(level: unknown): Promise<void> };
+    };
+    for (const room of rooms) {
+      await scene.levelStorage.save({
+        schemaVersion: 2,
+        id: room.id,
+        name: room.name,
+        createdAt: "2026-10-16T00:00:00.000Z",
+        updatedAt: "2026-10-16T00:00:00.000Z",
+        tileSize: 32,
+        background: room.background,
+        width: 20,
+        height: 12,
+        isRoom: true,
+        layers: { ground: Array.from({ length: 12 }, (_, y) => Array.from({ length: 20 }, () => (y === 10 ? 0 : -1))) },
+        entities: [
+          { type: "player-spawn", x: room.spawnX, y: 9 },
+          { type: "edge-exit", x: room.exitX, y: 9 },
+        ],
+      });
+    }
+  }, rooms);
+
+  // Start in Room A, with the world carrying the one door between them. The
+  // links riding on the world context is what makes the exit live at all.
+  await page.evaluate(async () => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      levelStorage: { load(id: string): Promise<unknown> };
+    };
+    const level = await scene.levelStorage.load("room-a");
+    window.__debugGame!.scene.start("Play", {
+      level,
+      world: {
+        levelIds: ["room-a", "room-b"],
+        index: 0,
+        worldId: "w-rooms",
+        roomLinks: [[{ levelId: "room-a", side: "right" }, { levelId: "room-b", side: "left" }]],
+      },
+    });
+  });
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
+
+  // Assert the precondition, or "arrived in room B" could be true of a test
+  // that never left room A because it started there.
+  await expect.poll(() => playingLevelId(page)).toBe("room-a");
+
+  await page.keyboard.down("ArrowRight");
+  await expect.poll(() => playingLevelId(page), { timeout: 20_000 }).toBe("room-b");
+  await page.keyboard.up("ArrowRight");
+
+  // Arrived *at Room B's door*, not at its Spawn marker 14 tiles away, which is
+  // where an ordinary start would have put them. That is the whole difference
+  // between a room change and a level change.
+  //
+  // **Deliberately not `toBe(1)`.** The exact landing tile is 1, but the key is
+  // still held as the scene restarts, so the arriving character immediately
+  // walks right and the precise tile is a moving target — asserting it raced
+  // the character and failed on tile 2 the first time this was written. The
+  // room is 20 wide with the door at one end and the spawn at the other, so
+  // "nearer the door than the spawn" is the question that actually has a stable
+  // answer.
+  await expect.poll(() => playerTileX(page)).toBeLessThan(8);
+});
