@@ -7,6 +7,7 @@ import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { WorldStorageAdapter } from "../persistence/WorldStorageAdapter";
 import { cellCenter, MAP_COLS, MAP_ROWS, orderedCells, resolveLayout, type MapRect } from "../world/worldLayout";
+import { roomLinksFromLayout } from "../world/roomLinks";
 import { circleHitArgs } from "../ui/touchTarget";
 import { completedCount, currentIndex, isUnlocked, isWorldComplete } from "../world/worldProgress";
 import { WorldData } from "../world/WorldSchema";
@@ -403,7 +404,18 @@ export class WorldMapScene extends Phaser.Scene {
       // restarts this scene on the way back, and without carrying it there the
       // run would silently stop being part of a game the moment you played a
       // level.
-      world: { levelIds: world.levelIds, index, worldId: world.id, game: this.gameRun },
+      world: {
+        levelIds: world.levelIds,
+        index,
+        worldId: world.id,
+        game: this.gameRun,
+        // Derived here rather than stored, because the map *is* where rooms are
+        // arranged — two levels in neighbouring cells are neighbouring rooms
+        // (see roomLinksFromLayout). Computed from the same `resolveLayout` the
+        // map draws itself with, so what a player walks through and what they
+        // just looked at cannot disagree.
+        roomLinks: roomLinksFromLayout(world.levelIds, resolveLayout(world.levelIds, world.layout)),
+      },
     });
   }
 

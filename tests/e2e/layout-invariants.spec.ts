@@ -242,3 +242,23 @@ test("the World Map is laid out soundly", async ({ page }) => {
   await expect.poll(() => boxes(page, "WorldMap").then((b) => b.length)).toBeGreaterThan(3);
   await assertLayoutSound(page, "WorldMap");
 });
+
+test("the Editor is laid out soundly with the Room toggle on", async ({ page }) => {
+  test.slow();
+  // The Room toggle is a *fourth* button in a Level Settings panel that had
+  // three, and the height is the scarce axis (CLAUDE.md): everything below it —
+  // the Enemy Size row, Clear — sits that much nearer the floor. It is the one
+  // thing this step spends vertical space on, so it gets the invariants.
+  //
+  // The markers tab is selected for the second half of the same question: the
+  // Door is a *seventh* marker brush in a grid that holds ten, so it must not
+  // summon a pager onto the skin picker (see the Decor test above).
+  await gotoApp(page);
+  await startEditorWithLevel(page, LEVEL());
+  await clickByText(page, "Editor", "Room: Off");
+  await selectPaletteCategory(page, "Editor", "Markers");
+  // Precondition: the Door is really showing, or this asserts the layout of the
+  // palette it already had.
+  await expect.poll(() => boxes(page, "Editor").then((all) => all.some((b) => b.label === "Door"))).toBe(true);
+  await assertLayoutSound(page, "Editor");
+});

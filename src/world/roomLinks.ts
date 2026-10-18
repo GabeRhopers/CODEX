@@ -19,6 +19,8 @@
  * `worldLayout.ts`, `worldProgress.ts` and `customEntity.ts` already use.
  */
 
+import { Cell } from "./worldLayout";
+
 /**
  * Which edge a room is left by.
  *
@@ -200,20 +202,46 @@ export function reachableRooms(links: readonly RoomLink[], startId: string): Set
   return seen;
 }
 
-/** Shape-checks links coming back out of storage. Anything unrecognisable is
- * dropped rather than rejecting the world, which is the same call
- * `parseWorld` already makes for `layout` and `background`. */
-export function parseRoomLinks(raw: unknown): RoomLink[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
+/**
+ * The doors a world's map implies.
+ *
+ * **Rooms connect by where they sit** (Gabriel, 2026-10-17): drag two rooms
+ * into neighbouring cells of the world map and their facing edges join. There
+ * is no linking screen to build, learn or explain, and the map becomes the
+ * dungeon plan — which is what a metroidvania map is anyway. The Song of Zink
+ * stores explicit pairs instead (`["r1:1", "r2:1"]`), which can send a door
+ * anywhere; that was weighed and not chosen, and the cost is real: **a door
+ * cannot lead to a non-adjacent room.**
+ *
+ * **Adjacency does not by itself make a door.** This says two rooms *could*
+ * join; walking through still needs an `edge-exit` placed on the facing edge of
+ * the room you are leaving, because that entity is what the overlap fires on.
+ * That distinction is load-bearing rather than tidy: `resolveLayout` fills
+ * unarranged levels in serpentine order, so in a world nobody has arranged
+ * every consecutive pair is *already* neighbours. Without the exits, a new
+ * world would silently be one long corridor. The map is the geography; the
+ * exits are the intent.
+ *
+ * Diagonals are not adjacency. Two rooms touching only at a corner share no
+ * edge, so there is no pair of facing sides for a door to use.
+ */
+export function roomLinksFromLayout(levelIds: readonly string[], layout: Record<string, Cell>): RoomLink[] {
   const links: RoomLink[] = [];
-  for (const entry of raw) {
-    if (!Array.isArray(entry) || entry.length !== 2) continue;
-    const [a, b] = entry;
-    if (!isRoomExit(a) || !isRoomExit(b)) continue;
-    links.push([
-      { levelId: a.levelId, side: a.side },
-      { levelId: b.levelId, side: b.side },
-    ]);
+  const placed = levelIds.filter((id) => layout[id]);
+  for (let i = 0; i < placed.length; i++) {
+    for (let j = i + 1; j < placed.length; j++) {
+      const a = layout[placed[i]];
+      const b = layout[placed[j]];
+      const dCol = b.col - a.col;
+      const dRow = b.row - a.row;
+      // Exactly one step, on exactly one axis.
+      if (Math.abs(dCol) + Math.abs(dRow) !== 1) continue;
+      const sideOfA: ExitSide = dCol === 1 ? "right" : dCol === -1 ? "left" : dRow === 1 ? "bottom" : "top";
+      links.push([
+        { levelId: placed[i], side: sideOfA },
+        { levelId: placed[j], side: oppositeSide(sideOfA) },
+      ]);
+    }
   }
-  return links.length > 0 ? links : undefined;
+  return links;
 }

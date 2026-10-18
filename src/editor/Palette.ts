@@ -162,6 +162,11 @@ export const PALETTE: Brush[] = [
   // anyway, everywhere either one renders.
   { id: "basket-sub", category: "markers", kind: "entity", label: "Basket (Down)", textureKey: "magic-basket", entityType: "basket-sub" },
   { id: "basket-up", category: "markers", kind: "entity", label: "Basket (Up)", textureKey: "magic-basket", entityType: "basket-up" },
+  // A door out of a room, for a metroidvania. **Only offered when the level
+  // says it is a room** (see EditorUI's tabBrushes and LevelData.isRoom) — an
+  // ordinary level's palette must look exactly as it did, and a child building
+  // one has no use for a door to a room that does not exist.
+  { id: "edge-exit", category: "markers", kind: "entity", label: "Door", textureKey: "room-door", entityType: "edge-exit" },
   { id: "enemy-ghost", category: "enemies", kind: "entity", label: "Ghost", textureKey: "enemy-ghost-pillow", entityType: "enemy-ghost" },
   { id: "enemy-spike", category: "enemies", kind: "entity", label: "Spike", textureKey: "enemy-spike-crawler", entityType: "enemy-spike" },
   { id: "enemy-bat", category: "enemies", kind: "entity", label: "Bat", textureKey: "enemy-bat", entityType: "enemy-bat" },

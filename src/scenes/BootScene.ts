@@ -25,6 +25,10 @@ export class BootScene extends Phaser.Scene {
     this.load.image("goal-portal", "assets/entities/caged-sheep.png");
     this.load.image("checkpoint-bell", "assets/entities/checkpoint-bell.png");
     this.load.image("magic-basket", "assets/entities/magic-basket.png");
+    // The room door (edge-exit). It borrowed "magic-basket" while the mechanism
+    // was being built, which put three identical baskets in a seven-icon
+    // markers tab — visible the moment anybody photographed it.
+    this.load.image("room-door", "assets/entities/door.png");
 
     // Real Kenney "Pixel Platformer" (CC0) art for the grass/desert ground
     // themes, the brick/bounce blocks, and the bat/spike-crawler enemies —

@@ -1,6 +1,5 @@
 import { BuiltinStaticBackgroundId } from "../level/staticBackgrounds";
 import { WorldLayout } from "./worldLayout";
-import { parseRoomLinks, RoomLink } from "./roomLinks";
 
 /**
  * A World is an ordered run of already-saved levels, laid out on a map.
@@ -30,19 +29,6 @@ export interface WorldData {
   levelIds: string[];
   /** Level id -> map cell. Partial entries are fine; see resolveLayout. */
   layout?: WorldLayout;
-  /**
-   * Doors between this world's rooms, for a metroidvania game.
-   *
-   * Beside `layout` because it is the same kind of thing: optional, partial,
-   * and about how this world's levels relate to each other rather than about
-   * any one of them. A platformer world has none and is unaffected, and a world
-   * saved before this existed opens untouched.
-   *
-   * Dangling links are normal, not corrupt — a world owns none of its levels,
-   * so one can be deleted from the library long after a link named it. See
-   * `resolveRoomLinks`, which drops those at read time.
-   */
-  roomLinks?: RoomLink[];
   /** The map screen's backdrop. Built-ins only — unlike a level, a world has
    * nowhere to keep an uploaded image, so "custom" is not offered here. */
   background?: BuiltinStaticBackgroundId;
@@ -90,7 +76,6 @@ export function parseWorld(raw: unknown): WorldData | null {
 
   const layout = doc.layout;
   const usableLayout = !!layout && typeof layout === "object" && !Array.isArray(layout);
-  const roomLinks = parseRoomLinks(doc.roomLinks);
 
   return {
     id: doc.id as string,
@@ -98,10 +83,6 @@ export function parseWorld(raw: unknown): WorldData | null {
     levelIds: doc.levelIds as string[],
     ...(usableLayout ? { layout: layout as WorldLayout } : {}),
     ...(typeof doc.background === "string" ? { background: doc.background as BuiltinStaticBackgroundId } : {}),
-    // Shape-checked here, meaning-checked at read time against the world's
-    // actual levels — the same two-step `layout` uses, and the reason a link to
-    // a since-deleted level costs that door rather than the world.
-    ...(roomLinks ? { roomLinks } : {}),
     createdAt: doc.createdAt as string,
     updatedAt: doc.updatedAt as string,
   };

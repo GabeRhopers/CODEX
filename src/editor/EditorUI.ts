@@ -76,6 +76,8 @@ export interface EditorUICallbacks {
    */
   onHeroPickerOpen: () => void;
   onSelectHero: (skinId: string | null | undefined) => void;
+  /** The level became, or stopped being, a metroidvania room. */
+  onToggleRoom: (isRoom: boolean) => void;
 
   onBackgroundPickerOpen: () => void;
   onSelectBackground: (id: string) => void;
@@ -306,6 +308,8 @@ export class EditorUI {
    * so that setCustomBrushes has one thing to replace. Built-ins always come
    * first, so no existing brush moves when an invented one exists. */
   private brushes: Brush[] = [...PALETTE];
+  private isRoom = false;
+  private roomToggle?: PanelButton;
 
   /** Which page of the active category's grid is showing. Reset whenever the
    * category changes — a page index only means anything relative to one list. */
@@ -584,6 +588,25 @@ export class EditorUI {
     this.setHeroPickerLabel();
     rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
 
+    // Room: whether this level is a room in a metroidvania. Here with
+    // Background/Music/Hero because it is a "what is this level like" choice
+    // rather than "what am I placing" — and because it is the thing that makes
+    // the Door brush appear in the markers tab at all, a level-wide answer is
+    // the only kind it could be.
+    //
+    // A single toggling button rather than a labelled row plus On/Off pair:
+    // height is the scarce axis on a 468px screen (CLAUDE.md), and this is one
+    // yes/no that most levels will never touch.
+    this.roomToggle = this.makeFixedWidthButton(
+      RIGHT_PANEL_X + PANEL_PADDING,
+      rowY,
+      RIGHT_BUTTON_WIDTH,
+      RIGHT_BUTTON_HEIGHT,
+      this.roomLabel(),
+      () => this.callbacks.onToggleRoom(!this.isRoom),
+    );
+    rowY += RIGHT_BUTTON_HEIGHT + RIGHT_BUTTON_GAP;
+
     // Enemy Size: a placement-time preference (like the palette selection
     // itself), not a property of anything currently selected — it applies
     // whenever an enemy brush is next placed, regardless of which brush
@@ -775,8 +798,31 @@ export class EditorUI {
    * answers "did somebody invent this", so no `Brush` needed a new field either.
    */
   private tabBrushes(): Brush[] {
-    if (this.activeCategory === MINE_TAB) return this.brushes.filter((brush) => isCustomEntityId(brush.id));
-    return this.brushes.filter((brush) => brush.category === this.activeCategory);
+    const offered = this.brushes.filter((brush) => brush.id !== "edge-exit" || this.isRoom);
+    if (this.activeCategory === MINE_TAB) return offered.filter((brush) => isCustomEntityId(brush.id));
+    return offered.filter((brush) => brush.category === this.activeCategory);
+  }
+
+  /**
+   * Whether this level is a metroidvania room, which decides whether the Door
+   * brush is offered at all.
+   *
+   * Held here rather than read from the level, because EditorUI is handed the
+   * pieces of a level it needs rather than the level itself — the same reason
+   * it takes `name`, `width` and `height` as arguments. Set on build and again
+   * whenever the toggle flips, so the icon grid can be redrawn against it.
+   */
+  setRoomMode(isRoom: boolean): void {
+    if (this.isRoom === isRoom) return;
+    this.isRoom = isRoom;
+    this.roomToggle?.label.setText(this.roomLabel());
+    // The Door may have just appeared or vanished from the markers tab, and the
+    // grid only re-filters when it is rebuilt.
+    this.renderIconGrid();
+  }
+
+  private roomLabel(): string {
+    return this.isRoom ? "Room: On" : "Room: Off";
   }
 
   /** The texture a brush's icon (and, via EntityPlacer/PlayScene using

@@ -30,29 +30,6 @@ describe("parseWorld", () => {
     expect(parseWorld(withExtras)).toEqual(withExtras);
   });
 
-  it("round-trips room links", () => {
-    const linked = {
-      ...good(),
-      roomLinks: [[{ levelId: "l1", side: "right" }, { levelId: "l2", side: "left" }]],
-    };
-    expect(parseWorld(linked)).toEqual(linked);
-  });
-
-  it("leaves a world with no links without the field", () => {
-    // A platformer world is every world written before this existed, and must
-    // survive a read/write cycle unchanged — otherwise the first save of an old
-    // world rewrites it and "no migration" stops being true.
-    expect(parseWorld(good())).not.toHaveProperty("roomLinks");
-  });
-
-  it("drops malformed links instead of refusing the world", () => {
-    // Same call `layout` and `background` already make: a world is a map screen
-    // somebody is waiting to see, and one bad door is not worth losing it.
-    const bad = { ...good(), roomLinks: "not-a-list" };
-    expect(parseWorld(bad)).not.toBeNull();
-    expect(parseWorld(bad)).not.toHaveProperty("roomLinks");
-  });
-
   it("refuses anything that is not a world-shaped object", () => {
     for (const raw of [null, undefined, 0, "world", [], [good()], {}]) {
       expect(parseWorld(raw), JSON.stringify(raw)).toBeNull();

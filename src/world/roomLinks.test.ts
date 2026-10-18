@@ -4,9 +4,9 @@ import {
   destinationFor,
   exitKey,
   oppositeSide,
-  parseRoomLinks,
   reachableRooms,
   resolveRoomLinks,
+  roomLinksFromLayout,
   sideOfTile,
   type RoomExit,
   type RoomLink,
@@ -151,40 +151,6 @@ describe("reachableRooms", () => {
   });
 });
 
-describe("parseRoomLinks", () => {
-  it("accepts what it wrote", () => {
-    expect(parseRoomLinks(JSON.parse(JSON.stringify(PAIR)))).toEqual(PAIR);
-  });
-
-  it("is undefined for anything that is not a list", () => {
-    // Absent rather than empty, so parseWorld can spread it away and a world
-    // with no links has no `roomLinks` key at all.
-    for (const raw of [undefined, null, {}, "links", 7]) {
-      expect(parseRoomLinks(raw)).toBeUndefined();
-    }
-  });
-
-  it("is undefined when every entry was junk", () => {
-    expect(parseRoomLinks([null, 1, "x"])).toBeUndefined();
-  });
-
-  it("keeps the good entries and drops the rest", () => {
-    expect(parseRoomLinks([null, JSON.parse(JSON.stringify(PAIR[0]))])).toEqual(PAIR);
-  });
-
-  it("rejects an unknown side rather than passing it through", () => {
-    // A side that is not one of the four would reach oppositeSide and come back
-    // "top" by the fallthrough, sending the player somewhere nobody authored.
-    expect(parseRoomLinks([[{ levelId: "a", side: "up" }, { levelId: "b", side: "left" }]])).toBeUndefined();
-  });
-
-  it("rejects an empty level id", () => {
-    // A level is minted with id "" and keeps it until its first save, so an
-    // exit linked before that would otherwise point at every unsaved level.
-    expect(parseRoomLinks([[{ levelId: "", side: "right" }, { levelId: "b", side: "left" }]])).toBeUndefined();
-  });
-});
-
 describe("sideOfTile", () => {
   // A 20x12 room, the shape a level actually is (GRID_COLS x GRID_ROWS).
   const side = (x: number, y: number) => sideOfTile({ x, y }, 20, 12);
@@ -249,5 +215,74 @@ describe("exitKey", () => {
   it("tells sides and rooms apart", () => {
     expect(exitKey(exit("a", "left"))).not.toBe(exitKey(exit("a", "right")));
     expect(exitKey(exit("a", "left"))).not.toBe(exitKey(exit("b", "left")));
+  });
+});
+
+describe("roomLinksFromLayout", () => {
+  const at = (entries: Record<string, [number, number]>) =>
+    Object.fromEntries(Object.entries(entries).map(([id, [col, row]]) => [id, { col, row }]));
+
+  it("joins the facing edges of two rooms side by side", () => {
+    const links = roomLinksFromLayout(["a", "b"], at({ a: [1, 1], b: [2, 1] }));
+    expect(links).toEqual([[exit("a", "right"), exit("b", "left")]]);
+  });
+
+  it("joins top to bottom for stacked rooms", () => {
+    // Row grows downward on the map, so the room in the *larger* row is below.
+    const links = roomLinksFromLayout(["a", "b"], at({ a: [1, 1], b: [1, 2] }));
+    expect(links).toEqual([[exit("a", "bottom"), exit("b", "top")]]);
+  });
+
+  it("gets the direction right when the neighbour is to the left or above", () => {
+    // The pair is examined in list order, not map order, so the room that comes
+    // first in levelIds may be the one on the right.
+    expect(roomLinksFromLayout(["a", "b"], at({ a: [2, 1], b: [1, 1] }))).toEqual([
+      [exit("a", "left"), exit("b", "right")],
+    ]);
+    expect(roomLinksFromLayout(["a", "b"], at({ a: [1, 2], b: [1, 1] }))).toEqual([
+      [exit("a", "top"), exit("b", "bottom")],
+    ]);
+  });
+
+  it("does not join rooms that only touch at a corner", () => {
+    // A diagonal shares no edge, so there is no pair of facing sides a door
+    // could use.
+    expect(roomLinksFromLayout(["a", "b"], at({ a: [1, 1], b: [2, 2] }))).toEqual([]);
+  });
+
+  it("does not join rooms with a gap between them", () => {
+    expect(roomLinksFromLayout(["a", "b"], at({ a: [1, 1], b: [3, 1] }))).toEqual([]);
+  });
+
+  it("joins every neighbour of a room in the middle of a cross", () => {
+    const links = roomLinksFromLayout(
+      ["mid", "w", "e", "n", "s"],
+      at({ mid: [2, 2], w: [1, 2], e: [3, 2], n: [2, 1], s: [2, 3] }),
+    );
+    expect(links).toHaveLength(4);
+    expect(destinationFor(links, exit("mid", "left"))).toEqual(exit("w", "right"));
+    expect(destinationFor(links, exit("mid", "right"))).toEqual(exit("e", "left"));
+    expect(destinationFor(links, exit("mid", "top"))).toEqual(exit("n", "bottom"));
+    expect(destinationFor(links, exit("mid", "bottom"))).toEqual(exit("s", "top"));
+  });
+
+  it("ignores a level the layout has no cell for", () => {
+    // resolveLayout promises every level a cell, but this takes a layout rather
+    // than producing one, so a caller handing it a partial map gets the rooms
+    // it does know about instead of a crash.
+    expect(roomLinksFromLayout(["a", "b", "ghost"], at({ a: [1, 1], b: [2, 1] }))).toHaveLength(1);
+  });
+
+  it("is empty for a world with one room, or none", () => {
+    expect(roomLinksFromLayout(["a"], at({ a: [1, 1] }))).toEqual([]);
+    expect(roomLinksFromLayout([], {})).toEqual([]);
+  });
+
+  it("produces links the runtime can walk both ways", () => {
+    // The property that matters end to end: what comes out of here is what
+    // destinationFor is asked, and a door has to work in both directions.
+    const links = roomLinksFromLayout(["a", "b"], at({ a: [1, 1], b: [2, 1] }));
+    expect(destinationFor(links, exit("a", "right"))).toEqual(exit("b", "left"));
+    expect(destinationFor(links, exit("b", "left"))).toEqual(exit("a", "right"));
   });
 });

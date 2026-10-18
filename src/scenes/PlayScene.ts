@@ -1144,16 +1144,19 @@ export class PlayScene extends Phaser.Scene {
       );
     }
 
-    // Edge exits — doors out of a *room*, for a metroidvania game. Rendered
-    // with the basket's art for now: 1b is about whether walking through one
-    // works at all, and inventing a door sprite before anyone has seen a room
-    // change would be art drawn against a guess. They are only reachable in a
-    // world that carries links (see useEdgeExit), so an exit in an ordinary
-    // level draws and does nothing.
+    // Edge exits — doors out of a *room*, for a metroidvania game. They are
+    // only reachable in a world that carries links (see useEdgeExit), so an
+    // exit in an ordinary level draws and does nothing.
+    //
+    // Opaque. It was drawn at 0.75 alpha while it borrowed the basket's art,
+    // and against the meadow backdrop that read as a ghost rather than a door —
+    // a washed-out shape on bright grass, in the screenshot taken on
+    // 2026-10-18. The thing a player has to notice and walk into is the last
+    // thing to make faint.
     for (const entity of area.entities.filter((e) => e.type === "edge-exit")) {
       const x = GRID_ORIGIN_X + entity.x * TILE_SIZE + TILE_SIZE / 2;
       const y = GRID_ORIGIN_Y + entity.y * TILE_SIZE + TILE_SIZE / 2;
-      this.trackSprite("edge-exit", this.add.image(x, y, "magic-basket").setDepth(5).setAlpha(0.75));
+      this.trackSprite("edge-exit", this.add.image(x, y, "room-door").setDepth(5));
       const zone = this.add.zone(x, y, TILE_SIZE, TILE_SIZE);
       this.physics.add.existing(zone, true);
       this.areaColliders.push(

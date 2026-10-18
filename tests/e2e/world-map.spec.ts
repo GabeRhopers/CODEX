@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clickByText, gotoApp } from "./support/coords";
+import { clickByText, clickIconWithLabel, clickScenePoint, gotoApp, selectPaletteCategory, startEditorWithLevel, tileCenter } from "./support/coords";
+import { makeArea, makeLevel } from "./support/levels";
 import { makeWorld, seedLevels, seedWorld, storedProgress } from "./support/worlds";
 
 /**
@@ -222,32 +223,61 @@ const playerTileX = (page: Page): Promise<number> =>
     return Math.round(((scene.player?.x ?? 0) - 190) / 32);
   });
 
-/**
- * Walking out of one room and into the next — the first thing the metroidvania
- * mode can actually do.
- *
- * A room is a level (Gabriel, 2026-10-16) and rooms are joined at their edges
- * because the camera never scrolls (CLAUDE.md), so this is the whole mechanism:
- * an exit on one room's edge, a link in the world, and the next screen.
- *
- * Seeded rather than authored, because placing and linking exits is 1c. What
- * this proves is that the runtime half works, which is what the editor half
- * will be built against.
- */
-test("walking into an edge exit opens the room it links to", async ({ page }) => {
-  test.slow();
-  await gotoApp(page);
+/** Every palette brush currently offered, by its label — EditorUI's
+ * `iconGrid.add([icon, label])` pairs, the same structure clickIconWithLabel
+ * finds its target in. What the *palette* offers, not what the Palette module
+ * holds, which is the whole point when a brush is being hidden. */
+const brushLabels = (page: Page): Promise<string[]> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Editor");
+    type Listable = { list?: Listable[]; type?: string; text?: string };
+    const out: string[] = [];
+    const walk = (list: Listable[]): void => {
+      for (let i = 0; i < list.length; i++) {
+        const child = list[i];
+        if (child.type === "Text" && typeof child.text === "string" && i > 0 && list[i - 1].type === "Image") {
+          out.push(child.text);
+        }
+        if (child.list) walk(child.list);
+      }
+    };
+    walk((scene.children.list as unknown as Listable[]) ?? []);
+    return out;
+  });
 
+/** What storage holds for a level, reduced to the two things the authoring
+ * spec is about. Reduced inside the page so a mismatch prints the room flag and
+ * the doors rather than a whole level document. */
+const savedLevel = (page: Page, id: string): Promise<{ isRoom?: boolean; exits: unknown[] } | null> =>
+  page.evaluate(async (id) => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      levelStorage: { load(id: string): Promise<{ isRoom?: boolean; entities?: { type: string }[] } | null> };
+    };
+    const level = await scene.levelStorage.load(id);
+    if (!level) return null;
+    return {
+      isRoom: level.isRoom,
+      exits: (level.entities ?? []).filter((e) => e.type === "edge-exit"),
+    };
+  }, id);
+
+/**
+ * Two saved rooms with one door between them: A's on its right edge, B's on its
+ * left. Used by both room specs below, which differ only in how the link
+ * between them is produced — handed over directly, or derived from where the
+ * two sit on the map.
+ */
+async function seedRoomPair(page: Page): Promise<void> {
   const rooms = [
     { id: "room-a", name: "Room A", exitX: 19, spawnX: 2, background: "meadow" }, // door on the right edge
     // **Room B's spawn sits at the far end from its door, on purpose.** The
-    // assertion below has to tell "arrived at the door" apart from "started at
-    // the Spawn marker", and the two are only a tile apart if the spawn is
-    // where Room A's is. Putting 14 tiles between them means the check does not
-    // depend on exactly when the held key is released — see the comment there.
-    // A different backdrop so a screenshot can show the room changed. The
-    // level-id assertion is what *proves* it; this is so a person looking at
-    // the two pictures can see it too.
+    // assertion in each spec has to tell "arrived at the door" apart from
+    // "started at the Spawn marker", and the two are only a tile apart if the
+    // spawn is where Room A's is. Putting 14 tiles between them means the check
+    // does not depend on exactly when the held key is released — see the
+    // comment there. A different backdrop so a screenshot can show the room
+    // changed. The level-id assertion is what *proves* it; this is so a person
+    // looking at the two pictures can see it too.
     { id: "room-b", name: "Room B", exitX: 0, spawnX: 15, background: "frozen-volcano" }, // door on the left edge
   ];
   await page.evaluate(async (rooms) => {
@@ -274,6 +304,25 @@ test("walking into an edge exit opens the room it links to", async ({ page }) =>
       });
     }
   }, rooms);
+}
+
+/**
+ * Walking out of one room and into the next — the first thing the metroidvania
+ * mode can actually do.
+ *
+ * A room is a level (Gabriel, 2026-10-16) and rooms are joined at their edges
+ * because the camera never scrolls (CLAUDE.md), so this is the whole mechanism:
+ * an exit on one room's edge, a link in the world, and the next screen.
+ *
+ * The links are handed straight to PlayScene here. That is deliberate and
+ * stayed that way through 1c: this spec is about the runtime, so it should keep
+ * passing whatever the authoring half later decides links are made of.
+ */
+test("walking into an edge exit opens the room it links to", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+
+  await seedRoomPair(page);
 
   // Start in Room A, with the world carrying the one door between them. The
   // links riding on the world context is what makes the exit live at all.
@@ -314,4 +363,107 @@ test("walking into an edge exit opens the room it links to", async ({ page }) =>
   // "nearer the door than the spawn" is the question that actually has a stable
   // answer.
   await expect.poll(() => playerTileX(page)).toBeLessThan(8);
+});
+
+/**
+ * The same walk, but with nobody having said which rooms are joined.
+ *
+ * Gabriel chose (2026-10-17) that **rooms connect by where they sit on the
+ * world map** — drag two into neighbouring cells and their facing edges join.
+ * So this spec seeds a world whose layout puts Room A immediately left of Room
+ * B, carries *no* link of any kind, and opens the map the way a player does.
+ *
+ * It is the spec that would catch the derivation being dropped on the way from
+ * the map to the Play scene — the test above cannot, because it hands the links
+ * over itself.
+ */
+test("two rooms in neighbouring cells on the map are joined with nothing linking them", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  await seedRoomPair(page);
+  await seedWorld(
+    page,
+    makeWorld("w-rooms", "The Keep", ["room-a", "room-b"], {
+      // Side by side, A on the left. Written out rather than left to
+      // resolveLayout's serpentine fill so the spec says what it depends on.
+      layout: { "room-a": { col: 0, row: 0 }, "room-b": { col: 1, row: 0 } },
+    }),
+  );
+
+  await openMap(page, "w-rooms");
+  const [first] = await nodes(page);
+  // Assert the precondition: node 0 has to be *clickable* or this spec proves
+  // nothing about doors — it would be a test of a locked map.
+  expect(first.interactive).toBe(true);
+  await clickScene(page, first.x, first.y);
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
+  await expect.poll(() => playingLevelId(page)).toBe("room-a");
+
+  await page.keyboard.down("ArrowRight");
+  await expect.poll(() => playingLevelId(page), { timeout: 20_000 }).toBe("room-b");
+  await page.keyboard.up("ArrowRight");
+
+  // Landed at Room B's door rather than its Spawn marker, for the reason spelt
+  // out in the spec above: 14 tiles apart makes this a question with a stable
+  // answer while the key is still held.
+  await expect.poll(() => playerTileX(page)).toBeLessThan(8);
+});
+
+/**
+ * Placing a door, through the editor a child actually uses.
+ *
+ * Lives in the worlds file rather than an editor one because the question is a
+ * rooms question: the Door brush exists *only* on a level marked as a room, so
+ * an ordinary level's palette has to be exactly what it was before any of this
+ * (Gabriel, 2026-10-17: hide the metroidvania gear unless it is asked for).
+ *
+ * Both halves matter and neither covers the other. The gating is what keeps the
+ * feature invisible to everyone not using it; the save is what makes a placed
+ * door survive the trip to storage, which is the only way the specs above ever
+ * get a room to open.
+ */
+test("the Door brush appears only on a room, and a placed one is saved", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  const level = makeLevel(
+    makeArea(20, 12, 10, [{ type: "player-spawn", x: 2, y: 9 }]),
+  );
+  await startEditorWithLevel(page, level);
+  await selectPaletteCategory(page, "Editor", "Markers");
+
+  // The precondition for the negative below: the markers tab is really drawn.
+  // Without this, "no Door" would also be true of a palette that had not
+  // rendered yet, and the gating assertion would pass vacuously.
+  await expect.poll(() => brushLabels(page)).toContain("Checkpoint");
+  expect(await brushLabels(page)).not.toContain("Door");
+
+  await clickByText(page, "Editor", "Room: Off");
+  await expect.poll(() => brushLabels(page)).toContain("Door");
+
+  await clickIconWithLabel(page, "Editor", "Door");
+  const target = tileCenter(19, 9);
+  await clickScenePoint(page, target.x, target.y);
+  await clickByText(page, "Editor", "Save");
+
+  // Polling storage is both the wait and the assertion: a door that is only in
+  // the scene's own array has not been saved, and every write here can fail
+  // (CLAUDE.md — never announce a save you have not seen land).
+  await expect
+    .poll(() => savedLevel(page, level.id), { timeout: 20_000 })
+    .toEqual({ isRoom: true, exits: [{ type: "edge-exit", x: 19, y: 9 }] });
+
+  // Reopening it is a separate claim and a separate line of code: the toggle
+  // has to come back *on*, or a child editing yesterday's room finds the Door
+  // gone from the palette and the room apparently demoted.
+  await page.evaluate(() => window.__debugGame!.scene.start("Menu"));
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Menu"));
+  await page.evaluate(async (id) => {
+    const maker = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      levelStorage: { load(id: string): Promise<unknown> };
+    };
+    window.__debugGame!.scene.start("Editor", { level: await maker.levelStorage.load(id) });
+  }, level.id);
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Editor"));
+  await selectPaletteCategory(page, "Editor", "Markers");
+  await expect.poll(() => brushLabels(page)).toContain("Door");
 });

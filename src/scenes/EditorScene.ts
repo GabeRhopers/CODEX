@@ -276,6 +276,7 @@ export class EditorScene extends Phaser.Scene {
         onSelectSkin: (skinId) => this.onSelectSkin(skinId),
         onHeroPickerOpen: () => this.onHeroPickerOpen(),
         onSelectHero: (skinId) => this.onSelectHero(skinId),
+        onToggleRoom: (isRoom) => this.setRoomMode(isRoom),
         onUploadSkin: (file) => this.uploadSkin(file),
         onDeleteSkin: (skinId) => this.onDeleteSkin(skinId),
         onSetSkinAsDefault: () => this.setAsDefaultSkin(),
@@ -416,6 +417,11 @@ export class EditorScene extends Phaser.Scene {
       this.ui.setStatus("Restored changes that never reached Google Drive");
       this.markDirty();
     }
+
+    // Opening an existing room has to show the toggle already on, and offer the
+    // Door brush. Done here rather than in the EditorUI constructor because a
+    // restored draft (above) can change the answer after the UI was built.
+    if (this.level.isRoom) this.ui.setRoomMode(true);
   }
 
   /** A library-backed background/track's real display name lives in
@@ -1255,6 +1261,25 @@ export class EditorScene extends Phaser.Scene {
       console.error("Hero selection failed:", err);
       this.ui.setStatus("Couldn't switch that hero");
     });
+  }
+
+  /**
+   * Turns this level into a metroidvania room, or back into an ordinary one.
+   *
+   * Written as `undefined` rather than `false` when turned off, so a level that
+   * was never a room keeps no trace of the field and an old level is still
+   * byte-identical after a round trip — the same reason every other optional
+   * field here is absent rather than defaulted.
+   *
+   * Doors already placed are deliberately *left alone* when this is turned off.
+   * They do nothing in an ordinary level (PlayScene only acts on an exit when
+   * the world carries links), and silently deleting a child's placements
+   * because they tapped a toggle would be the worse surprise of the two.
+   */
+  private setRoomMode(isRoom: boolean): void {
+    this.level.isRoom = isRoom ? true : undefined;
+    this.ui.setRoomMode(isRoom);
+    this.markDirty();
   }
 
   /** Writes a skin choice onto the level being edited and marks it dirty, so it
