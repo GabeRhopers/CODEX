@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { clickByText, gotoApp, readSceneField, startEditorWithLevel, tileCenter, clickScenePoint } from "./support/coords";
-import { failDriveWrites, hangDriveWrites, stopFailingDriveWrites } from "./support/mockDrive";
+import { expireDriveGrant, failDriveWrites, hangDriveWrites, stopFailingDriveWrites } from "./support/mockDrive";
+import { RECONNECT_MESSAGE } from "../../src/drive/driveErrors";
 import { makeArea, makeLevel } from "./support/levels";
 import { seedLevels } from "./support/worlds";
 
@@ -40,6 +41,16 @@ const paintedTileCount = (page: Page): Promise<number> =>
       level: { layers: { ground: number[][] } };
     };
     return scene.level.layers.ground.flat().filter((t) => t !== -1).length;
+  });
+
+/** The editor's transient status line — what `EditorUI.setStatus` wrote, until
+ * it clears itself 2.5s later. */
+const editorStatusText = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Editor") as unknown as {
+      ui: { statusText: { text: string } };
+    };
+    return scene.ui.statusText.text;
   });
 
 /** The maker's one-line status, under the map. */
@@ -421,4 +432,40 @@ test("a world's arrangement survives closing the tab mid-outage", async ({ page 
   await expect
     .poll(() => worldStatusText(page))
     .toBe("Restored changes that never reached Google Drive");
+});
+
+/**
+ * The sentence a failed save produces, when the cause is the one that actually
+ * happens here.
+ *
+ * Both save paths used to print "your browser may be out of storage space"
+ * whatever went wrong, and for the likeliest cause that is not true and points
+ * nowhere useful: the Drive grant lapses roughly weekly by design (full `drive`
+ * scope, Testing-status consent screen — see `src/config/googleDrive.ts`), and
+ * no amount of clearing browser storage helps.
+ *
+ * The *promise* in the message is what the rest of this asserts: the work is
+ * still on screen and still unsaved, so "your work is kept here meanwhile" is
+ * something the app can back up rather than a reassurance.
+ */
+test("a lapsed Drive grant says to reconnect, not to clear storage", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  await startEditorWithLevel(page, LEVEL());
+  await expireDriveGrant(page);
+
+  await paintOneTile(page);
+  // Assert the precondition: there is work to lose. Without this the message
+  // assertion below would hold just as well for a save of nothing.
+  expect(await paintedTileCount(page)).toBeGreaterThan(0);
+
+  // Saved by hand rather than waiting for autosave, so the attempt happens now
+  // — `setStatus` clears itself after 2.5s, and a debounce in between would
+  // leave the poll chasing a line that had already gone.
+  await clickByText(page, "Editor", "Save");
+
+  await expect.poll(() => editorStatusText(page)).toBe(RECONNECT_MESSAGE);
+  // The claim the message makes, checked rather than taken on trust.
+  expect(await paintedTileCount(page)).toBeGreaterThan(0);
+  expect(await readSceneField<boolean>(page, "Editor", "dirty")).toBe(true);
 });

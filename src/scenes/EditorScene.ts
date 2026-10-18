@@ -32,6 +32,7 @@ import { MusicAsset } from "../music/MusicLibrary";
 import { addMusicAsset, loadMusicLibrary, removeMusicAsset } from "../music/musicLibraryStorage";
 import { CHARACTER_SKIN_ID, HERO_TEXTURE_KEY } from "../skins/spriteFrames";
 import { getLevelStorage } from "../persistence/storage";
+import { saveFailureMessage } from "../drive/driveErrors";
 import { clearDraft, isDraftNewer, loadDraft, saveDraft } from "../persistence/draftStore";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { loadActiveProfile } from "../profile/Profile";
@@ -1493,7 +1494,7 @@ export class EditorScene extends Phaser.Scene {
       // when someone gives up and closes it.
       this.writeDraft();
       this.ui.setSaveState("error");
-      this.ui.setStatus("Save failed — your browser may be out of storage space");
+      this.ui.setStatus(saveFailureMessage(err));
       console.error("Level save failed:", err);
     }
   }

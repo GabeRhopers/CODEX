@@ -1,4 +1,5 @@
 import { DRIVE_SCOPE, GOOGLE_CLIENT_ID } from "../config/googleDrive";
+import { DriveAuthError } from "./driveErrors";
 
 /** Minimal shape of what Google Identity Services' token client hands
  * back — not the full GIS type surface, just the fields this file reads.
@@ -104,7 +105,24 @@ function requestToken(interactive: boolean): Promise<string> {
         const client = ensureTokenClient();
         client.callback = (response) => {
           if (response.error || !response.access_token) {
-            reject(new Error(response.error ?? "Sign-in failed"));
+            // A refused *silent* renewal is the expected weekly failure (see
+            // config/googleDrive.ts on why the grant lapses), and it is the one
+            // a save needs to tell apart from a full disk — so it is typed.
+            // A refused *interactive* attempt is somebody closing the consent
+            // popup, which only ProfileGateScene ever sees and which it already
+            // reports in its own words.
+            //
+            // **This line's type is checked by the compiler, not by a test, and
+            // that is a known gap.** Driving it end to end would need the
+            // cached token to expire mid-spec: the mock issues one lasting an
+            // hour, and shortening it is not an option because ProfileGateScene
+            // gates the Menu on `isConnected()`, so an already-expired token
+            // means no spec ever reaches the editor. The sibling path — a 401
+            // from `driveClient` — is covered end to end and produces the same
+            // message through the same code, so what is untested here is this
+            // one constructor call.
+            const message = response.error ?? "Sign-in failed";
+            reject(interactive ? new Error(message) : new DriveAuthError(message));
             return;
           }
           // 60s margin so a save that starts right as the token's about to

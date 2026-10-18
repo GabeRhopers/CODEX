@@ -1,4 +1,5 @@
 import { APP_FOLDER_NAME, DRIVE_ROOT_FOLDER_ID, LEGACY_APP_FOLDER_NAMES } from "../config/googleDrive";
+import { DriveAuthError } from "./driveErrors";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
@@ -33,7 +34,17 @@ async function driveFetch(token: string, url: string, init: RequestInit = {}): P
     } catch {
       // response body wasn't JSON (or was empty) — fall through with just the status
     }
-    throw new DriveApiError(`Drive request failed (${res.status})${detail ? `: ${detail}` : ""}`);
+    const message = `Drive request failed (${res.status})${detail ? `: ${detail}` : ""}`;
+    // 401 is the other way the grant can be gone: a token that was still inside
+    // its lifetime when the page cached it, but was revoked (or the app's
+    // consent withdrawn) server-side since. Typed so a failed save can say
+    // "reconnect" rather than blaming browser storage — see driveErrors.ts.
+    //
+    // Only 401. A 403 from Drive is far more often a quota or rate limit than a
+    // permission problem, and calling one of those an auth failure would just
+    // move the wrong message somewhere new.
+    if (res.status === 401) throw new DriveAuthError(message);
+    throw new DriveApiError(message);
   }
   return res;
 }

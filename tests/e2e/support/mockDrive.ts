@@ -325,6 +325,33 @@ export function stopFailingDriveWrites(page: Page): void {
 }
 
 /**
+ * Makes every Drive **write** come back 401 — the grant is gone.
+ *
+ * A different failure from `failDriveWrites`'s 503, and the app is supposed to
+ * say a different thing about it: 503 is Drive being unwell and 401 is this
+ * app no longer being allowed in, which is the failure a child here will
+ * actually meet. The consent screen is deliberately in Testing status (see
+ * `src/config/googleDrive.ts`) and those grants lapse after about a week, so
+ * "reconnect" is the right instruction and "your browser may be out of storage
+ * space" is simply untrue.
+ *
+ * Reads keep working, as in `failDriveWrites`, so a spec can still assert the
+ * work is on screen and still dirty. A real lapsed grant would fail reads too;
+ * what is under test is the sentence a failed *save* produces, and keeping
+ * reads alive is what lets the rest of the assertions mean anything.
+ */
+export async function expireDriveGrant(page: Page): Promise<void> {
+  await page.route("https://www.googleapis.com/**", async (route) => {
+    const request = route.request();
+    if (isDriveWrite(new URL(request.url()), request.method())) {
+      await route.fulfill({ status: 401, json: { error: { message: "mock: invalid credentials" } } });
+      return;
+    }
+    await route.fallback();
+  });
+}
+
+/**
  * Makes every Drive **write** hang — intercepted and never answered — while
  * reads keep working.
  *

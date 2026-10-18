@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { LevelNameInput } from "../editor/LevelNameInput";
+import { saveFailureMessage } from "../drive/driveErrors";
 import { clearWorldDraft, isDraftNewer, loadWorldDraft, saveWorldDraft } from "../persistence/draftStore";
 import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { SAVE_STATE_DISPLAY } from "../persistence/saveState";
@@ -647,7 +648,7 @@ export class WorldMakerScene extends Phaser.Scene {
       // somebody gives up and closes it.
       this.writeDraft();
       this.saveStatusText.setText(SAVE_STATE_DISPLAY.error.text).setColor(SAVE_STATE_DISPLAY.error.color);
-      this.statusText.setText("Save failed — your browser may be out of storage space");
+      this.statusText.setText(saveFailureMessage(err));
       console.error("World save failed:", err);
     }
   }
