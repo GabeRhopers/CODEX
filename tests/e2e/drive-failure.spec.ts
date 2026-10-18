@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { clickByText, gotoApp, readSceneField, startEditorWithLevel, tileCenter, clickScenePoint } from "./support/coords";
-import { failDriveWrites, stopFailingDriveWrites } from "./support/mockDrive";
+import { failDriveWrites, hangDriveWrites, stopFailingDriveWrites } from "./support/mockDrive";
 import { makeArea, makeLevel } from "./support/levels";
 import { seedLevels } from "./support/worlds";
 
@@ -40,6 +40,49 @@ const paintedTileCount = (page: Page): Promise<number> =>
       level: { layers: { ground: number[][] } };
     };
     return scene.level.layers.ground.flat().filter((t) => t !== -1).length;
+  });
+
+/** The maker's one-line status, under the map. */
+const worldStatusText = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      statusText: { text: string };
+    };
+    return scene.statusText.text;
+  });
+
+/** The levels the maker currently holds, in play order. */
+const worldLevelIds = (page: Page): Promise<string[]> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as { world: { levelIds: string[] } };
+    return [...scene.world.levelIds];
+  });
+
+/** Whether the world has been through a successful save yet — an id minted and
+ * nothing outstanding. Both halves, because an id alone appears the moment the
+ * *first* save is attempted, including one that failed. */
+const worldSaved = (page: Page): Promise<{ hasId: boolean; dirty: boolean }> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      world: { id: string };
+      dirty: boolean;
+    };
+    return { hasId: !!scene.world.id, dirty: scene.dirty };
+  });
+
+/** What Drive actually holds for the world being made. Reads keep working while
+ * writes fail, which is what lets this stand in for "the copy still out there". */
+const loadStoredWorld = (page: Page): Promise<{ id: string; levelIds: string[]; updatedAt: string } | null> =>
+  page.evaluate(async () => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      world: { id: string };
+      worldStorage: { load(id: string): Promise<unknown> };
+    };
+    return (await scene.worldStorage.load(scene.world.id)) as {
+      id: string;
+      levelIds: string[];
+      updatedAt: string;
+    } | null;
   });
 
 async function paintOneTile(page: Page): Promise<void> {
@@ -254,4 +297,128 @@ test("work survives closing the tab mid-outage, and comes back on reopen", async
   // Restored work has not reached Drive, so it must still be dirty — otherwise
   // the next save would never push it and the recovery would be cosmetic.
   expect(await readSceneField<boolean>(page, "Editor", "dirty")).toBe(true);
+});
+
+/**
+ * The same property, for a world.
+ *
+ * `WorldMakerScene` is a near-copy of the editor's save machinery and had the
+ * same hole: `handlePageHide` fired `void persistWorld()`, an async Drive write
+ * into a page being torn down. Closing the tab mid-outage lost which levels
+ * were in the world, what order they played in and where their nodes sat —
+ * about eight gestures, with no copy of them anywhere.
+ *
+ * Built through the real maker rather than seeded, because the thing under test
+ * is what the maker holds in memory versus what Drive was given, and seeding a
+ * world would make those the same document.
+ */
+test("a world's arrangement survives closing the tab mid-outage", async ({ page }) => {
+  test.slow();
+  await gotoApp(page);
+  const ids = await seedLevels(page, ["Green Hill", "Ice Cave", "Lava Keep"]);
+
+  await clickByText(page, "Menu", "Worlds");
+  await clickByText(page, "WorldBrowser", "New World");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMaker"));
+
+  // Two levels in and saved. This is the state Drive ends up holding, and the
+  // world needs a real id before a draft can be keyed by one — see
+  // WorldMakerScene.writeDraft on why that window exists and how long it is.
+  for (const [i, name] of ["Green Hill", "Ice Cave"].entries()) {
+    await clickByText(page, "WorldMaker", name);
+    await expect.poll(() => worldLevelIds(page)).toEqual(ids.slice(0, i + 1));
+  }
+  await expect
+    .poll(() => worldSaved(page), { timeout: 20_000 })
+    .toEqual({ hasId: true, dirty: false });
+  const stored = await loadStoredWorld(page);
+  expect(stored?.levelIds, "Drive must be holding the two-level world").toHaveLength(2);
+
+  // **Writes now hang rather than fail**, which is the point. A rejecting write
+  // reaches `persistWorld`'s catch, and that catch writes a draft of its own —
+  // so it would quietly stand in for the teardown draft this spec is about. A
+  // request that never answers is also the truer model of a closing tab: it
+  // takes its in-flight requests with it and they never come back as errors.
+  await hangDriveWrites(page);
+
+  // The third level is the work that now cannot reach Drive.
+  await clickByText(page, "WorldMaker", "Lava Keep");
+  // Assert the precondition, or the reopen below proves nothing: a test that
+  // "restores" a level that was never added passes against a broken feature.
+  await expect.poll(() => worldLevelIds(page)).toEqual(ids);
+
+  // **The tab closes inside the autosave debounce**, which is the harder case
+  // and the one `writeDraft`'s own timestamp exists for. Arranging never
+  // touches `updatedAt` — only `persistWorld` does — so with no save attempt in
+  // between, the world still carries the stamp of the last *successful* save. A
+  // draft written verbatim would be judged no newer than the stored copy and
+  // silently refused.
+  //
+  // Measured on 2026-10-18: without cancelling the pending timer this test
+  // passed with the stamping removed, because the failed autosave 2s after the
+  // click had already bumped `updatedAt` for it. The assertion below is what
+  // stops that happening again — if the timer beat us here, this fails loudly
+  // rather than quietly testing the easy path.
+  const stillStale = await page.evaluate((storedUpdatedAt) => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      autosaveTimer?: { remove(dispatch: boolean): void };
+      world: { updatedAt: string };
+    };
+    scene.autosaveTimer?.remove(false);
+    return scene.world.updatedAt === storedUpdatedAt;
+  }, stored!.updatedAt);
+  expect(stillStale, "no save may have run between the edit and the tab closing").toBe(true);
+
+  // The tab goes away. A plain Event, not PageTransitionEvent — same reasoning
+  // as the editor's test above.
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+
+  const draft = await page.evaluate((id) => localStorage.getItem(`rhopers:worlddraft:${id}`), stored!.id);
+  expect(draft, "pagehide must leave a draft behind — it is the only write that can finish").not.toBeNull();
+
+  // Reopening with the copy Drive still holds: two levels, older. The draft is
+  // newer, so the maker should take it.
+  //
+  // **Via the browser screen, and that is not decoration.** Restarting a scene
+  // that is already running leaves `isActive("WorldMaker")` true throughout, so
+  // a wait on it returns at once and every read after it can still be looking
+  // at the *pre-restart* scene — which is how this spec passed on 2026-10-18
+  // with the draft timestamping removed. Leaving first makes the transition
+  // observable, so the reads below are guaranteed to be of the reopened maker.
+  // Left through the maker's *own* ScenePlugin, not the global scene manager:
+  // `game.scene.start(key)` starts that scene and leaves the caller running,
+  // so the maker would never actually shut down and the wait below could not
+  // be satisfied.
+  await page.evaluate(() => {
+    const maker = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      scene: { start(key: string): void };
+    };
+    maker.scene.start("WorldBrowser");
+  });
+  await page.waitForFunction(
+    () => window.__debugGame!.scene.isActive("WorldBrowser") && !window.__debugGame!.scene.isActive("WorldMaker"),
+  );
+  await page.evaluate((world) => {
+    const browser = window.__debugGame!.scene.getScene("WorldBrowser") as unknown as {
+      scene: { start(key: string, data: unknown): void };
+    };
+    browser.scene.start("WorldMaker", { world });
+  }, stored);
+  await page.waitForFunction(
+    () => window.__debugGame!.scene.isActive("WorldMaker") && !window.__debugGame!.scene.isActive("WorldBrowser"),
+  );
+
+  await expect.poll(() => worldLevelIds(page)).toEqual(ids);
+  // Restored work has not reached Drive, so it must still be dirty — otherwise
+  // the next save would never push it and the recovery would be cosmetic.
+  expect(await readSceneField<boolean>(page, "WorldMaker", "dirty")).toBe(true);
+
+  // And it *says so*. Polled, not read once, because the line is written when
+  // the level names come back — and it has to survive `refresh()` writing its
+  // own "N levels" line, which is the bug a screenshot caught on 2026-10-18:
+  // the arrangement came back correctly and nothing on screen explained why it
+  // differed from what Drive holds.
+  await expect
+    .poll(() => worldStatusText(page))
+    .toBe("Restored changes that never reached Google Drive");
 });

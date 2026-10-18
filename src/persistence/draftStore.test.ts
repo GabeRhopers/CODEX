@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { clearDraft, clearThingDraft, draftIds, isDraftNewer, loadDraft, loadThingDraft, saveDraft, saveThingDraft } from "./draftStore";
+import {
+  clearDraft,
+  clearThingDraft,
+  clearWorldDraft,
+  draftIds,
+  isDraftNewer,
+  loadDraft,
+  loadThingDraft,
+  loadWorldDraft,
+  saveDraft,
+  saveThingDraft,
+  saveWorldDraft,
+} from "./draftStore";
 import { LevelData } from "../level/LevelSchema";
 import { createEmptyGrid, SCHEMA_VERSION } from "../level/LevelSchema";
+import { WorldData } from "../world/WorldSchema";
 
 /** A minimal Storage, because Vitest runs in node and there is no
  * `localStorage` — the same reason draftStore takes one as an argument. */
@@ -111,6 +124,79 @@ describe("draftStore", () => {
       // A level that was never successfully saved at all — the case with the
       // most to lose, since there is no other copy anywhere.
       expect(isDraftNewer(level("a", "2026-10-14T10:00:00.000Z"), null)).toBe(true);
+    });
+  });
+
+  describe("a world's draft", () => {
+    const world = (id: string, updatedAt: string, levelIds: string[] = ["l1", "l2"]): WorldData => ({
+      id,
+      name: "Green Hills",
+      levelIds,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt,
+    });
+
+    it("round-trips everything the maker can arrange", () => {
+      // Order, cells and backdrop together, because losing any one of them is
+      // the loss this exists to prevent — a world is its arrangement.
+      const storage = fakeStorage();
+      const original: WorldData = {
+        ...world("w1", "2026-10-18T10:00:00.000Z", ["l2", "l1", "l3"]),
+        layout: { l2: { col: 0, row: 0 }, l1: { col: 1, row: 0 }, l3: { col: 1, row: 1 } },
+        background: "meadow",
+      };
+      expect(saveWorldDraft(storage, original)).toBe(true);
+      expect(loadWorldDraft(storage, "w1")).toEqual(original);
+    });
+
+    it("has nothing to offer when none was written", () => {
+      expect(loadWorldDraft(fakeStorage(), "never-saved")).toBeNull();
+    });
+
+    it("clears, and tolerates clearing nothing", () => {
+      const storage = fakeStorage();
+      saveWorldDraft(storage, world("w1", "2026-10-18T10:00:00.000Z"));
+      clearWorldDraft(storage, "w1");
+      expect(loadWorldDraft(storage, "w1")).toBeNull();
+      expect(() => clearWorldDraft(storage, "w1")).not.toThrow();
+    });
+
+    it("reports failure instead of throwing when storage is full", () => {
+      expect(saveWorldDraft(fullStorage(), world("w1", "2026-10-18T10:00:00.000Z"))).toBe(false);
+    });
+
+    it("treats a corrupt draft as absent", () => {
+      const storage = fakeStorage();
+      storage.setItem("rhopers:worlddraft:w1", "{ not json");
+      expect(loadWorldDraft(storage, "w1")).toBeNull();
+    });
+
+    it("treats a draft that is valid JSON but not a world as absent", () => {
+      // The reason loading goes through parseWorld rather than a cast: a
+      // `levelIds` that is not an array is not a recoverable world, it is a
+      // TypeError in WorldMapScene (see WorldSchema.test.ts).
+      const storage = fakeStorage();
+      storage.setItem("rhopers:worlddraft:w1", JSON.stringify({ ...world("w1", "x"), levelIds: "l1" }));
+      expect(loadWorldDraft(storage, "w1")).toBeNull();
+    });
+
+    it("is judged by the same isDraftNewer rule as a level", () => {
+      expect(isDraftNewer(world("w1", "2026-10-18T12:00:00.000Z"), { updatedAt: "2026-10-18T11:00:00.000Z" })).toBe(true);
+      expect(isDraftNewer(world("w1", "2026-10-18T12:00:00.000Z"), { updatedAt: "2026-10-18T12:00:00.000Z" })).toBe(false);
+      expect(isDraftNewer(world("w1", "2026-10-18T12:00:00.000Z"), null)).toBe(true);
+    });
+
+    it("does not collide with a level draft of the same id", () => {
+      // Ids come from one crypto.randomUUID(), so this is not realistic — but
+      // ruling it out costs one word in a key, and the failure it would cause
+      // is the editor opening a world.
+      const storage = fakeStorage();
+      saveDraft(storage, level("same", "2026-10-18T10:00:00.000Z", "A Level"));
+      saveWorldDraft(storage, world("same", "2026-10-18T10:00:00.000Z"));
+      expect(loadDraft(storage, "same")?.name).toBe("A Level");
+      expect(loadWorldDraft(storage, "same")?.name).toBe("Green Hills");
+      // And a world draft is not mistaken for a level's by the prefix scan.
+      expect(draftIds(storage)).toEqual(["same"]);
     });
   });
 

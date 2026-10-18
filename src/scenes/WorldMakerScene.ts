@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { LevelNameInput } from "../editor/LevelNameInput";
+import { clearWorldDraft, isDraftNewer, loadWorldDraft, saveWorldDraft } from "../persistence/draftStore";
 import { getLevelStorage, getWorldStorage } from "../persistence/storage";
 import { SAVE_STATE_DISPLAY } from "../persistence/saveState";
 import { StorageAdapter } from "../persistence/StorageAdapter";
@@ -134,8 +135,23 @@ export class WorldMakerScene extends Phaser.Scene {
   private refreshId = 0;
   private dirty = false;
   private autosaveTimer?: Phaser.Time.TimerEvent;
+  /** The world `init` was handed, kept as storage's copy of it so
+   * `adoptNewerDraft` has something to compare a draft against. */
+  private initialWorld?: WorldData;
+  /** A stable bound reference so `shutdown` can remove it — an inline arrow
+   * passed to addEventListener can never be un-registered.
+   *
+   * The draft is written **first, and synchronously**, for the reason
+   * `EditorScene.handlePageHide` does the same: `persistWorld` is async and
+   * this is page teardown, so the browser is free to discard the in-flight
+   * Drive request, which is exactly how an arrangement used to disappear.
+   * localStorage is synchronous and therefore the only write guaranteed to
+   * finish. The Drive attempt still runs, and clears the draft itself if it
+   * lands. */
   private readonly handlePageHide = (): void => {
-    if (this.dirty) void this.persistWorld();
+    if (!this.dirty) return;
+    this.writeDraft();
+    void this.persistWorld();
   };
 
   constructor() {
@@ -144,12 +160,18 @@ export class WorldMakerScene extends Phaser.Scene {
 
   init(data: WorldMakerSceneData): void {
     this.world = data?.world ?? createEmptyWorld();
+    this.initialWorld = data?.world;
     this.selectedId = null;
     this.page = 0;
     this.dirty = false;
   }
 
   create(): void {
+    // Before anything reads the world: the name field below takes its value
+    // straight off `this.world`, and `refresh()` draws the map from it, so
+    // adopting afterwards would show the draft's arrangement under the stored
+    // copy's name.
+    const restoredDraft = this.adoptNewerDraft();
     this.add
       .text(24, 20, "← Back", {
         fontSize: "14px",
@@ -220,7 +242,21 @@ export class WorldMakerScene extends Phaser.Scene {
     this.buildBackdropButton();
     this.drawBackdrop();
 
-    void this.refresh();
+    // Said **after** the refresh, and that is not a style choice. `refresh()`
+    // ends by writing its own "N levels — paths follow play order" line into
+    // `statusText`, so a message set before it is overwritten the moment the
+    // level names come back — which is exactly what the screenshot taken on
+    // 2026-10-18 showed: the arrangement restored correctly, and nothing on
+    // screen saying why it was different from what Drive holds.
+    //
+    // Deliberately gentle, like the editor's: the work is already back on
+    // screen, so this explains what they are looking at rather than asking them
+    // to decide anything.
+    void this.refresh().then(() => {
+      if (restoredDraft) this.statusText.setText("Restored changes that never reached Google Drive");
+    });
+
+    if (restoredDraft) this.markDirty();
 
     // Same tab-close/refresh safety net as EditorScene — see its comment
     // on why "pagehide" and why the underlying write must stay synchronous.
@@ -601,11 +637,76 @@ export class WorldMakerScene extends Phaser.Scene {
       await this.worldStorage.save(this.world);
       this.dirty = false;
       this.saveStatusText.setText(SAVE_STATE_DISPLAY.saved.text).setColor(SAVE_STATE_DISPLAY.saved.color);
+      // In storage, so the local copy is no longer unsent mail — and leaving it
+      // would make the maker offer to "restore" what it just saved.
+      const draftStorage = this.draftStorage;
+      if (draftStorage) clearWorldDraft(draftStorage, this.world.id);
     } catch (err) {
+      // Keeping a draft matters most here: `dirty` staying true protects the
+      // arrangement only while the tab is open, and an outage is exactly when
+      // somebody gives up and closes it.
+      this.writeDraft();
       this.saveStatusText.setText(SAVE_STATE_DISPLAY.error.text).setColor(SAVE_STATE_DISPLAY.error.color);
       this.statusText.setText("Save failed — your browser may be out of storage space");
       console.error("World save failed:", err);
     }
+  }
+
+  /** Where drafts live. A getter rather than a captured field, for the reason
+   * `EditorScene.draftStorage` is one: Safari in private mode throws on access
+   * and not just on write, and nothing should touch `localStorage` at
+   * construction time. */
+  private get draftStorage(): Storage | null {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Swaps in a local draft when it is newer than the world `init` was handed,
+   * and reports whether it did.
+   *
+   * **It restores rather than asking**, the same call `EditorScene` makes: a
+   * draft only exists when work did not reach Drive, so the alternative to
+   * restoring it is losing it, and the stored copy is not destroyed — it stays
+   * in Drive until the next save replaces it.
+   */
+  private adoptNewerDraft(): boolean {
+    const storage = this.draftStorage;
+    if (!storage || !this.world.id) return false;
+    const draft = loadWorldDraft(storage, this.world.id);
+    if (!draft || !isDraftNewer(draft, this.initialWorld ?? null)) return false;
+    this.world = draft;
+    return true;
+  }
+
+  /**
+   * Best-effort local copy of the arrangement. Silent by design: it is a safety
+   * net, and somebody already being told their save failed does not need a
+   * second message about the backup of it.
+   *
+   * **Stamps its own `updatedAt`, and that is load-bearing.** Arranging does
+   * not touch `updatedAt` — only `persistWorld` does, just before it writes —
+   * so on the pagehide path the world still carries the timestamp of the last
+   * *successful* save. Writing that verbatim would produce a draft that
+   * `isDraftNewer` correctly judges to be no newer, and the restore would never
+   * fire. Stamped on a copy, because this runs during teardown where mutating
+   * the live world buys nothing and could be seen by an in-flight save.
+   *
+   * **One gap, and it is the editor's gap.** A world keeps `id: ""` until a
+   * save mints one, and `persistWorld` no-ops on an empty world — so a brand
+   * new world is unprotected until a level has been added *and* a save has been
+   * attempted. That window is AUTOSAVE_DEBOUNCE_MS after the first level lands
+   * and no longer, since persistWorld mints the id before the write and so even
+   * a failed save closes it. Minting earlier would change when world ids come
+   * into existence for every other reader of one.
+   */
+  private writeDraft(): void {
+    const storage = this.draftStorage;
+    if (!storage || !this.world.id) return;
+    saveWorldDraft(storage, { ...this.world, updatedAt: new Date().toISOString() });
   }
 
   private async autosave(): Promise<void> {

@@ -1,8 +1,13 @@
 import { LevelData } from "../level/LevelSchema";
 import { deserializeLevel, serializeLevel } from "../level/LevelSerializer";
+import { parseWorld, WorldData } from "../world/WorldSchema";
 
 /**
  * A local copy of work that has not reached Drive.
+ *
+ * Three families live here — levels, worlds, and the Thing Maker's one drawing
+ * — because they share one discipline, not because they share a schema. Each is
+ * keyed separately and each never throws.
  *
  * **The hole this fills is a tab close, not an outage.** `EditorScene`'s
  * `handlePageHide` does `void this.persistLevel()` — an async Drive write fired
@@ -84,16 +89,81 @@ export function clearDraft(storage: Storage, id: string): void {
 /**
  * Whether a draft is worth offering back.
  *
- * Strictly newer, by the level's own `updatedAt`. Equal timestamps mean the
+ * Strictly newer, by the document's own `updatedAt`. Equal timestamps mean the
  * draft is the copy that already reached storage, and offering that back would
  * ask a child to recover work they have not lost. Comparison is on the ISO
  * strings, which sort lexicographically for the same reason LocalStorageAdapter
  * sorts its index that way — every `updatedAt` here is written by
  * `new Date().toISOString()`, so they share a format and a zone.
+ *
+ * Takes `{ updatedAt }` rather than a `LevelData` so levels and worlds settle
+ * this the same way. Two copies of a one-line comparison is how two copies
+ * start disagreeing about whether an equal timestamp counts.
  */
-export function isDraftNewer(draft: LevelData, stored: { updatedAt: string } | null): boolean {
+export function isDraftNewer(draft: { updatedAt: string }, stored: { updatedAt: string } | null): boolean {
   if (!stored) return true;
   return draft.updatedAt > stored.updatedAt;
+}
+
+/**
+ * The same three calls for a world, under their own key family.
+ *
+ * A world is worth as much as a level and was exposed the same way:
+ * `WorldMakerScene.handlePageHide` fired `void persistWorld()` into a page
+ * being torn down, so closing the tab mid-outage lost which levels were in the
+ * world, what order they played in, where their nodes sat on the map, and the
+ * backdrop — about eight gestures, and no copy of them anywhere.
+ *
+ * Kept separate from the level keys rather than sharing one, because an id
+ * collision between a level and a world would hand the editor a world to open.
+ * They come from the same `crypto.randomUUID()`, so a collision is not
+ * realistic, but the cost of ruling it out is one word in a string.
+ */
+const worldDraftKey = (id: string) => `rhopers:worlddraft:${id}`;
+
+export function saveWorldDraft(storage: Storage, world: WorldData): boolean {
+  try {
+    storage.setItem(worldDraftKey(world.id), JSON.stringify(world));
+    return true;
+  } catch {
+    // Quota, or Safari's private mode — see saveDraft for why this never
+    // throws: the caller is in page teardown or already handling a failed save.
+    return false;
+  }
+}
+
+/**
+ * The draft for a world, or null if there is none or it cannot be read.
+ *
+ * Validated by `parseWorld`, the same reader every stored world goes through,
+ * rather than a second shape check written here. A draft that does not parse is
+ * treated as absent for the reason `loadDraft` treats a corrupt level that way:
+ * it is a recovery aid, and one that cannot be read has nothing to offer.
+ */
+export function loadWorldDraft(storage: Storage, id: string): WorldData | null {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(worldDraftKey(id));
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    return parseWorld(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+/** Called on every successful world save, so it must tolerate there being
+ * nothing to clear — the common case, since most saves follow a save. */
+export function clearWorldDraft(storage: Storage, id: string): void {
+  try {
+    storage.removeItem(worldDraftKey(id));
+  } catch {
+    // Same as clearDraft: a stale draft is stale at worst, and isDraftNewer
+    // will decline to offer it.
+  }
 }
 
 /**

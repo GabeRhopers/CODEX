@@ -325,6 +325,29 @@ export function stopFailingDriveWrites(page: Page): void {
 }
 
 /**
+ * Makes every Drive **write** hang — intercepted and never answered — while
+ * reads keep working.
+ *
+ * The difference from `failDriveWrites` is the whole reason this exists, and it
+ * is the same distinction `hangSkinsRead` draws below: a 503 **rejects**, so
+ * every `.catch` in the app gets its turn, while a request that never answers
+ * settles nothing. That matters because a save's catch block is itself a place
+ * drafts get written — so a rejecting write quietly covers for a draft the
+ * teardown path failed to write properly, and a hanging one does not.
+ *
+ * It is also the more faithful model of the thing drafts exist for: a tab
+ * closing takes its in-flight requests with it, and they do not come back as
+ * errors. Nothing in the page ever learns what happened to them.
+ */
+export async function hangDriveWrites(page: Page): Promise<void> {
+  await page.route("https://www.googleapis.com/**", async (route) => {
+    const request = route.request();
+    if (isDriveWrite(new URL(request.url()), request.method())) return; // never answered, on purpose
+    await route.fallback();
+  });
+}
+
+/**
  * Makes the shared skins library read **hang** — the request is intercepted and
  * never answered.
  *
