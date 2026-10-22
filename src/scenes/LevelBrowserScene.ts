@@ -36,7 +36,18 @@ export class LevelBrowserScene extends Phaser.Scene {
       fallbackName: "Untitled Level",
       noun: "level",
       secondary: (level) => `Updated ${formatDate(level.updatedAt)}`,
-      actions: [{ label: "Edit", onClick: (level) => void this.editLevel(level.id) }],
+      // Play first, Edit second — the same order My Worlds and Templates use,
+      // and the order of the two things a child wants to do with a saved level.
+      // Until 2026-10-22 there was no Play here at all: the only way to play
+      // your own level was to open it in the editor and press Test Play, while
+      // every *other* list on the screen offered Play directly. The row layout
+      // made the absence visible too — `savedList` lays actions out right to
+      // left from a fixed x, so a one-action row left a hole exactly where My
+      // Worlds draws its Play.
+      actions: [
+        { label: "Play", onClick: (level) => void this.playLevel(level.id) },
+        { label: "Edit", onClick: (level) => void this.editLevel(level.id) },
+      ],
       list: () => getLevelStorage().list(),
       remove: (id) => getLevelStorage().remove(id),
     }));
@@ -46,6 +57,24 @@ export class LevelBrowserScene extends Phaser.Scene {
     const level = await getLevelStorage().load(id);
     if (!level) return;
     this.scene.start("Editor", { level });
+  }
+
+  /**
+   * Plays the saved level, and comes back here rather than to the editor.
+   *
+   * `returnScene` is all that is needed: PlayScene's back navigation is already
+   * generic (`scene.start(this.returnScene)`), and the *wording* of its back
+   * button comes from `play/backDestination.ts`, which knows this key.
+   *
+   * Not cloned, unlike `TemplateBrowserScene.play`. A template is a shared
+   * built-in that must survive being played, so it hands over a copy; this is
+   * the player's own level, freshly loaded from storage, and PlayScene never
+   * writes a level back.
+   */
+  private async playLevel(id: string): Promise<void> {
+    const level = await getLevelStorage().load(id);
+    if (!level) return;
+    this.scene.start("Play", { level, returnScene: "LevelBrowser" });
   }
 }
 

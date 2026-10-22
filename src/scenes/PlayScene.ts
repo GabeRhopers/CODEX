@@ -55,6 +55,7 @@ import {
 import { HandheldShell, LEFT_BAND, makeConsoleButton, SCREEN_RECT, VOLUME_CONTROL } from "../gameplay/HandheldShell";
 import { recordCompletion } from "../world/worldProgress";
 import { destinationFor, ExitSide, INWARD_STEP, RoomLink, sideOfTile } from "../world/roomLinks";
+import { backDestination, type BackDestination } from "./play/backDestination";
 import { TouchControls } from "../gameplay/TouchControls";
 import {
   applyWizardTexture,
@@ -726,7 +727,7 @@ export class PlayScene extends Phaser.Scene {
       y: 21,
       width: 164,
       height: 26,
-      label: `◀ ${this.backDestinationLabel().toUpperCase()} (ESC)`,
+      label: `◀ ${this.backDestination().label.toUpperCase()} (ESC)`,
       depth: 30,
       fontSize: "11px",
       onPress: () => this.backToEditor(),
@@ -1482,19 +1483,12 @@ export class PlayScene extends Phaser.Scene {
     this.pauseOverlay.setVisible(this.paused);
   }
 
-  /** "Editor"/"Worlds"/"Templates" for the top-left back button; see
-   * backDestinationPhrase for the lowercase, mid-sentence form used in the
-   * win/lose hint text. */
-  private backDestinationLabel(): string {
-    if (this.world) return this.world.worldId ? "Map" : "Worlds";
-    if (this.returnScene === "Templates") return "Templates";
-    return "Editor";
-  }
-
-  private backDestinationPhrase(): string {
-    if (this.world) return this.world.worldId ? "the map" : "Worlds";
-    if (this.returnScene === "Templates") return "Templates";
-    return "the editor";
+  /** For the top-left back button; `.phrase` on the same result is the
+   * lowercase, mid-sentence form the win/lose hint uses. The rule itself lives
+   * in `play/backDestination.ts` — it is pure string logic and gets a unit test
+   * there, where this file could only have been checked by playing. */
+  private backDestination(): BackDestination {
+    return backDestination({ world: this.world, returnScene: this.returnScene });
   }
 
   /**
@@ -2198,7 +2192,7 @@ export class PlayScene extends Phaser.Scene {
       this.hint.setText("Press R to replay this level, or Esc for Worlds").setVisible(true);
     } else {
       this.banner.setText("You Win!").setVisible(true);
-      this.hint.setText(`Press R to play again, or Esc for ${this.backDestinationPhrase()}`).setVisible(true);
+      this.hint.setText(`Press R to play again, or Esc for ${this.backDestination().phrase}`).setVisible(true);
     }
     this.restartButton.setVisible(true);
   }
@@ -2234,7 +2228,7 @@ export class PlayScene extends Phaser.Scene {
     this.applyTerminalPose("lose");
     this.physics.pause();
     this.banner.setText("You Lose").setVisible(true);
-    this.hint.setText(`Press R to try again, or Esc for ${this.backDestinationPhrase()}`).setVisible(true);
+    this.hint.setText(`Press R to try again, or Esc for ${this.backDestination().phrase}`).setVisible(true);
     this.restartButton.setVisible(true);
   }
 
