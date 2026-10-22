@@ -35,7 +35,22 @@ import { makeWorld, seedLevels, seedWorlds } from "./support/worlds";
 // canvas is 1050x468 (2.24:1) against this 1.43:1, so roughly a third of the
 // height is letterbox; that is not a bug in any screen below, it is the fixed
 // canvas aspect, and it is why every shot has a dark band.
-test.use({ viewport: { width: 1194, height: 834 } });
+//
+// **`hasTouch` and `isMobile`, not just the size.** A viewport is not a
+// pointer: the project runs `devices["Desktop Chrome"]`
+// (playwright.config.ts), so with the size alone
+// `matchMedia("(pointer: fine)")` stays true and every shot here was of the
+// *mouse* variant of each screen. Everything behind `hasFinePointer()`
+// (`src/ui/pointer.ts`) was therefore invisible to this file — including the
+// Skin Creator's touch layout, which is what a child on an iPad actually gets.
+//
+// That is not a hypothetical gap. The hint this whole survey was created by —
+// "Ctrl+scroll zooms", printed to iPad users who have no Ctrl key, found in the
+// first iPad screenshot anybody took — lives behind exactly that call. The
+// survey could photograph the bug but never the fix. Checked on 2026-10-22:
+// with these two flags the hint is correctly absent, so the app was right and
+// only the camera was wrong.
+test.use({ viewport: { width: 1194, height: 834 }, hasTouch: true, isMobile: true });
 
 test.describe.configure({ mode: "serial" });
 
@@ -210,3 +225,39 @@ const sceneHas = (page: Page, sceneKey: string, text: string): Promise<boolean> 
     },
     { sceneKey, text },
   );
+
+/**
+ * The one screen that looks different with a mouse.
+ *
+ * The survey above runs with touch, because that is the device this is for.
+ * That would otherwise stop the *mouse* variant being photographed at all, and
+ * swapping one blind spot for the other is not progress.
+ *
+ * It costs one screenshot rather than fifteen because `hasFinePointer()` has
+ * exactly one caller in the whole codebase — `SkinEditorScene`'s pan/zoom hint
+ * (checked 2026-10-22, `grep -rn hasFinePointer src/`). Every other screen
+ * renders identically either way, so there is nothing else to re-photograph. If
+ * a second caller ever appears, this block is where its screen joins.
+ */
+test.describe("with a mouse", () => {
+  test.use({ hasTouch: false, isMobile: false });
+
+  test("the Skin Creator, which says more when there is a pointer", async ({ page }, testInfo) => {
+    testInfo.setTimeout(120_000);
+    await gotoApp(page);
+    await page.evaluate(() => {
+      const manager = window.__debugGame!.scene;
+      for (const active of manager.getScenes(true)) if (active.scene.key !== "Boot") manager.stop(active.scene.key);
+      manager.start("SkinEditor");
+    });
+    await page.waitForFunction(() => window.__debugGame!.scene.isActive("SkinEditor"));
+    await clickIconWithLabel(page, "SkinEditor", "Ghost");
+    await waitForSkinCanvas(page);
+    await page.waitForTimeout(500); // settling before a photograph, never before an assertion
+    const name = "10-skin-canvas-mouse";
+    await testInfo.attach(name, { body: await page.screenshot(), contentType: "image/png" });
+    await page.screenshot({ path: `test-results/survey-${name}.png` });
+    // The hint is the whole reason this variant is worth a picture.
+    expect(await sceneHas(page, "SkinEditor", "Ctrl+scroll zooms")).toBe(true);
+  });
+});
