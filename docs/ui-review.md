@@ -15,10 +15,13 @@ screenshots where they only exist on screen. Screenshot pixels are divided by
 
 ## What the pass is worth
 
-Three of the findings below are invisible to `assertLayoutSound` by
-construction: it compares only *interactive* Text for overlap, and two of these
-are plain labels. One is a capability that is simply absent rather than broken.
-None of them would ever have failed a test.
+The findings below are invisible to `assertLayoutSound` by construction: it
+compares only *interactive* Text for overlap, and says nothing at all about
+whitespace that is merely wrong. One is a capability that is simply absent
+rather than broken. None of them would ever have failed a test.
+
+One finding was also wrong, and is kept here struck through rather than
+deleted — see 4.
 
 Against that: two things I went looking at turned out to be fine, and both were
 only settled by reading the code — the cut-scene sprite strip (not clipped) and
@@ -53,10 +56,10 @@ this is the single most surprising absence on any screen.
 ### 2. "Copy link" is 846px from the link it copies
 
 `PublishScene.drawStepThree`: the link renders at `STEP_TEXT_X` = 74 and the
-button at `GAME_WIDTH - 130` = 920. The link under test was 40 characters and
-occupied about 250px, so roughly **600px of empty space separates a value from
-the button that acts on it**, on a screen 1050 wide. Nothing else on the screen
-sits between them.
+button at `GAME_WIDTH - 130` = 920. Measured from the scene, the link is 275px
+wide and so ends at x = 349, leaving **571px of empty canvas between a value and
+the button that acts on it**, on a screen 1050 wide. Nothing else sits between
+them.
 
 The wrap width (`GAME_WIDTH - STEP_TEXT_X - 160` = 816) means the text *can*
 reach x = 890 for a long game name, which is presumably why the button was
@@ -67,8 +70,11 @@ unrelated controls.
 
 `src/editor/thingFields.ts:224` places eight buttons on a fixed `step = 62`
 from `controlX + 62` — None, five presets, 🎲 Roll, ▶ Play. The buttons are
-text-width, so a fixed step produces gaps that vary with label length. Measured
-off the screenshot, in scene px: **10, 4, 6, 25, 21, 12, 2**.
+text-width, so a fixed step produces gaps that vary with label length. Read
+from the scene on 2026-10-22, in scene px: **13, 5, 7, 27, 21, 14, 3**. (The
+first pass estimated 10, 4, 6, 25, 21, 12, 2 off a screenshot — the right shape,
+every number a little low. See the withdrawn finding 4 for why that method was
+retired.)
 
 The 2px is between **🎲 Roll and ▶ Play** — the two buttons that are *not*
 sound choices, fused into one block — while "Hit" and "Blip", which are
@@ -79,15 +85,27 @@ The step is documented as chosen so the row "finishes clear of the drawing
 column", i.e. tuned for total width. That goal and even spacing are not in
 conflict; nothing yet serves the second.
 
-### 4. Two labels in "Acts like" touch
+### 4. ~~Two labels in "Acts like" touch~~ — withdrawn, 2026-10-22
 
-On the thing form, the labels **"Chicken Slipper"** and **"PJ Thunder Hat"**
-under adjacent tiles end and begin about **2 scene px** apart and read as one
-run of text. Both are plain `Text`, not interactive, so `assertLayoutSound`
-cannot see them — this is the documented blind spot, for the fourth time.
+**This finding was wrong, and the way it was wrong is worth more than the
+finding would have been.**
 
-It is the widest pair of labels in that row, so it will recur with any new
-long-named thing.
+It claimed "Chicken Slipper" and "PJ Thunder Hat" ended and began about 2 scene
+px apart. Asked directly, the scene says both labels are **71px wide on one
+line**, and the tile pitch is 78 — a **7px gap**, which is tight but reads as
+two labels. Nothing needed fixing, and a `wordWrap` "fix" written against the
+false number was a no-op (71 < the 74 it wrapped at) and has been reverted.
+
+The 2px came from measuring glyph edges off a PNG, at a 10px font, scaled by
+1.137. That is a method with a couple of pixels of error in it, used to support
+a claim whose whole content was a couple of pixels. **When the claim is a pixel
+count, get the pixels from the scene** — `width`, `x` and `getWrappedText` are
+all there through the debug hook, and they are exact. A screenshot is for
+noticing that something looks wrong; it is not an instrument.
+
+The other three findings survive that same scrutiny, re-measured from the
+scene: the empty My Levels slot is arithmetic from `savedList.ts`, and the two
+below were re-checked and their real numbers are recorded with them.
 
 ---
 

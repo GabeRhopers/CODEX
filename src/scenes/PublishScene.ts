@@ -248,7 +248,7 @@ export class PublishScene extends Phaser.Scene {
   private drawStepThree(): void {
     this.stepNumber(STEP_THREE_Y, 3, false);
     this.stepHeading(STEP_THREE_Y, "Send this link", !this.exported);
-    this.add
+    const link = this.add
       .text(STEP_TEXT_X, STEP_THREE_Y + 24, this.link, {
         fontSize: "13px",
         color: "#9ec5ff",
@@ -257,7 +257,23 @@ export class PublishScene extends Phaser.Scene {
         wordWrap: { width: GAME_WIDTH - STEP_TEXT_X - 160 },
       })
       .setOrigin(0, 0);
-    this.makeButton(GAME_WIDTH - 130, STEP_THREE_Y + 34, "Copy link", () => void this.copyLink());
+    // **Beside the link, not at the right margin.** This button used to be
+    // pinned at GAME_WIDTH - 130 = 920 while the link starts at 74, so for any
+    // realistic link — the one measured on 2026-10-19 was 40 characters and
+    // about 250px — some 600px of empty canvas separated a value from the
+    // button that acts on it, with nothing in between to connect them.
+    //
+    // The margin was not arbitrary: the link wraps at 816px, so a long enough
+    // game name really can reach x = 890. So measure instead of reserving —
+    // follow the link when it is short, and fall back to the old position when
+    // it is long enough to need it. There is no room to drop below the link
+    // instead: step three sits at y 352 of 468 with the closing note under it.
+    this.makeButton(
+      Math.min(link.x + link.width + 12, GAME_WIDTH - 130),
+      STEP_THREE_Y + 34,
+      "Copy link",
+      () => void this.copyLink(),
+    );
     // The bottom line does double duty: normally what the link is worth, and
     // after a copy, whether the copy worked. One line, full width — the column
     // beside the Copy button is 110px wide, which turns "Could not copy — write

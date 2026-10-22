@@ -12,6 +12,7 @@ import {
 } from "../entities/customEntity";
 import { PALETTE } from "./Palette";
 import { rollSeed, SOUND_PRESETS, type SoundPreset, type SoundSpec } from "../audio/soundSynth";
+import { rowPositions } from "./rowLayout";
 import { makeTextButton } from "../ui/textButton";
 import { MUTED_COLOR } from "../ui/theme";
 
@@ -78,6 +79,18 @@ const SPEED_CHOICES: { value: number; label: string }[] = [
 const ACTS_PER_ROW = 7;
 const ACTS_ROW_H = 62;
 
+/**
+ * The Sound row's two gaps — see rowLayout.ts for why the row is measured
+ * rather than stepped.
+ *
+ * 10px inside a group is the same breathing room `makeTextButton`'s own
+ * horizontal padding uses, so buttons read as separate without drifting apart.
+ * 30px before 🎲 Roll is three times that, which is the smallest step that
+ * reads as a break rather than as a slightly wider gap — chosen by looking at
+ * the row, which is the only way to judge it.
+ */
+const SOUND_ROW_SPACING = { gap: 10, groupGap: 30 };
+
 /** Label column to control column. Every row lines its controls up on this. */
 const CONTROL_DX = 50;
 /** First row (Name) to the family row, and to the top of the "acts like" grid.
@@ -137,9 +150,17 @@ export function drawThingFields(options: ThingFieldsOptions): ThingFields {
   const label = (text: string, atY: number): void => {
     scene.add.text(x, atY, text, { fontSize: "12px", color: MUTED_COLOR }).setOrigin(0, 0.5);
   };
-  const button = (bx: number, by: number, text: string, onClick: () => void, isActive?: () => boolean): void => {
+  // Returns the Text so a caller can measure what it just drew. The Sound row
+  // below needs that: its buttons are text-width, so where the *next* one goes
+  // is only knowable once this one exists.
+  const button = (
+    bx: number,
+    by: number,
+    text: string,
+    onClick: () => void,
+    isActive?: () => boolean,
+  ): Phaser.GameObjects.Text =>
     makeTextButton({ scene, x: bx, y: by, label: text, onClick, isActive, paddingY: BUTTON_PADDING_Y });
-  };
 
   // --- name
   label("Name", y);
@@ -184,6 +205,13 @@ export function drawThingFields(options: ThingFieldsOptions): ThingFields {
       .setInteractive({ useHandCursor: true });
     const art = builtinTextureKey(type);
     if (art) fitWithinTile(scene.add.image(cx + 35, cy + 18, art), 28);
+    // Deliberately unconstrained. A 2026-10-19 review called "Chicken Slipper"
+    // and "PJ Thunder Hat" 2px apart and nearly touching; measuring them from
+    // the scene instead of off a screenshot says both are 71px wide on one
+    // line, which against the 78px tile pitch is a 7px gap. The widest label
+    // these tiles can hold is a built-in's, so 71 is the ceiling and no
+    // wrapping or shrinking is needed. See docs/ui-review.md for the
+    // correction.
     scene.add
       .text(cx + 35, cy + 34, builtinLabel(type), { fontSize: "10px", color: "#eeeeee", align: "center" })
       .setOrigin(0.5, 0);
@@ -219,36 +247,52 @@ export function drawThingFields(options: ThingFieldsOptions): ThingFields {
     const soundY = bottomY;
     const current = draft.sound;
 
-    // Stepped rather than fixed at the old 76 so the row's last button
-    // ("▶ Play", the eighth) finishes clear of the drawing column.
-    const step = 62;
     const setSound = (sound: SoundSpec | undefined): void => {
       onChange((current) => ({ ...current, sound }), true);
       if (sound) onPreviewSound(sound);
     };
 
-    button(controlX, soundY, "None", () => setSound(undefined), () => !current);
-    SOUND_PRESETS.forEach((preset, i) => {
-      button(
-        controlX + 62 + i * step,
-        soundY,
-        SOUND_LABELS[preset],
-        // Picking a kind with no seed yet rolls one, so a single tap is always
-        // enough to hear something — asking a child to press two buttons before
-        // anything happens is how a feature goes unused.
-        () => setSound({ preset, seed: current?.seed ?? rollSeed() }),
-        () => current?.preset === preset,
-      );
-    });
+    // **Placed from measured widths, not on a fixed step.** The old layout put
+    // all eight buttons on a 62px step while every one of them is text-width,
+    // so the difference between a long label and a short one went into the
+    // whitespace: measured on 2026-10-19 the gaps ran 10, 4, 6, 25, 21, 12 and
+    // 2 scene px. The 2px was between 🎲 Roll and ▶ Play, which are not sound
+    // choices at all, while "Hit" and "Blip" — alternatives in the same set —
+    // sat 25px apart. The row grouped itself backwards.
+    //
+    // The buttons are built first and moved after, because a Text's width is
+    // only known once it has been rendered with its own label. The arithmetic
+    // is in rowLayout.ts, where it is unit-tested.
+    const choices: Phaser.GameObjects.Text[] = [
+      button(controlX, soundY, "None", () => setSound(undefined), () => !current),
+      ...SOUND_PRESETS.map((preset) =>
+        button(
+          controlX,
+          soundY,
+          SOUND_LABELS[preset],
+          // Picking a kind with no seed yet rolls one, so a single tap is always
+          // enough to hear something — asking a child to press two buttons before
+          // anything happens is how a feature goes unused.
+          () => setSound({ preset, seed: current?.seed ?? rollSeed() }),
+          () => current?.preset === preset,
+        ),
+      ),
+    ];
     // Roll is how you get a *different* noise of the same kind: the seed is the
     // only variation mechanism, deliberately, instead of a panel of sliders
     // nobody wants on a game canvas.
-    button(controlX + 62 + SOUND_PRESETS.length * step, soundY, "🎲 Roll", () => {
-      if (current) setSound({ preset: current.preset, seed: rollSeed() });
-    });
-    button(controlX + 62 + (SOUND_PRESETS.length + 1) * step, soundY, "▶ Play", () => {
-      if (current) onPreviewSound(current);
-    });
+    const actions: Phaser.GameObjects.Text[] = [
+      button(controlX, soundY, "🎲 Roll", () => {
+        if (current) setSound({ preset: current.preset, seed: rollSeed() });
+      }),
+      button(controlX, soundY, "▶ Play", () => {
+        if (current) onPreviewSound(current);
+      }),
+    ];
+
+    const row = [...choices, ...actions];
+    const items = row.map((b, i) => ({ width: b.width, startsGroup: i === choices.length }));
+    rowPositions(items, controlX, SOUND_ROW_SPACING).forEach((bx, i) => row[i].setX(bx));
     bottomY += 56;
   }
 
