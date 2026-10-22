@@ -181,6 +181,30 @@ test("a colour swatch in the Skin Creator is as big as its cell allows", async (
   expect(worst.height, `shortest swatch target: ${JSON.stringify(worst)}`).toBeGreaterThanOrEqual(22);
 });
 
+/**
+ * How many nodes the map has actually drawn.
+ *
+ * `WorldMakerScene.addLevel` pushes the level id synchronously, but `refresh()`
+ * re-reads every level's name from storage before `drawMap` can draw anything —
+ * so for a storage round trip after the click, the world container is still
+ * empty. Both map tests below used to read it the instant the click returned.
+ *
+ * That is a positive assertion with no poll in front of it, and it failed on CI
+ * on 2026-10-22 as `TypeError: Cannot read properties of undefined (reading
+ * 'x')` — a message naming the test's own non-null assertion and saying nothing
+ * about the map, with the test above it merely flaky for the same reason. It
+ * had been latent for as long as both tests existed; adding a spec file
+ * recomposed the shards, and it surfaced on the one commit that moved the
+ * boundaries (the exact failure mode CLAUDE.md records for `530e3fe`).
+ */
+const mapNodeCount = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
+      worldContainer?: { list: { type?: string }[] };
+    };
+    return (scene.worldContainer?.list ?? []).filter((o) => o.type === "Arc").length;
+  });
+
 test("a world map node is big enough to tap", async ({ page }) => {
   test.slow();
   await gotoApp(page);
@@ -189,6 +213,7 @@ test("a world map node is big enough to tap", async ({ page }) => {
   await clickByText(page, "WorldBrowser", "New World");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMaker"));
   await clickByText(page, "WorldMaker", "Green Hill");
+  await expect.poll(() => mapNodeCount(page)).toBe(1);
 
   const arcs = (await tapTargets(page, "WorldMaker")).filter((t) => t.label === "Arc");
   expect(arcs).toHaveLength(1);
@@ -207,6 +232,7 @@ test("a node can be tapped off the circle, in the space the target gained", asyn
   await clickByText(page, "WorldBrowser", "New World");
   await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMaker"));
   await clickByText(page, "WorldMaker", "Green Hill");
+  await expect.poll(() => mapNodeCount(page)).toBe(1);
 
   const node = await page.evaluate(() => {
     const scene = window.__debugGame!.scene.getScene("WorldMaker") as unknown as {
