@@ -181,12 +181,20 @@ test("once storage comes back, the same level saves and is really there", async 
 const listedNames = (page: Page): Promise<string[]> =>
   page.evaluate(() => {
     const scene = window.__debugGame!.scene.getScene("LevelBrowser") as unknown as {
-      listContainer: { list: { type?: string; text?: string }[] };
+      listContainer: { list: { type?: string; text?: string; style?: { fontSize?: string } }[] };
     };
+    // Picked out by the name's own font size rather than by excluding every
+    // string that is *not* a name. The exclusion list named "Edit", "Delete"
+    // and "Delete? Tap again", so when My Levels grew a Play button on
+    // 2026-10-22 every row started contributing a second entry and this
+    // reported ["Delete Me", "Play"] where the spec expected one name. A list
+    // of things to ignore has to be updated by whoever adds a button, and
+    // nothing makes them; the name is 15px (savedList.ts:138) while buttons
+    // default to 12px and the "Updated …" line is 11px, so asking for the name
+    // directly cannot rot the same way.
     return scene.listContainer.list
-      .filter((c) => c.type === "Text" && c.text)
-      .map((c) => c.text!)
-      .filter((t) => !t.startsWith("Updated ") && !["Edit", "Delete", "Delete? Tap again"].includes(t));
+      .filter((c) => c.type === "Text" && c.text && c.style?.fontSize === "15px")
+      .map((c) => c.text!);
   });
 
 /** Whether any row's Delete is currently armed. Searches the *container*, not
