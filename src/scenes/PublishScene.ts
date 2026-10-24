@@ -11,6 +11,7 @@ import {
   publishedGamePath,
 } from "../game/gameBundle";
 import { publishedGameLink } from "../game/publishedBundle";
+import { gamesUploadLink } from "../game/uploadLink";
 import { downloadTextFile } from "../ui/downloadFile";
 import { MUTED_COLOR } from "../ui/theme";
 import { makeTextButton } from "../ui/textButton";
@@ -214,16 +215,19 @@ export class PublishScene extends Phaser.Scene {
   private drawStepTwo(): void {
     this.stepNumber(STEP_TWO_Y, 2, false);
     this.stepHeading(STEP_TWO_Y, `Put it in the site's ${PUBLISHED_GAMES_DIR} folder`, !this.exported);
+    // **Said to be a grown-up's step.** Everything else on this screen is
+    // something the person who made the game can do; this one is not, and the
+    // tool is honest everywhere else about what it cannot do.
     this.add
       .text(
         STEP_TEXT_X,
         STEP_TWO_Y + 22,
-        `On GitHub, open public/${PUBLISHED_GAMES_DIR}/ and use Add file → Upload files.\n` +
-          "Upload it exactly as it is — the name is what the link looks for:",
+        "A grown-up does this bit. Upload the file exactly as it is —\n" +
+          "its name is what the link looks for:",
         { fontSize: "12px", color: MUTED_COLOR, lineSpacing: 4 },
       )
       .setOrigin(0, 0);
-    this.add
+    const pathChip = this.add
       .text(STEP_TEXT_X, STEP_TWO_Y + 64, `public/${publishedGamePath(gameSlug(this.gameDoc.title))}`, {
         fontSize: "12px",
         color: "#8fd694",
@@ -231,6 +235,26 @@ export class PublishScene extends Phaser.Scene {
         padding: { x: 8, y: 6 },
       })
       .setOrigin(0, 0);
+    // A link rather than the old sentence naming the folder. Finding a folder
+    // on GitHub was never the hard part — being on the right *branch* was, and
+    // nothing said so: the web UI opens on the repository's default, which is
+    // not the branch that deploys, so a correct-looking upload would never
+    // appear. `gamesUploadLink` carries that branch; see its own comment.
+    //
+    // **Beside the path, not under it**, and that is forced rather than
+    // chosen. Three steps already fill 468px: a button on its own row here
+    // overlapped the path chip above it by about 1.5px and left as little
+    // under it before step 3's number — seen in a screenshot on 2026-10-24,
+    // and invisible to `assertLayoutSound`, which compares only interactive
+    // Text and never sees a button this deployment does not draw at all. On
+    // the chip's own line there is room to spare, and the folder's name ends
+    // up beside the button that opens it.
+    const uploadHref = gamesUploadLink(location.href);
+    if (uploadHref) {
+      this.makeButton(pathChip.x + pathChip.width + 12, pathChip.y + pathChip.height / 2, "Open this folder →", () =>
+        window.open(uploadHref, "_blank", "noopener"),
+      );
+    }
     this.add
       .text(STEP_TEXT_X, STEP_TWO_Y + 96, "The site rebuilds itself; a few minutes later the link below is live.", {
         fontSize: "12px",
@@ -268,12 +292,15 @@ export class PublishScene extends Phaser.Scene {
     // follow the link when it is short, and fall back to the old position when
     // it is long enough to need it. There is no room to drop below the link
     // instead: step three sits at y 352 of 468 with the closing note under it.
-    this.makeButton(
-      Math.min(link.x + link.width + 12, GAME_WIDTH - 130),
-      STEP_THREE_Y + 34,
-      "Copy link",
-      () => void this.copyLink(),
-    );
+    const copyX = Math.min(link.x + link.width + 12, GAME_WIDTH - 130);
+    const copy = this.makeButton(copyX, STEP_THREE_Y + 34, "Copy link", () => void this.copyLink());
+    // **Check answers the only question this screen could not.** The link is
+    // drawn the moment a file is exported, but it is dead until an upload
+    // lands and the site rebuilds — and dead forever if the upload went to a
+    // branch that does not deploy. Until now the screen showed the same link
+    // either way and had no way to tell them apart, which invites sending a
+    // link that does not work.
+    this.makeButton(copyX + copy.width + 10, STEP_THREE_Y + 34, "Check", () => void this.checkLink());
     // The bottom line does double duty: normally what the link is worth, and
     // after a copy, whether the copy worked. One line, full width — the column
     // beside the Copy button is 110px wide, which turns "Could not copy — write
@@ -296,6 +323,42 @@ export class PublishScene extends Phaser.Scene {
    * origins and can be refused outright, and a link you were told was copied but
    * was not is worse than one you were told to type.
    */
+  /**
+   * Asks the site whether the game is actually there.
+   *
+   * Fetches the file the player would fetch — `publishedGamePath` against this
+   * page's own origin, so it is the same request `fetchPublishedBundle` makes
+   * and same-origin besides, with no CORS to arrange.
+   *
+   * `cache: "no-store"` is load-bearing: the answer changes from 404 to 200
+   * minutes after an upload, and a cached 404 would keep saying no long after
+   * the game went live — which is the exact moment somebody gives up.
+   *
+   * Three outcomes, not two. "Could not check" is its own answer because a
+   * network failure is not evidence the game is missing, and saying it is
+   * would send an author back to re-upload a file that was already there.
+   */
+  private async checkLink(): Promise<void> {
+    this.linkStatus = "Checking…";
+    this.linkTone = "good";
+    this.rebuild();
+    const path = publishedGamePath(gameSlug(this.gameDoc.title));
+    try {
+      const res = await fetch(new URL(path, location.href).toString(), { cache: "no-store" });
+      if (res.ok) {
+        this.linkStatus = "The game is there — the link works.";
+        this.linkTone = "good";
+      } else {
+        this.linkStatus = "Not there yet. If you just uploaded it, give the site a few minutes.";
+        this.linkTone = "warn";
+      }
+    } catch {
+      this.linkStatus = "Could not check just now — that does not mean the game is missing.";
+      this.linkTone = "warn";
+    }
+    this.rebuild();
+  }
+
   private async copyLink(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.link);

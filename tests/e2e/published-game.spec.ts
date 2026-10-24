@@ -397,3 +397,69 @@ test("the Publish screen is laid out soundly", async ({ page }) => {
   await expect.poll(() => labels(page, "Publish").then((l) => l.join(" "))).toContain("Saved 1 world");
   await assertLayoutSound(page, "Publish");
 });
+
+/**
+ * Checking whether the game is really there.
+ *
+ * The link is drawn the moment a file is exported, but it is dead until the
+ * upload lands and the site rebuilds — and dead *forever* if the upload went to
+ * a branch that does not deploy, which is the easy mistake to make because
+ * GitHub's web UI opens on the repository's default branch and this project
+ * deploys only from `main`. Until Check existed the screen showed the same link
+ * either way and had no way to tell them apart.
+ *
+ * The three answers are tested rather than the one, because the difference
+ * between them is the whole point: "not there yet" sends you back to wait,
+ * while "could not check" must *not*, since a failed request is no evidence the
+ * game is missing.
+ */
+async function openPublish(page: Page): Promise<void> {
+  await gotoApp(page);
+  const levels = await seedLevels(page, ["Green Hill"]);
+  await seedWorlds(page, [makeWorld("w1", "World One", [levels[0]])]);
+  await clickByText(page, "Menu", "Game Maker");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameMaker"));
+  await page.getByPlaceholder("Grampa's Quest").fill("Grampa's Quest");
+  await page.getByPlaceholder("Grampa's Quest").press("Enter");
+  await clickByText(page, "GameMaker", "Add");
+  await clickByText(page, "GameMaker", "Publish…");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Publish"));
+}
+
+/** The one status line under the link, which every answer is written to. */
+const linkLine = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("Publish") as unknown as { linkStatus: string };
+    return scene.linkStatus;
+  });
+
+test("Check says the game is there when the site has it", async ({ page }) => {
+  test.slow();
+  await page.route("**/games/grampa-s-quest.json", (route) =>
+    route.fulfill({ status: 200, body: "{}", contentType: "application/json" }),
+  );
+  await openPublish(page);
+  await clickByText(page, "Publish", "Check");
+  await expect.poll(() => linkLine(page)).toContain("the link works");
+});
+
+test("Check says not yet when the file is not uploaded", async ({ page }) => {
+  test.slow();
+  await page.route("**/games/grampa-s-quest.json", (route) => route.fulfill({ status: 404, body: "" }));
+  await openPublish(page);
+  await clickByText(page, "Publish", "Check");
+  // Points at waiting, because a just-uploaded file really is 404 for a few
+  // minutes while the site rebuilds.
+  await expect.poll(() => linkLine(page)).toContain("Not there yet");
+});
+
+test("a failed check does not claim the game is missing", async ({ page }) => {
+  test.slow();
+  await page.route("**/games/grampa-s-quest.json", (route) => route.abort("failed"));
+  await openPublish(page);
+  await clickByText(page, "Publish", "Check");
+  const said = await expect.poll(() => linkLine(page)).toContain("Could not check").then(() => linkLine(page));
+  // The distinction this test exists for: a network failure is not evidence,
+  // and saying it is would send an author to re-upload a file already there.
+  expect(said).not.toContain("Not there yet");
+});

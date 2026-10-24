@@ -159,8 +159,37 @@ Listed because they were noticed, not because they need doing.
 open public/games/ and use Add file → Upload files." The screen is clear and
 well built; the instruction is simply not something a child can carry out, and
 is a chore for an adult once per game. The stated goal of the tool ends with
-"ship it somehow", and this is the weakest link in the whole path by a distance
-— worth its own decision rather than a layout tweak.
+"ship it somehow", and this is the weakest link in the whole path by a distance.
+
+### Decided, 2026-10-24: keep the architecture, remove the friction
+
+Looking at it properly turned up something worse than the friction. **The
+repository's default branch is not `main`, and only `main` deploys.** An author
+following the written instruction lands on the default branch, uploads
+successfully, sees the file on GitHub — and the link never comes alive, with
+nothing anywhere explaining why. That is a trap, not a chore.
+
+So step 2 now carries a link straight to the upload page *on `main`*
+(`gamesUploadLink`, derived from the Pages URL rather than hardcoded), the path
+chip sits beside the button that opens its folder, and step 3 gained **Check**,
+which fetches the file the player would fetch and answers live / not yet /
+could not check. The screen used to show the same link whether the game was
+there or not. It also now says plainly that step 2 is a grown-up's step.
+
+**Not automated with a GitHub token**, though that is the obvious answer. It
+would put a repo-writable credential on a child's device, add a yearly expiry
+chore and a credential UI, and reverse a decision `PublishScene` states in its
+own docstring — "nothing here needs a build script, a second deployment, or a
+token" — for something that happens a handful of times a year. It could not be
+verified from the dev container either. If it is ever wanted, the shape with the
+smallest blast radius is a separate `codex-games` repository, so a leaked token
+cannot touch the app itself.
+
+**Not "the page accepts the file" either**, which an earlier note in this
+session recommended. It helps the author and hurts the recipient: a link becomes
+a link plus a file plus instructions, and the person asked to find a downloaded
+`.json` in a phone's Files app is the least technical in the chain. The goal is
+a link somebody taps.
 
 ---
 
