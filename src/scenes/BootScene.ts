@@ -6,6 +6,7 @@ import { GAME_HEIGHT, GAME_WIDTH } from "../config/gameConfig";
 import { WIZARD_FRAME_KEYS } from "../gameplay/wizardAnimation";
 import { groundIconKey, groundTilesetKey } from "../level/groundSkins";
 import { STATIC_BACKGROUNDS } from "../level/staticBackgrounds";
+import { ZINK_ASSET_DIR, ZINK_FRAME_KEYS } from "../skins/heroChoice";
 import { playFromBundle } from "../game/contentSource";
 import { fetchPublishedBundle } from "../game/publishedBundle";
 
@@ -20,6 +21,15 @@ export class BootScene extends Phaser.Scene {
     // GitHub Pages project site) - see the `base` comment in vite.config.ts.
     for (const key of WIZARD_FRAME_KEYS) {
       this.load.image(key, `assets/wizard/${key.replace("wizard-", "")}.png`);
+    }
+    // The second built-in hero, loaded unconditionally beside the first
+    // because whether a level wants him is not known until a level is opened,
+    // and he is too small to be worth deferring: measured 2026-10-26, his six
+    // 32x48 frames total 1,374 bytes, against 3.4-4.3KB for *each* of Grampa's
+    // six — they are hand-drawn, his are nine flat colours. See
+    // skins/heroChoice.ts.
+    for (const key of ZINK_FRAME_KEYS) {
+      this.load.image(key, `${ZINK_ASSET_DIR}/${key.replace("zink-", "")}.png`);
     }
     this.load.image("enemy-ghost-pillow", "assets/entities/ghost-pillow.png");
     this.load.image("goal-portal", "assets/entities/caged-sheep.png");

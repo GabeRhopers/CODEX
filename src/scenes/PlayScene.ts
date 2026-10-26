@@ -73,6 +73,7 @@ import { getLevelStorage } from "../persistence/storage";
 import { StorageAdapter } from "../persistence/StorageAdapter";
 import { builtInGroundTilesets, composeGroundTilesets } from "../skins/groundTileset";
 import { FrameTextureKeys, resolveFrameTextureKeys, resolveLoopLength, resolveSkinTextureKeys } from "../skins/skinLoader";
+import { heroFrameKeys } from "../skins/heroChoice";
 import { CHARACTER_SKIN_ID, framePlanFor } from "../skins/spriteFrames";
 import { advanceLoop, createLoopState, LoopState } from "../gameplay/spriteLoop";
 import { makeCoopHud } from "./play/coopHud";
@@ -504,10 +505,15 @@ export class PlayScene extends Phaser.Scene {
   // immediately basket-up, both in Main). Cleared by update() on the first
   // frame the player is off it. See TELEPORT_COOLDOWN_MS for why a timer
   // alone was not enough.
-  /** A custom character skin's frames, once resolved — null while nothing is
-   * active (the ordinary case: Grampa's own art) and until the async resolve
-   * lands, which update() handles by simply passing undefined through. */
-  private characterFrameKeys?: FrameTextureKeys;
+  /** The character's frames, once resolved — a painted skin's, or a built-in
+   * hero's (see skins/heroChoice.ts), and undefined while nothing is active
+   * (the ordinary case: Grampa's own art) and until the async resolve lands,
+   * which update() handles by simply passing undefined through.
+   *
+   * ReadonlyMap rather than FrameTextureKeys because a built-in hero's map is a
+   * module-level constant shared by every level that names him — handing out a
+   * mutable reference to it would let one scene re-key another's hero. */
+  private characterFrameKeys?: ReadonlyMap<string, string>;
   /** Per animated enemy brush: its skin's frames, how many of them actually
    * loop, and one shared timer. Shared per brush rather than per sprite so
    * every ghost in an area flaps together — cheaper, and it reads as
@@ -868,9 +874,18 @@ export class PlayScene extends Phaser.Scene {
    * before `updateAccessoryVisuals` takes over — see that method.
    */
   private makePlayer(index: number, x: number, y: number, input: PlayerInputKeys): CoopPlayer {
-    const sprite = this.physics.add.sprite(x, y, "wizard-idle");
+    // **This hero's resting pose, not a hardcoded `wizard-idle`.** A level
+    // played as Zink would otherwise be born as Grampa and be corrected by the
+    // first update tick — which is a frame nobody is likely to see and exactly
+    // the sort of frame a screenshot catches at the worst moment.
+    //
+    // It answers `wizard-idle` by itself whenever the skin resolve has not
+    // landed yet (a player can join mid-load — see joinWhenReady), so the
+    // unchanged path for a level that is Grampa's is also the fallback path.
+    const idleKey = situationTextureKey("idle", 0, this.characterFrameKeys);
+    const sprite = this.physics.add.sprite(x, y, idleKey);
     sprite.setOrigin(0.5, 1);
-    applyWizardTexture(sprite, "wizard-idle");
+    applyWizardTexture(sprite, idleKey);
     sprite.setCollideWorldBounds(true);
     this.playerGroup.add(sprite);
     return {
@@ -1304,9 +1319,15 @@ export class PlayScene extends Phaser.Scene {
     // because the player isn't a placed entity and so isn't in
     // spritesByBrushId at all — it's the one sprite the whole skin system
     // never reached before this.
+    // `?? heroFrameKeys(...)` is the whole of "a level can be played as Zink":
+    // a built-in hero fills the same map a painted one does, so everything
+    // downstream — situationTextureKey, the stride, the terminal pose — is
+    // untouched. The order is the rule: a painted character wins, this level's
+    // `hero` comes next, and `undefined` is Grampa exactly as before. See
+    // skins/heroChoice.ts.
     void resolveFrameTextureKeys(this, CHARACTER_SKIN_ID, this.level.skins).then((keys) => {
       if (this.currentAreaKey !== key) return;
-      this.characterFrameKeys = keys ?? undefined;
+      this.characterFrameKeys = keys ?? heroFrameKeys(this.level.hero) ?? undefined;
     });
 
     // `this.level.skins` is what makes a skin choice belong to this level
@@ -1844,11 +1865,11 @@ export class PlayScene extends Phaser.Scene {
     const two = this.makePlayer(1, spot.x + SPAWN_SPACING_X, spot.y, createPlayerInput(this, "wasd"));
     two.baseTint = PLAYER_TWO_TINT;
     two.sprite.setTint(PLAYER_TWO_TINT);
-    // No texture work here: makePlayer starts them on `wizard-idle`, and the
-    // very next frame's updateWizardAnimation resolves this level's painted
-    // character skin for them exactly as it does for player one. Both wear the
-    // one CHARACTER_SKIN_ID skin, which is what keeps the Skin Creator and the
-    // cut-scene cast out of co-op entirely.
+    // No texture work here: makePlayer starts them on this hero's resting
+    // pose, and the very next frame's updateWizardAnimation resolves this
+    // level's painted character skin for them exactly as it does for player
+    // one. Both wear the one CHARACTER_SKIN_ID skin, which is what keeps the
+    // Skin Creator and the cut-scene cast out of co-op entirely.
     this.players.push(two);
 
     // The invitation has been taken up, so it stops being offered.

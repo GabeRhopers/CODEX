@@ -9,7 +9,15 @@ import { HistoryStack } from "../editor/commands/HistoryStack";
 import { MoveEntityCommand } from "../editor/commands/MoveEntityCommand";
 import { PaintTileCommand } from "../editor/commands/PaintTileCommand";
 import { readAndDownscaleImage } from "../editor/customBackgroundUpload";
-import { BUILTIN_SKIN_ID, EditorUI, NO_MUSIC_ID, USE_DEFAULT_SKIN_ID } from "../editor/EditorUI";
+import { BUILTIN_HERO_PICKER_IDS, BUILTIN_SKIN_ID, EditorUI, NO_MUSIC_ID, USE_DEFAULT_SKIN_ID } from "../editor/EditorUI";
+import {
+  BUILT_IN_HEROES,
+  BuiltInHeroId,
+  DEFAULT_HERO_ID,
+  heroName,
+  heroTextureKey,
+  heroWhenRoomTurnedOn,
+} from "../skins/heroChoice";
 import { EntityPlacer, TileCoord } from "../editor/EntityPlacer";
 import { MusicTooLargeError, readAudioAsDataUrl } from "../editor/musicUpload";
 import { Brush, isSkinnable, PALETTE } from "../editor/Palette";
@@ -276,7 +284,7 @@ export class EditorScene extends Phaser.Scene {
         onSkinPickerOpen: () => this.onSkinPickerOpen(),
         onSelectSkin: (skinId) => this.onSelectSkin(skinId),
         onHeroPickerOpen: () => this.onHeroPickerOpen(),
-        onSelectHero: (skinId) => this.onSelectHero(skinId),
+        onSelectHero: (skinId, builtIn) => this.onSelectHero(skinId, builtIn),
         onToggleRoom: (isRoom) => this.setRoomMode(isRoom),
         onUploadSkin: (file) => this.uploadSkin(file),
         onDeleteSkin: (skinId) => this.onDeleteSkin(skinId),
@@ -1119,7 +1127,7 @@ export class EditorScene extends Phaser.Scene {
     // Paired with applySkins rather than pushed separately: together they are
     // what the trigger label needs to say whether the look on screen is this
     // level's own choice or one inherited from the default.
-    this.ui.setLevelSkins(this.level.skins);
+    this.ui.setLevelSkins(this.level.skins, this.level.hero);
     this.entityPlacer.setSkinTextureKeys(skinTextureKeys);
     this.entityPlacer.syncFromLevel(this.brushesByType);
   }
@@ -1239,11 +1247,22 @@ export class EditorScene extends Phaser.Scene {
     void resolveSkinThumbnails(this, CHARACTER_SKIN_ID, "Grampa").then((thumbnails) => {
       const items: AssetPickerItem[] = [
         { id: USE_DEFAULT_SKIN_ID, label: "Use default", textureKey: HERO_TEXTURE_KEY },
-        { id: BUILTIN_SKIN_ID, label: "Grampa", textureKey: HERO_TEXTURE_KEY },
+        // Built-ins before painted ones, and generated rather than listed, so a
+        // third hero is a line in heroChoice.ts and nothing here.
+        ...BUILT_IN_HEROES.map((hero) => ({
+          id: BUILTIN_HERO_PICKER_IDS[hero],
+          label: heroName(hero),
+          textureKey: heroTextureKey(hero),
+        })),
         ...thumbnails.map((t) => ({ id: t.id, label: t.name, textureKey: t.textureKey })),
       ];
       const choice = this.level.skins?.[CHARACTER_SKIN_ID];
-      const selected = choice === undefined ? USE_DEFAULT_SKIN_ID : (choice ?? BUILTIN_SKIN_ID);
+      // `null` means built-in art, and which built-in is `level.hero` — so the
+      // highlighted entry is the hero, not a single "Built-in" row.
+      const selected =
+        choice === undefined
+          ? USE_DEFAULT_SKIN_ID
+          : (choice ?? BUILTIN_HERO_PICKER_IDS[this.level.hero ?? DEFAULT_HERO_ID]);
       this.ui.setHeroPickerItems(items, selected);
     });
   }
@@ -1256,7 +1275,12 @@ export class EditorScene extends Phaser.Scene {
    * library-wide act hiding inside a per-level control — the same separation
    * `setAsDefaultSkin` exists to keep.
    */
-  private onSelectHero(choice: string | null | undefined): void {
+  private onSelectHero(choice: string | null | undefined, builtIn?: BuiltInHeroId): void {
+    // Only the built-in entries carry one, and only they write the field —
+    // picking a painted hero or "Use default" leaves `hero` where it was, so a
+    // room that is Zink's stays Zink's underneath a skin that is later removed.
+    // Grampa is written as `undefined`, because absent is what Grampa is.
+    if (builtIn) this.level.hero = builtIn === DEFAULT_HERO_ID ? undefined : builtIn;
     this.setLevelSkin(CHARACTER_SKIN_ID, choice);
     void this.reresolveSkins().catch((err: unknown) => {
       console.error("Hero selection failed:", err);
@@ -1276,11 +1300,31 @@ export class EditorScene extends Phaser.Scene {
    * They do nothing in an ordinary level (PlayScene only acts on an exit when
    * the world carries links), and silently deleting a child's placements
    * because they tapped a toggle would be the worse surprise of the two.
+   *
+   * **Turning it on also makes the level Zink's**, when and only when nobody
+   * has said otherwise — `heroWhenRoomTurnedOn` is that rule and owns the
+   * conditions. A room is a metroidvania room and Grampa is a wizard in a
+   * platformer; asking a child to find a second control to get the right
+   * character is the kind of step that never gets taken.
+   *
+   * It pins the built-in art alongside, which is the part worth saying out
+   * loud: `hero` only decides what the *built-in* character is, so without the
+   * pin a library default painted hero would still win and the toggle would
+   * have done nothing visible. Pinning also makes the Hero picker honest — it
+   * highlights Zink, rather than "Use default" over a level that plays as Zink.
+   * Both are only ever written over the untouched state.
+   *
+   * Turning it off leaves the hero exactly as it leaves the doors.
    */
   private setRoomMode(isRoom: boolean): void {
     this.level.isRoom = isRoom ? true : undefined;
     this.ui.setRoomMode(isRoom);
     this.markDirty();
+    if (!isRoom) return;
+    const hero = heroWhenRoomTurnedOn(this.level.hero, this.level.skins?.[CHARACTER_SKIN_ID]);
+    if (hero === this.level.hero) return;
+    this.level.hero = hero;
+    this.onSelectHero(null);
   }
 
   /** Writes a skin choice onto the level being edited and marks it dirty, so it

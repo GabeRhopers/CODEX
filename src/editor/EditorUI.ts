@@ -16,6 +16,7 @@ import { LevelNameInput } from "./LevelNameInput";
 import { Brush, CATEGORIES, isSkinnable, MINE_TAB, PALETTE, PaletteTab, UP_BASKET_TINT_COLOR } from "./Palette";
 import { BrushSlot, layOutBrushes, pageOfBrush } from "./paletteLayout";
 import { CustomEntityDef, isCustomEntityId } from "../entities/customEntity";
+import { BUILT_IN_HEROES, BuiltInHeroId, DEFAULT_HERO_ID, heroName } from "../skins/heroChoice";
 import { CHARACTER_SKIN_ID } from "../skins/spriteFrames";
 import { customBrushes } from "../entities/entityRegistry";
 import { clampPage, rowsPerPage } from "../ui/pager";
@@ -75,7 +76,18 @@ export interface EditorUICallbacks {
    * "what is this level like" choices rather than "what am I placing".
    */
   onHeroPickerOpen: () => void;
-  onSelectHero: (skinId: string | null | undefined) => void;
+  /**
+   * Two arguments because the picker now answers two questions at once.
+   *
+   * `skinId` is the level's painted-character choice, three-state as ever:
+   * undefined follows the library default, null pins the built-in art, a string
+   * names a painted skin. `builtIn` says *which* built-in that art is, and is
+   * passed only by the entries that are a built-in hero — picking a painted
+   * skin or "Use default" leaves the level's `hero` alone rather than quietly
+   * resetting it, the same restraint the Room toggle shows towards doors
+   * already placed.
+   */
+  onSelectHero: (skinId: string | null | undefined, builtIn?: BuiltInHeroId) => void;
   /** The level became, or stopped being, a metroidvania room. */
   onToggleRoom: (isRoom: boolean) => void;
 
@@ -104,6 +116,21 @@ export interface EditorUICallbacks {
 export const USE_DEFAULT_SKIN_ID = "__default__";
 export const BUILTIN_SKIN_ID = "__builtin__";
 export const NO_MUSIC_ID = "__none__";
+
+/**
+ * The hero picker's entry per built-in hero (see skins/heroChoice.ts).
+ *
+ * Grampa reuses BUILTIN_SKIN_ID rather than getting a sentinel of his own,
+ * because he *is* what "the built-in art" has always meant — a level that picks
+ * him is a level with `skins[player] = null` and no `hero`, which is exactly
+ * what that entry already wrote. Zink is the one that needed a new id, and a
+ * map keyed by hero rather than two loose constants so adding a third built-in
+ * is one line here and a compile error nowhere else.
+ */
+export const BUILTIN_HERO_PICKER_IDS: Record<BuiltInHeroId, string> = {
+  grampa: BUILTIN_SKIN_ID,
+  zink: "__zink__",
+};
 
 const ENEMY_SIZES: { id: EnemySize; label: string }[] = [
   { id: "small", label: "Small" },
@@ -273,6 +300,9 @@ export class EditorUI {
    * that "Custom" alone can't distinguish a choice this level made from one it
    * inherited and would lose if the default moved. */
   private levelSkins: Record<string, string | null> | undefined;
+  /** This level's built-in hero, for the trigger label. Undefined is Grampa,
+   * exactly as the absent field on the level means. */
+  private levelHero: BuiltInHeroId | undefined;
   private eraserButton!: PanelButton;
   private handButton!: PanelButton;
   private clearButton!: PanelButton;
@@ -580,8 +610,16 @@ export class EditorUI {
         this.callbacks.onHeroPickerOpen();
       },
       onSelect: (id) => {
-        if (id === USE_DEFAULT_SKIN_ID) this.callbacks.onSelectHero(undefined);
-        else if (id === BUILTIN_SKIN_ID) this.callbacks.onSelectHero(null);
+        if (id === USE_DEFAULT_SKIN_ID) {
+          this.callbacks.onSelectHero(undefined);
+          return;
+        }
+        // A built-in hero is "the built-in art" (null) plus which one — so
+        // picking Zink and picking Grampa write the same skin choice and differ
+        // only in the level's `hero` field. Anything else is a painted skin's
+        // own id and goes through unchanged.
+        const builtIn = BUILT_IN_HEROES.find((hero) => BUILTIN_HERO_PICKER_IDS[hero] === id);
+        if (builtIn) this.callbacks.onSelectHero(null, builtIn);
         else this.callbacks.onSelectHero(id);
       },
     });
@@ -1220,18 +1258,20 @@ export class EditorUI {
   }
 
   /**
-   * What the hero trigger says, in the Skin picker's own three words rather
-   * than the Background picker's naming of its choice.
+   * What the hero trigger says.
    *
-   * Naming the chosen hero would read better beside "BG: Meadow", but the
-   * skin's *name* only arrives when the picker is opened (see
-   * onHeroPickerOpen's Drive read), so labelling it that way would mean
-   * resolving the whole library on every editor open to fill in one word.
-   * Built-in / Default / Custom is the same vocabulary the control it is
-   * really a sibling of already uses.
+   * **A built-in hero is named; a painted one is not**, and the asymmetry is
+   * the point rather than an oversight. A painted skin's *name* only arrives
+   * when the picker is opened (see onHeroPickerOpen's Drive read), so naming
+   * one here would mean resolving the whole library on every editor open to
+   * fill in one word — which is why this used to read "Hero: Built-in ▾" and
+   * borrow the Skin picker's Built-in / Default / Custom vocabulary throughout.
+   * There is no such cost for a built-in: `level.hero` is already in hand, so
+   * "Hero: Zink ▾" is free and says more than "Built-in" ever did — and with
+   * two built-ins, "Built-in" stopped being an answer at all.
    */
   private heroTriggerLabel(): string {
-    if (!this.skinTextureKeys.has(CHARACTER_SKIN_ID)) return "Hero: Built-in ▾";
+    if (!this.skinTextureKeys.has(CHARACTER_SKIN_ID)) return `Hero: ${heroName(this.levelHero ?? DEFAULT_HERO_ID)} ▾`;
     return this.levelSkins?.[CHARACTER_SKIN_ID] ? "Hero: Custom ▾" : "Hero: Default ▾";
   }
 
@@ -1253,9 +1293,11 @@ export class EditorUI {
   }
 
   /** Pushed in by EditorScene alongside every applySkins, so the trigger can
-   * distinguish a look this level chose from one it inherited. */
-  setLevelSkins(levelSkins: Record<string, string | null> | undefined): void {
+   * distinguish a look this level chose from one it inherited — and, for the
+   * hero, which built-in it falls back to when it chose none. */
+  setLevelSkins(levelSkins: Record<string, string | null> | undefined, hero?: BuiltInHeroId): void {
     this.levelSkins = levelSkins;
+    this.levelHero = hero;
     this.setSkinPickerLabel();
     this.setHeroPickerLabel();
   }

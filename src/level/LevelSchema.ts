@@ -1,6 +1,7 @@
 import { GRID_COLS, GRID_ROWS, MAX_GRID_COLS, MAX_GRID_ROWS, TILE_SIZE } from "../config/gameConfig";
 import { StaticBackgroundId } from "./staticBackgrounds";
 import type { PlaceableType } from "../entities/customEntity";
+import type { BuiltInHeroId } from "../skins/heroChoice";
 
 export const EMPTY_TILE = -1;
 
@@ -217,6 +218,25 @@ export interface LevelData extends LevelArea {
    * level. Nothing migrates.
    */
   isRoom?: boolean;
+  /**
+   * Which **built-in** character this level is played as — see
+   * skins/heroChoice.ts, which owns the list and the rules.
+   *
+   * Optional, absent on every level ever saved, and absent is Grampa. Nothing
+   * migrates, and a level saved by this build still opens on an older one: the
+   * field is ignored there and the level is Grampa's, which is what it was.
+   *
+   * **A sibling of `skins`, not a replacement for it, and it loses to it.**
+   * `skins[CHARACTER_SKIN_ID]` says which *painted* character to wear and has
+   * three states of its own (see below); this says which built-in to fall back
+   * to when none is worn. So the full order is painted skin → this → Grampa,
+   * and a child who drew their own hero keeps them inside a room.
+   *
+   * Not validated by `deserializeLevel`, deliberately: `heroFrameKeys` answers
+   * null for any id it does not know, so an unrecognised value is already a
+   * level played as Grampa rather than a level that fails to load.
+   */
+  hero?: BuiltInHeroId;
   /**
    * Which custom skin (see skins/skinSelection.ts) this level wears for each
    * Brush id. Level-wide rather than per-`LevelArea` on purpose: Sub/Up are the

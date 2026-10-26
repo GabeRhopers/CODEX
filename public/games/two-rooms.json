@@ -341,7 +341,11 @@
         }
       ],
       "background": "meadow",
-      "isRoom": true
+      "isRoom": true,
+      "hero": "zink",
+      "skins": {
+        "player": null
+      }
     },
     {
       "schemaVersion": 2,
@@ -638,7 +642,11 @@
         }
       ],
       "background": "frozen-volcano",
-      "isRoom": true
+      "isRoom": true,
+      "hero": "zink",
+      "skins": {
+        "player": null
+      }
     }
   ],
   "skins": {},
