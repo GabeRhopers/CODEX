@@ -463,3 +463,80 @@ test("a failed check does not claim the game is missing", async ({ page }) => {
   // and saying it is would send an author to re-upload a file already there.
   expect(said).not.toContain("Not there yet");
 });
+
+/**
+ * The rooms sample, played the way somebody handed the link would play it.
+ *
+ * `public/games/two-rooms.json` exists so a person can try the one thing the
+ * metroidvania work actually does — walk off a room's edge and arrive in the
+ * next. A sample that does not work is worse than no sample, and the
+ * published Pages URL cannot be reached from the dev container, so this is the
+ * only place the claim can be checked.
+ *
+ * **No route stub.** Every other published test serves a bundle it built; this
+ * one lets the dev server serve the committed file from `public/games/`, so
+ * what is played is the artifact that ships and not a copy of it.
+ * `published-games.spec.ts` checks the same file against the app's rules
+ * without a browser; this checks that walking through it works.
+ */
+test("the Two Rooms sample joins its rooms when a visitor plays it", async ({ browser }) => {
+  test.slow();
+  const page = await (await publishedContext(browser)).newPage();
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/?game=two-rooms");
+  await waitForGame(page);
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("GameTitle"), undefined, { timeout: 20_000 });
+
+  await clickByText(page, "GameTitle", "Play ▶");
+  // One opening panel, which is where the sample says what to try.
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("CutScene"));
+  await clickByText(page, "CutScene", "Begin ▶");
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("WorldMap"));
+
+  // Into the first room from the map, which is the path that derives the links
+  // from the world's layout — the half a seeded test cannot reach.
+  //
+  // By the node's circle, not its name: the Arc is what `setInteractive` is
+  // called on and the label beside it is plain text, so clicking the words
+  // finds nothing and waits out the timeout.
+  const node = await page.evaluate(() => {
+    const scene = window.__debugGame!.scene.getScene("WorldMap");
+    type Obj = { type?: string; radius?: number; x?: number; y?: number };
+    const arc = (scene.children.list as unknown as Obj[]).find((o) => o.type === "Arc" && o.radius === 18);
+    return arc ? { x: arc.x!, y: arc.y! } : null;
+  });
+  expect(node, "the map should have drawn a node to click").not.toBeNull();
+  const point = await page.evaluate(({ x, y }) => {
+    const game = window.__debugGame!;
+    const rect = game.canvas.getBoundingClientRect();
+    const scale = game.scale.displayScale;
+    return { x: rect.left + x / scale.x, y: rect.top + y / scale.y };
+  }, node!);
+  await page.mouse.click(point.x, point.y);
+  await page.waitForFunction(() => window.__debugGame!.scene.isActive("Play"));
+  const playingName = (): Promise<string | undefined> =>
+    page.evaluate(() => {
+      const scene = window.__debugGame!.scene.getScene("Play") as unknown as { level?: { name: string } };
+      return scene.level?.name;
+    });
+  // Assert where we started, or "reached the East Room" would be true of a
+  // sample that simply opened it first.
+  await expect.poll(() => playingName()).toBe("West Room");
+
+  // The spawn is mid-room with the door to the right and the goal to the left,
+  // so walking right is walking to the door and nothing else.
+  await page.keyboard.down("ArrowRight");
+  // **A minute, because this page is running at about 6fps.** Measured on
+  // 2026-10-26: 18 game frames in 3000ms, where 60fps would be 180. This file
+  // shares one context and never closes a page, so by the last test some ten
+  // Phaser games are still alive and competing for a CPU that is already
+  // running software WebGL. `bringToFront` was tried and changed nothing,
+  // which is what rules out visibility throttling and leaves contention.
+  //
+  // Nine tiles at that rate is about eighteen seconds, so the old 20s budget
+  // was decided by a couple of seconds of jitter rather than by whether the
+  // door works. Every assertion above this one is a scene change and needs
+  // almost no frames; walking is the only thing here that does.
+  await expect.poll(() => playingName(), { timeout: 60_000 }).toBe("East Room");
+  await page.keyboard.up("ArrowRight");
+});
